@@ -27,6 +27,13 @@ desktop.ini
 # Claude Code local settings (per-developer)
 .claude/settings.local.json
 
+# MCP server registrations contain absolute paths to local binaries
+# (per-developer). Re-create from spikes/s2-mcp-sdk/README.md when needed.
+.mcp.json
+
+# Build outputs
+/bin/
+
 # Spike scratch outputs
 spikes/**/scratch/
 
