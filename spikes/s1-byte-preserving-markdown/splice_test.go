@@ -174,6 +174,12 @@ func TestAnchorIDExtraction(t *testing.T) {
 		{"different comment", "## Heading\n<!-- unrelated -->\n", ""},
 		{"with extra whitespace", "## Heading\n<!-- @id:   spaced-id   -->\n", "spaced-id"},
 		{"blank line before anchor", "## Heading\n\n<!-- @id: deferred -->\n", "deferred"},
+		// Regression: anchor finder must not leak across heading boundaries.
+		// Previously, a 256-byte forward scan caused a level-1 heading without
+		// its own anchor to falsely adopt the next section's anchor.
+		{"does not cross next heading", "# Outer\n\n## Inner\n<!-- @id: inner-anchor -->\n", ""},
+		{"does not cross with two blanks", "# Outer\n\n\n<!-- @id: too-far -->\n", ""},
+		{"does not cross intervening text", "## Heading\n\nSome body text.\n<!-- @id: too-late -->\n", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -41,7 +41,10 @@ The renderer is never invoked. Output bytes are produced by string-level splice 
    - Get the heading content's first segment via `node.Lines().At(0).Start` — this points after the `## ` marker prefix.
    - Walk backward from that position to the previous `\n` (or start-of-file) to get the **heading line start byte**.
 3. For each heading, compute its **section end byte**: the heading line start of the next heading at the same or higher level (smaller level number), or `len(src)` if none.
-4. Resolve `@id` anchors by scanning a bounded window (256 bytes) immediately after each heading line for `<!-- @id: ... -->`.
+4. Resolve `@id` anchors with a **strict positional rule**, not a window:
+   - The anchor must be on the line immediately after the heading line, or after at most one blank line.
+   - The opening `<!-- @id:` and the closing `-->` must be on the same line.
+   - Do not scan through intervening headings or any non-blank, non-anchor content. A loose window leaks anchors across section boundaries — confirmed by spike S1 fixture `02-replace-by-id`.
 5. To replace a section:
 
    ```
@@ -70,7 +73,7 @@ The renderer is never invoked. Output bytes are produced by string-level splice 
 | End-of-file section | `ByteEnd = len(src)`. Trailing newline is preserved by the prefix/suffix splice. |
 | Duplicate heading text | Each section has an `Occurrence` counter (1-based). Callers disambiguate via `(text, level, occurrence)` or via the section's `@id` anchor. |
 | Nested headings | A level-N section ends at the next heading of level ≤ N. So a level-1 section subsumes child level-2+ sections — caller picks the level appropriate to their intent. |
-| Unrelated HTML comments | The anchor finder only scans within ~256 bytes after a heading line and only matches the specific `<!-- @id: ... -->` pattern. Other HTML comments are ignored as content. |
+| Unrelated HTML comments | The anchor finder only inspects the line immediately following the heading (optionally with one blank line of slack), and only matches the specific `<!-- @id: ... -->` pattern. Other HTML comments anywhere else are content. |
 | YAML frontmatter | Goldmark parses `---` as a thematic break; frontmatter content becomes a paragraph before the first heading. The section parser only operates from the first heading onward; frontmatter is in the splice prefix and is untouched. |
 
 ## Edge cases deferred

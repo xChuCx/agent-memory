@@ -174,11 +174,16 @@ func lineStart(src []byte, offset int) int {
 	return offset
 }
 
-// findAnchorID looks for an <!-- @id: ... --> anchor on the line(s) immediately
-// after the heading line at headingStart. Returns the trimmed ID or "".
+// findAnchorID looks for an <!-- @id: ... --> anchor immediately following the
+// heading line at headingStart. Returns the trimmed ID or "".
 //
-// Convention: the anchor appears within a bounded window after the heading line.
-// Only the first match is recognized.
+// Convention (matches design doc §12.1): the anchor sits on the line directly
+// after the heading. We tolerate at most ONE blank line of slack for human-edited
+// files. We do NOT scan past the next non-blank, non-anchor line — this prevents
+// false matches against anchors that belong to subsequent sections.
+//
+// The closing "-->" must appear on the same line as the opening "<!-- @id:" —
+// multi-line anchors are out of scope.
 func findAnchorID(src []byte, headingStart int) string {
 	// Advance past the heading line.
 	i := headingStart
@@ -188,21 +193,26 @@ func findAnchorID(src []byte, headingStart int) string {
 	if i < len(src) {
 		i++ // skip the newline
 	}
-	// Scan a bounded window for the anchor pattern.
-	const scanWindow = 256
-	stop := i + scanWindow
-	if stop > len(src) {
-		stop = len(src)
+
+	// Allow at most one blank line between heading and anchor.
+	if i < len(src) && src[i] == '\n' {
+		i++
 	}
-	hay := src[i:stop]
-	open := []byte("<!-- @id:")
-	closeMarker := []byte("-->")
-	openIdx := bytes.Index(hay, open)
-	if openIdx < 0 {
+	if i >= len(src) {
 		return ""
 	}
-	rest := hay[openIdx+len(open):]
-	closeIdx := bytes.Index(rest, closeMarker)
+
+	openMarker := []byte("<!-- @id:")
+	if !bytes.HasPrefix(src[i:], openMarker) {
+		return ""
+	}
+
+	// Find closing --> on the same line.
+	rest := src[i+len(openMarker):]
+	if lineEnd := bytes.IndexByte(rest, '\n'); lineEnd >= 0 {
+		rest = rest[:lineEnd]
+	}
+	closeIdx := bytes.Index(rest, []byte("-->"))
 	if closeIdx < 0 {
 		return ""
 	}
