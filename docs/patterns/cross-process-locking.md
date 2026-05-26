@@ -1,7 +1,7 @@
 # Pattern: Cross-Process Locking
 
-**Status:** Sketched. Pending empirical validation in spike S3.
-**Owner:** `internal/lock/` (from M1).
+**Status:** Implemented in [`internal/lock/lock.go`](../../internal/lock/lock.go). Spike-validated in S3; production API tested in `internal/lock/lock_test.go`.
+**Owner:** `internal/lock/` (M1).
 **Tracks design:** [Design Doc v0.4.1 §11](../../agent-memory-design-doc-v0.4.1.md).
 
 ## Problem
@@ -52,36 +52,59 @@ fl.Unlock()
 | `status` | Read-only; lock metadata read is best-effort. |
 | `propose_update` (stage path) | Creates a timestamp-named staging directory; no contention possible. |
 
-## Implementation API (target: `internal/lock/`)
+## Implementation API (`internal/lock/`)
 
 ```go
+var ErrLockHeld = errors.New("lock held by another process")
+
 type AcquireOpts struct {
-    WaitTimeout time.Duration // 0 = TryLock only; >0 = blocking with timeout
-    Owner       Metadata
+    // 0 = TryLock once; >0 = poll until timeout.
+    WaitTimeout time.Duration
+    // Filled into the lock-file metadata on success. Empty fields default:
+    // OwnerPID = os.Getpid(), AcquiredAt = time.Now().UTC().
+    Owner Metadata
 }
 
 type Metadata struct {
-    OwnerPID   int
-    OwnerID    string
-    OwnerKind  string    // "agent" | "cli" | "cli-merge-driver" | ...
-    AcquiredAt time.Time
-    OpID       string
+    OwnerPID   int       `json:"owner_pid"`
+    OwnerID    string    `json:"owner_id"`
+    OwnerKind  string    `json:"owner_kind"`   // "agent" | "cli" | "cli-merge-driver" | ...
+    AcquiredAt time.Time `json:"acquired_at"`
+    OpID       string    `json:"op_id,omitempty"`
 }
+
+type Lock struct { /* ... */ }
+func (l *Lock) Path() string { /* ... */ }
 
 func Acquire(path string, opts AcquireOpts) (*Lock, error)
 func (l *Lock) Release() error
 func ReadMetadata(path string) (Metadata, error)
 ```
 
-Acquisition:
+### Acquisition
 
-1. `Acquire` opens the lock file (created if absent).
-2. Attempts `TryLock`.
-3. If failed and `WaitTimeout > 0`, blocks on `Lock` for up to `WaitTimeout`.
-4. On success: truncates the file and writes the metadata JSON (best-effort, failure is non-fatal).
-5. On timeout: returns `ErrLockHeld` with whatever metadata was readable from the file (informational only).
+1. `flock.New(path)` (does not yet open the file).
+2. If `WaitTimeout > 0` → `TryLockContext(ctx, 10ms)` (blocking with poll); else `TryLock` (single attempt).
+3. On context-deadline error → return `ErrLockHeld`. On other error → wrap and return.
+4. On `locked == false` (deadline reached) → return `ErrLockHeld`.
+5. On success: fill in metadata defaults, write JSON metadata through the *same file handle* that holds the lock (`fl.Fh().Truncate(0) → Seek(0,0) → Write(json)`). Best-effort; failure does not fail Acquire.
 
-Release: `Lock.Release()` closes the file handle. The kernel releases the OS lock atomically as part of close. The file persists; only the lock is transient.
+### Release
+
+`Lock.Release()` calls `fl.Unlock()`, which closes the underlying file handle. The kernel releases the OS advisory lock atomically as part of close. The lock file persists on disk (next acquirer reuses it). `Release` is idempotent: a second call (or a call on a nil `*Lock`) returns nil.
+
+### Reading metadata
+
+`ReadMetadata(path)` reads the lock file *without* acquiring the lock and decodes its JSON contents. Returns an empty `Metadata` and no error for: missing file, empty file, or malformed JSON. The OS lock remains the ground truth for whether the lock is held — metadata is purely for `status` debugging.
+
+### Why write metadata through the locked handle
+
+Two reasons:
+
+1. **Atomicity vs. competing writers.** While the lock is held, only one process can write to the file via its own handle. Opening a second file descriptor for writing would, on Windows, risk sharing-violation errors.
+2. **No second open.** Re-opening the file path while flock is held has platform-dependent semantics on POSIX (per-FD locks) and Windows (per-handle byte-range locks). Using the existing handle sidesteps the issue entirely.
+
+`gofrs/flock` opens the file with `O_CREATE|O_RDWR` and exposes the handle via `Fh()`, so write access is guaranteed.
 
 ## Alternatives considered
 
@@ -103,9 +126,31 @@ Write `{pid, acquired_at, ttl_seconds}` to a lock file; subsequent acquirers com
 
 ## Validation
 
-Spike S3 builds two tests that exercise the two critical properties (cross-process serialization and crash recovery) on the actual host platform. Results in [s3-results.md](../spikes/s3-results.md).
+The two critical properties were validated end-to-end on Windows 10 in spike S3:
 
-Cross-platform CI verification (Linux + macOS) is a follow-up before M1 lands the production implementation.
+- **Cross-process serialization** — 10 subprocess workers, no overlap, 520ms total (~theoretical minimum).
+- **Crash recovery** — second worker acquired the lock 4.6ms after the holder was killed and reaped (1000× under the 1s SLA).
+
+See [s3-results.md](../spikes/s3-results.md) for the full validation record.
+
+The production implementation in `internal/lock/lock.go` is exercised by `internal/lock/lock_test.go`:
+
+| Test | What |
+|---|---|
+| `TestAcquireRelease` | Basic Acquire → Release happy path. |
+| `TestAcquireReleaseReacquire` | Same path can be re-locked after release. |
+| `TestReleaseIsIdempotent` | Second Release and nil-Lock Release are no-ops. |
+| `TestMetadataRoundTrip` | Metadata written by Acquire is read back by ReadMetadata. |
+| `TestReadMetadata_DefaultsAreFilled` | OwnerPID and AcquiredAt are populated even with zero-value Owner. |
+| `TestReadMetadata_MissingFile` | Returns empty Metadata, no error. |
+| `TestReadMetadata_MalformedFile` | Returns empty Metadata, no error. |
+| `TestCrossProcessSerialization` | 5 subprocesses, no overlap (smoke test against the production API). |
+| `TestCrashRecovery` | Holder Kill + Wait, contender acquires <1s later. |
+| `TestAcquireTimeoutReturnsErrLockHeld` | Contender with WaitTimeout=100ms returns ErrLockHeld when holder holds. |
+
+Subprocess tests use the same `TestMain` dispatch pattern as the S3 spike: the test binary, when invoked with `LOCK_TEST_WORKER=1` in the environment, runs `runLockWorker()` and exits instead of running tests. This sidesteps the platform-dependent semantics of within-process flock and exercises the property that actually matters in production (separate processes).
+
+Cross-platform CI verification (Linux + macOS) runs via the M0 `.github/workflows/ci.yml` matrix on every push.
 
 ## References
 
