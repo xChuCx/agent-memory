@@ -3,6 +3,7 @@ module github.com/agent-memory/agent-memory
 go 1.25.0
 
 require (
+	github.com/gofrs/flock v0.12.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/yuin/goldmark v1.7.4
 )
