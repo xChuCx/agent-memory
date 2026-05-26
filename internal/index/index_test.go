@@ -159,8 +159,8 @@ func TestDeleteFile_WipesAllRows(t *testing.T) {
 		sectionDoc("modules/auth.md", "b", "B", "y"),
 		sectionDoc("decisions.md", "d", "D", "z"),
 	})
-	_ = idx.UpsertFile(ctx, FileDoc{File: "modules/auth.md", Category: "modules", GitTracked: true})
-	_ = idx.UpsertFile(ctx, FileDoc{File: "decisions.md", Category: "decisions", GitTracked: true})
+	_ = idx.UpsertFile(ctx, FileDoc{File: "modules/auth.md", Category: "modules", Committed: true})
+	_ = idx.UpsertFile(ctx, FileDoc{File: "decisions.md", Category: "decisions", Committed: true})
 
 	if err := idx.DeleteFile(ctx, "modules/auth.md"); err != nil {
 		t.Fatal(err)
