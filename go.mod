@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/gofrs/flock v0.12.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/spf13/cobra v1.8.1
 	github.com/yuin/goldmark v1.7.4
 	modernc.org/sqlite v1.34.0
 )

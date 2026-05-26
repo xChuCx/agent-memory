@@ -33,6 +33,8 @@ desktop.ini
 
 # Build outputs
 /bin/
+/agent-memory
+/agent-memory.exe
 
 # Spike scratch outputs
 spikes/**/scratch/

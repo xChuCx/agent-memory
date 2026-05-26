@@ -20,18 +20,37 @@ Older revisions preserved for traceability:
 
 ## Build
 
-Requires Go 1.22+.
+Requires Go 1.22+. GNU make is optional — every target maps to a plain `go` command shown below.
 
 ```bash
-go mod tidy
+make build         # produce ./agent-memory (or ./agent-memory.exe on Windows)
+make test          # run all tests
+make test-race     # run tests with race detector (linux/macos most reliable)
+make lint          # golangci-lint, if installed
+make tidy          # refresh go.mod / go.sum
+```
+
+Without make:
+
+```bash
+go build -o agent-memory ./cmd/agent-memory
 go test ./...
 ```
 
-The byte-preserving Markdown engine spike (S1) lives in `spikes/s1-byte-preserving-markdown/` and runs via:
+Verify the build:
 
 ```bash
-go test ./spikes/s1-byte-preserving-markdown/...
+./agent-memory version
+# 0.4.1-mvp-dev
 ```
+
+The pre-M1 spikes live under `spikes/` and run via:
+
+```bash
+go test ./spikes/...
+```
+
+See [docs/spikes/](docs/spikes/) for results and decisions.
 
 ## Layout
 
