@@ -24,6 +24,9 @@ go.work.sum
 Thumbs.db
 desktop.ini
 
+# Claude Code local settings (per-developer)
+.claude/settings.local.json
+
 # Spike scratch outputs
 spikes/**/scratch/
 
