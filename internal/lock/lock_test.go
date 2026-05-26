@@ -220,7 +220,9 @@ func TestReadMetadata_MissingFile(t *testing.T) {
 
 func TestReadMetadata_MalformedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lock")
-	if err := os.WriteFile(path, []byte("not json {{{"), 0644); err != nil {
+	// Metadata lives in the sidecar file (path + ".info"). Write garbage
+	// there to verify ReadMetadata tolerates a malformed payload.
+	if err := os.WriteFile(MetadataPath(path), []byte("not json {{{"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadMetadata(path)
@@ -229,6 +231,14 @@ func TestReadMetadata_MalformedFile(t *testing.T) {
 	}
 	if got != (Metadata{}) {
 		t.Errorf("expected empty Metadata for malformed file, got %+v", got)
+	}
+}
+
+func TestMetadataPath(t *testing.T) {
+	got := MetadataPath("/foo/bar/lock")
+	want := "/foo/bar/lock.info"
+	if got != want {
+		t.Errorf("MetadataPath = %q, want %q", got, want)
 	}
 }
 

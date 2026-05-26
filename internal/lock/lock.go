@@ -23,6 +23,17 @@ import (
 // AcquireOpts.WaitTimeout (or immediately, if WaitTimeout is zero).
 var ErrLockHeld = errors.New("lock held by another process")
 
+// metadataSuffix is appended to the lock file path to form the sidecar
+// metadata file. The lock file itself stays empty so that gofrs/flock owns
+// the OS-level lock without contention from our own writes; metadata lives
+// in a separate readable JSON file.
+//
+// Rationale: gofrs/flock v0.12+ does not expose the underlying *os.File. On
+// Windows, LockFileEx locks a byte range and prevents writes through any
+// other handle; so we cannot open a second handle to the locked file for
+// metadata. The sidecar avoids the constraint entirely.
+const metadataSuffix = ".info"
+
 // Metadata is the informational JSON written inside the lock file by the
 // current holder. It NEVER gates correctness — the OS lock is ground truth.
 // Stale metadata after a crashed holder is harmless: the next acquirer
@@ -102,7 +113,7 @@ func Acquire(path string, opts AcquireOpts) (*Lock, error) {
 	}
 	// Best-effort: metadata write failure does NOT fail Acquire. The lock is
 	// already held; metadata is debugging info only.
-	_ = writeMetadata(fl, owner)
+	_ = writeMetadata(path, owner)
 
 	return &Lock{fl: fl, path: path}, nil
 }
@@ -123,12 +134,19 @@ func (l *Lock) Release() error {
 	return nil
 }
 
+// MetadataPath returns the sidecar file path where Acquire writes the
+// Metadata JSON for a lock at lockPath.
+func MetadataPath(lockPath string) string { return lockPath + metadataSuffix }
+
 // ReadMetadata reads the JSON metadata written by the current (or last) lock
 // holder. Best-effort: a missing, empty, or malformed file returns an empty
 // Metadata with no error. The OS lock is ground truth for whether the lock
 // is held; this function exists only for status/debugging.
-func ReadMetadata(path string) (Metadata, error) {
-	b, err := os.ReadFile(path)
+//
+// The metadata lives in a sidecar file (MetadataPath(lockPath)), not in the
+// lock file itself. See the package comment for the rationale.
+func ReadMetadata(lockPath string) (Metadata, error) {
+	b, err := os.ReadFile(MetadataPath(lockPath))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Metadata{}, nil
@@ -146,29 +164,17 @@ func ReadMetadata(path string) (Metadata, error) {
 	return m, nil
 }
 
-// writeMetadata writes m as JSON into the lock file via the same file handle
-// that holds the lock. No fsync — metadata is debugging-only state.
+// writeMetadata writes m as JSON into the sidecar file next to lockPath.
+// Best-effort: failures are returned but the caller (Acquire) ignores them.
 //
-// Per gofrs/flock: Lock/TryLock open the file with O_CREATE|O_RDWR and return
-// the handle via Fh(). We truncate and rewrite through that handle so the
-// write is correctly serialised with the lock state (we are the only writer).
-func writeMetadata(fl *flock.Flock, m Metadata) error {
+// The sidecar is written via os.WriteFile (truncate-write, not atomic).
+// Atomicity is unnecessary here: metadata is debugging-only and is
+// overwritten by every Acquire; a partial write read by status would
+// just look like malformed JSON, which ReadMetadata handles as empty.
+func writeMetadata(lockPath string, m Metadata) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	fh := fl.Fh()
-	if fh == nil {
-		return errors.New("flock has no open file handle")
-	}
-	if err := fh.Truncate(0); err != nil {
-		return err
-	}
-	if _, err := fh.Seek(0, 0); err != nil {
-		return err
-	}
-	if _, err := fh.Write(b); err != nil {
-		return err
-	}
-	return nil
+	return os.WriteFile(MetadataPath(lockPath), b, 0644)
 }

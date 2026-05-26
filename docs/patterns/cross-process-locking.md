@@ -87,24 +87,35 @@ func ReadMetadata(path string) (Metadata, error)
 2. If `WaitTimeout > 0` → `TryLockContext(ctx, 10ms)` (blocking with poll); else `TryLock` (single attempt).
 3. On context-deadline error → return `ErrLockHeld`. On other error → wrap and return.
 4. On `locked == false` (deadline reached) → return `ErrLockHeld`.
-5. On success: fill in metadata defaults, write JSON metadata through the *same file handle* that holds the lock (`fl.Fh().Truncate(0) → Seek(0,0) → Write(json)`). Best-effort; failure does not fail Acquire.
+5. On success: fill in metadata defaults, write JSON metadata to the sidecar file `MetadataPath(lockPath)` (= `lockPath + ".info"`). Best-effort; failure does not fail Acquire.
 
 ### Release
 
 `Lock.Release()` calls `fl.Unlock()`, which closes the underlying file handle. The kernel releases the OS advisory lock atomically as part of close. The lock file persists on disk (next acquirer reuses it). `Release` is idempotent: a second call (or a call on a nil `*Lock`) returns nil.
 
+The `.info` sidecar is **not** removed on Release. It stays as a "last successful acquisition" record, useful for post-mortem status reads after a crash. Each new Acquire overwrites it.
+
 ### Reading metadata
 
-`ReadMetadata(path)` reads the lock file *without* acquiring the lock and decodes its JSON contents. Returns an empty `Metadata` and no error for: missing file, empty file, or malformed JSON. The OS lock remains the ground truth for whether the lock is held — metadata is purely for `status` debugging.
+`ReadMetadata(lockPath)` reads `MetadataPath(lockPath)` *without* acquiring the lock and decodes its JSON contents. Returns an empty `Metadata` and no error for: missing sidecar, empty sidecar, or malformed JSON. The OS lock remains the ground truth for whether the lock is held — metadata is purely for `status` debugging.
 
-### Why write metadata through the locked handle
+### Why a sidecar file, not the lock file itself
 
-Two reasons:
+The original sketch wrote metadata into the lock file via the file handle held by `gofrs/flock`. Two problems prevented that:
 
-1. **Atomicity vs. competing writers.** While the lock is held, only one process can write to the file via its own handle. Opening a second file descriptor for writing would, on Windows, risk sharing-violation errors.
-2. **No second open.** Re-opening the file path while flock is held has platform-dependent semantics on POSIX (per-FD locks) and Windows (per-handle byte-range locks). Using the existing handle sidesteps the issue entirely.
+1. **`gofrs/flock` v0.12+ does not expose the underlying `*os.File`.** The field `fh` is unexported; there is no `Fh()` getter. Without access to the handle, writing through it is impossible without reflection or a fork.
+2. **Opening a second handle is unsafe on Windows.** `LockFileEx` locks a byte range and blocks writes through any other handle to the locked range. Even if we opened a fresh `os.OpenFile` while the lock is held, the write would fail.
 
-`gofrs/flock` opens the file with `O_CREATE|O_RDWR` and exposes the handle via `Fh()`, so write access is guaranteed.
+The sidecar avoids both issues:
+
+- `meta/lock` — empty file, owned exclusively by `gofrs/flock` for the OS lock.
+- `meta/lock.info` — JSON metadata, owned by our code, written with a simple `os.WriteFile` after Acquire succeeds and read with `os.ReadFile` by status.
+
+There is no race: only the lock-holder writes `.info`, and the lock-holder is unique by definition. A reader can interleave with a writer mid-write and see a partially-written file, but `ReadMetadata` treats malformed JSON as "no metadata" — no functional impact, only briefly stale debug info.
+
+### Production `.gitignore` note
+
+The default `.agent-memory/.gitignore` (created by `agent-memory init`, M1.T1.10) must include both `meta/lock` and `meta/lock.info`.
 
 ## Alternatives considered
 
