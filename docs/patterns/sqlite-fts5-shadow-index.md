@@ -1,7 +1,7 @@
 # Pattern: SQLite FTS5 Shadow Index
 
-**Status:** Sketched. Pending empirical validation in spike S4.
-**Owner:** `internal/index/` (from M2).
+**Status:** Implemented in [`internal/index/`](../../internal/index). Spike-validated in S4; production tests exercise the same WAL + incremental UPSERT pattern.
+**Owner:** `internal/index/` (M2).
 **Tracks design:** [Design Doc v0.4.1 §17, §20](../../agent-memory-design-doc-v0.4.1.md).
 
 ## Problem
