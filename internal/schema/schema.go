@@ -116,7 +116,16 @@ type Provenance struct {
 }
 
 // DefaultSchema returns the recommended schema from design doc v0.4.1 §25.1.
+// The returned Schema has Category.Name populated for every entry — callers
+// who consume *Schema directly (without going through LoadSchema) get a
+// self-consistent struct.
 func DefaultSchema() *Schema {
+	s := defaultSchema()
+	s.populateCategoryNames()
+	return s
+}
+
+func defaultSchema() *Schema {
 	return &Schema{
 		Version: "0.4.1",
 		Categories: map[string]Category{
@@ -319,20 +328,26 @@ func mergeProvenance(defaults, loaded Provenance) Provenance {
 //     would use '\' on Windows, letting '*' eat slashes, which is wrong
 //     for our convention.)
 //
+// The returned Category has Name populated from the map key, even if the
+// Schema didn't go through populateCategoryNames() upstream. Callers can
+// rely on Name being non-empty whenever ok == true.
+//
 // Returns (Category{}, false) if no category matches.
 func (s *Schema) CategoryForPath(rel string) (Category, bool) {
 	// Exact match first.
-	for _, cat := range s.Categories {
+	for name, cat := range s.Categories {
 		if cat.File != "" && cat.File == rel {
+			cat.Name = name
 			return cat, true
 		}
 	}
 	// Glob match (forward-slash semantics, OS-independent).
-	for _, cat := range s.Categories {
+	for name, cat := range s.Categories {
 		if cat.FileGlob == "" {
 			continue
 		}
 		if ok, err := path.Match(cat.FileGlob, rel); ok && err == nil {
+			cat.Name = name
 			return cat, true
 		}
 	}
