@@ -1,0 +1,36 @@
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Spike scratch outputs
+spikes/**/scratch/
+
+# Local .agent-memory dogfooding (when we dogfood the project on itself)
+.agent-memory/meta/index.sqlite
+.agent-memory/meta/index.sqlite-*
+.agent-memory/meta/lock
+.agent-memory/local/
+.agent-memory/sessions/
+.agent-memory/staging/
