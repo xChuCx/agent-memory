@@ -1,7 +1,7 @@
 # Pattern: Byte-Preserving Markdown Engine
 
-**Status:** Active. First validated in spike S1.
-**Owner:** `internal/markdown/` (from M1).
+**Status:** Implemented in [`internal/markdown/`](../../internal/markdown). Spike-validated in S1; production tests exercise the same fixture corpus.
+**Owner:** `internal/markdown/` (M1).
 **Tracks design:** [Design Doc v0.4.1 §21](../../agent-memory-design-doc-v0.4.1.md).
 
 ## Problem
@@ -101,7 +101,7 @@ Kept as **documented fallback** if goldmark proves insufficient on any future fi
 
 Mutate the AST in place and rely on goldmark to render only the changed subtree. **Rejected** because the renderer can still reformat surrounding content; we don't trust it.
 
-## API sketch (target package: `internal/markdown/`)
+## API (package `internal/markdown/`)
 
 ```go
 type Section struct {
@@ -111,20 +111,43 @@ type Section struct {
     Occurrence   int    // 1-based among same (text, level) sections
     ByteStart    int    // inclusive; start of heading line
     ByteEnd      int    // exclusive
+    ContentHash  string // "sha256:<hex>" of bytes [ByteStart, ByteEnd)
 }
 
 func ParseSections(src []byte) ([]Section, error)
-func FindByID(sections []Section, id string) (Section, bool)
-func FindByHeading(sections []Section, text string, level, occurrence int) (Section, bool)
-func Splice(src []byte, start, end int, replacement []byte) ([]byte, error)
+func FindByID(sections []Section, id string) (*Section, bool)
+func FindByHeading(sections []Section, heading string, level, occurrence int) (*Section, bool)
+
+// Multi-op byte splice. All offsets refer to the ORIGINAL src; Splice sorts
+// internally and stitches the result. Overlapping ops error out.
+type SpliceOp struct {
+    ByteStart   int
+    ByteEnd     int
+    Replacement []byte
+}
+
+func Splice(src []byte, ops []SpliceOp) ([]byte, error)
 func ReplaceSection(src []byte, sec Section, newContent []byte) ([]byte, error)
+
+// Post-splice sanity check (goldmark parses cleanly) and a small helper.
+func ValidateMarkdown(src []byte) error
+func CountSections(src []byte) (int, error)
 ```
 
-These names are stable for the spike. The M1 implementation will add:
+Still to come (M1 follow-up):
 
-- `AssignMissingIDs(src) (newSrc, assigned)` per design doc §12.5.
-- Richer `SpliceOp` for multi-op transactions per Appendix A.1.
-- CRLF normalization helper.
+- `AssignMissingIDs(src) (newSrc, assigned, err)` — T1.5. Auto-inserts `<!-- @id: ... -->` anchors after headings that don't have one. Required so the production engine can ingest legacy files written without anchors.
+- CRLF normalization helper — out of scope for the spike's fixture coverage; needed once we ingest real cross-platform repos.
+
+### Differences from the spike
+
+| Aspect | Spike S1 | M1 production |
+|---|---|---|
+| Package | `package s1` | `package markdown` |
+| `Section.ContentHash` | absent | sha256 of section bytes |
+| `Find*` return | `(Section, bool)` | `(*Section, bool)` |
+| Splice API | single `Splice(src, start, end, repl)` + `ReplaceSection` | multi-op `Splice(src, []SpliceOp)`; `ReplaceSection` now wraps `Splice` |
+| Test corpus location | `spikes/s1-byte-preserving-markdown/testdata/` (historical) | `internal/markdown/testdata/` (canonical) |
 
 ## References
 
