@@ -118,6 +118,9 @@ func ParseSections(src []byte) ([]Section, error)
 func FindByID(sections []Section, id string) (*Section, bool)
 func FindByHeading(sections []Section, heading string, level, occurrence int) (*Section, bool)
 
+// Auto-assign @id anchors to headings that don't have one. Idempotent.
+func AssignMissingIDs(src []byte) (newSrc []byte, ids []string, err error)
+
 // Multi-op byte splice. All offsets refer to the ORIGINAL src; Splice sorts
 // internally and stitches the result. Overlapping ops error out.
 type SpliceOp struct {
@@ -136,8 +139,44 @@ func CountSections(src []byte) (int, error)
 
 Still to come (M1 follow-up):
 
-- `AssignMissingIDs(src) (newSrc, assigned, err)` — T1.5. Auto-inserts `<!-- @id: ... -->` anchors after headings that don't have one. Required so the production engine can ingest legacy files written without anchors.
 - CRLF normalization helper — out of scope for the spike's fixture coverage; needed once we ingest real cross-platform repos.
+
+## Section ID auto-assignment
+
+`AssignMissingIDs` parses the source, generates a stable lowercase-kebab slug for any heading that does not already carry an `<!-- @id: ... -->` anchor, resolves collisions, and inserts the new anchors on the line immediately after each heading via the same byte-preserving `Splice` primitive used everywhere else.
+
+### Slug rules
+
+- Lowercase.
+- Alphanumeric only (`[a-z0-9]`); any other rune becomes a dash.
+- Runs of dashes collapse to a single dash.
+- Leading and trailing dashes stripped.
+- Truncated to 64 characters; if the cut leaves a trailing dash, that's also trimmed.
+- Non-ASCII letters (Cyrillic, CJK, etc.) are currently treated as separators. Transliteration is a future extension.
+- Empty result falls back to the literal `section`, made unique via the collision suffix.
+
+Examples: `Token Rotation` → `token-rotation`; `Foo, bar!` → `foo-bar`; `v1.2.3` → `v1-2-3`; `!!!` → `section`.
+
+### Collision resolution
+
+A `used` set is seeded with every pre-existing anchor BEFORE any new assignment, so pre-existing anchors take precedence. Then for each unanchored heading, the natural slug is suffixed with `-2`, `-3`, ... until it doesn't collide. Pre-existing custom anchors keep whatever name they were given even if a later heading would have produced the same natural slug.
+
+```
+## Auth
+<!-- @id: auth -->
+
+## Auth          ← gets auth-2 (auth is taken by the custom anchor above)
+
+## Auth          ← gets auth-3
+```
+
+### Idempotence
+
+Re-running `AssignMissingIDs` on its own output produces byte-identical bytes: the second pass sees every section already anchored, generates zero splice ops, and `Splice` with no ops returns a copy of the input. This is what makes the operation safe to call repeatedly as part of `init` and `rebuild-index`.
+
+### Byte preservation
+
+`AssignMissingIDs` reuses the multi-op `Splice` primitive. Every region of the input outside the insertion points is byte-identical in the output — no whitespace churn, no list-marker rewrites, no fence normalisation. Edge case: when a heading sits at EOF without a trailing newline, the inserted anchor is prefixed with `\n` so it still lands on its own line.
 
 ### Differences from the spike
 
