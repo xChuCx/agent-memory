@@ -44,6 +44,26 @@ Verify the build:
 # 0.4.1-mvp-dev
 ```
 
+## CLI (M1)
+
+```bash
+agent-memory init [--root DIR] [--name NAME] [--force]
+        # Create the .agent-memory/ scaffold for the current repo.
+
+agent-memory status [--root DIR] [--json]
+        # Show repo state: project, version, file counts per category,
+        # last-known lock metadata.
+
+agent-memory doctor [--root DIR]
+        # Diagnose layout issues. Advisory; exits 0 even when findings
+        # are reported.
+
+agent-memory version
+        # Print the binary version and exit.
+```
+
+M2 will add `fetch` and the MCP server (`mcp --stdio`). M3 adds `review`/`apply`/`reject`/`rebase`. M6 adds `install <adapter>`.
+
 The pre-M1 spikes live under `spikes/` and run via:
 
 ```bash
