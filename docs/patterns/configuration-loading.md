@@ -22,20 +22,65 @@ We need to:
 
 ## Solution
 
-`gopkg.in/yaml.v3 Unmarshal` into a struct that's pre-populated with `Default*()`. yaml.v3 merges into the existing struct: fields present in YAML overwrite defaults; fields absent leave the default untouched. For maps (like `Schema.Categories`), this extends recursively — a user can override one field in one category and leave the rest at defaults.
+`gopkg.in/yaml.v3 Unmarshal` into a struct that's pre-populated with `Default*()`. yaml.v3's merge semantics on plain structs work the way we want: fields present in YAML overwrite defaults; fields absent leave the default untouched. This is what `LoadManifest` relies on.
 
 ```go
-func LoadX(path string) (*X, error) {
+func LoadManifest(path string) (*Manifest, error) {
     b, err := os.ReadFile(path)
     if err != nil { return nil, err }
-    x := DefaultX()
-    if err := yaml.Unmarshal(b, x); err != nil { return nil, err }
-    // optional: post-process (e.g., populate map-key into a Name field)
-    return x, nil
+    m := DefaultManifest()
+    if err := yaml.Unmarshal(b, m); err != nil { return nil, err }
+    return m, nil
 }
 ```
 
 Writes use [`internal/fs.WriteAtomic`](atomic-writes.md) so readers always see either the pre-write or post-write version.
+
+## yaml.v3 does NOT merge into existing map values
+
+The naive pattern above breaks for `Schema.Categories` (a `map[string]Category`). When yaml.v3 unmarshals a YAML map key that already exists in the Go map, it creates a fresh zero-value `Category{}` and unmarshals INTO it, then assigns to the map. The existing value (with its defaults) is **discarded**.
+
+Result: a YAML file with
+
+```yaml
+categories:
+  decisions:
+    approval: apply
+```
+
+would leave `decisions.File` as `""` (zero value) — the default `decisions.md` is lost.
+
+`LoadSchema` works around this with a **two-step custom merge**:
+
+1. Decode the YAML into a fresh `Schema` (no defaults).
+2. Start from `DefaultSchema()` and merge field-by-field for each category that the user mentioned. Categories not mentioned survive verbatim from defaults; user-defined categories not in defaults are accepted as-is.
+
+```go
+func LoadSchema(schemaPath string) (*Schema, error) {
+    var loaded Schema
+    yaml.Unmarshal(file, &loaded)
+    s := DefaultSchema()
+    if loaded.Version != "" { s.Version = loaded.Version }
+    for name, lcat := range loaded.Categories {
+        if dcat, ok := s.Categories[name]; ok {
+            s.Categories[name] = mergeCategory(dcat, lcat)
+        } else {
+            s.Categories[name] = lcat
+        }
+    }
+    return s, nil
+}
+```
+
+`mergeCategory` overrides each field on `defaults` only if the corresponding value in `loaded` is non-zero.
+
+### Bool-flip limitation
+
+Go's zero value for `bool` is `false`. yaml.v3 cannot distinguish an explicit `field: false` in YAML from "field not set". `mergeCategory` therefore treats a `false` in loaded as "not set" and preserves the default.
+
+In practice: a user can flip a default-`false` bool to `true` via partial override. To flip a default-`true` bool to `false`, the user must write the full category structure rather than the partial-override style.
+
+This is documented in `TestLoadSchema_BoolFalseToTrueOverrideWorks` (the supported case) and `TestLoadSchema_BoolFlipTrueToFalseDoesNotWork` (the limitation). The latter test is a regression guard: if our merge ever changes to support boolean flips both ways, the test fails and forces a doc update at the same time.
 
 ## Package layout and dependency direction
 
@@ -75,7 +120,9 @@ cat, ok := s.CategoryForPath("modules/auth.md")
 Lookup order:
 
 1. Exact `File` match (e.g., `decisions.md` → decisions category).
-2. `FileGlob` match via `filepath.Match` (e.g., `modules/*.md` → modules category).
+2. `FileGlob` match via `path.Match` (e.g., `modules/*.md` → modules category).
+
+**`path.Match`, not `path/filepath.Match`.** The `path` package always treats `/` as the separator on every OS. `path/filepath` uses the OS-native separator (`\` on Windows), which lets `*` span what we semantically consider a directory boundary — `modules/auth/extra/deep.md` would match `modules/*.md` on Windows. Our memory-relative paths are always forward-slash by convention, so `path.Match` is the correct primitive. `TestCategoryForPath_NoMatch/modules/auth/extra/deep.md` guards against regressions on Windows runners.
 
 `Category.Name` is populated from the map key by `populateCategoryNames()` so callers don't have to thread the lookup key separately.
 

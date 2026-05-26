@@ -327,3 +327,119 @@ func TestValidate_RejectsServerManagedAndAgentWritable(t *testing.T) {
 		t.Error("expected error for server_managed + agent_writable combo")
 	}
 }
+
+// ---------- merge semantics ----------
+
+func TestLoadSchema_UserDefinedCategoryAcceptedVerbatim(t *testing.T) {
+	// A category name not present in defaults is added as-is.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "schema.yaml")
+	body := `version: "0.4.1"
+categories:
+  custom_notes:
+    file_glob: "custom/*.md"
+    approval: apply
+    git_tracked: true
+`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSchema(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, ok := s.Categories["custom_notes"]
+	if !ok {
+		t.Fatal("custom_notes category not added")
+	}
+	if cat.FileGlob != "custom/*.md" {
+		t.Errorf("FileGlob = %q, want custom/*.md", cat.FileGlob)
+	}
+	if cat.Approval != ApprovalApply {
+		t.Errorf("Approval = %q, want apply", cat.Approval)
+	}
+	// Default categories must also survive.
+	if _, ok := s.Categories["decisions"]; !ok {
+		t.Error("defaults categories lost after adding custom")
+	}
+}
+
+func TestLoadSchema_BoolFalseToTrueOverrideWorks(t *testing.T) {
+	// sessions has SectionIDRequired: false by default. Setting it to true
+	// via partial override should land while leaving other fields intact.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "schema.yaml")
+	body := `version: "0.4.1"
+categories:
+  sessions:
+    section_id_required: true
+`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSchema(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Categories["sessions"].SectionIDRequired {
+		t.Error("SectionIDRequired override false→true did not apply")
+	}
+	// Other sessions fields must survive.
+	if s.Categories["sessions"].FileGlob != "sessions/*.md" {
+		t.Errorf("FileGlob lost after partial override: got %q", s.Categories["sessions"].FileGlob)
+	}
+}
+
+func TestLoadSchema_ProvenancePartialMerge(t *testing.T) {
+	// modules has Provenance.Required: true by default; AllowedSourceTypes
+	// is empty in defaults. Override just AllowedSourceTypes — Required must
+	// survive.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "schema.yaml")
+	body := `version: "0.4.1"
+categories:
+  modules:
+    provenance:
+      allowed_source_types: [file, test]
+`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSchema(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := s.Categories["modules"].Provenance
+	if !prov.Required {
+		t.Error("modules.Provenance.Required = false, want true (default preserved)")
+	}
+	if len(prov.AllowedSourceTypes) != 2 {
+		t.Errorf("AllowedSourceTypes len = %d, want 2", len(prov.AllowedSourceTypes))
+	}
+}
+
+func TestLoadSchema_BoolFlipTrueToFalseDoesNotWork(t *testing.T) {
+	// Documented limitation: a default-true bool cannot be flipped to false
+	// via a partial override. The YAML `section_id_required: false` is
+	// indistinguishable from "field not set" in Go's zero-value model.
+	// To flip the default, users must write the full category.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "schema.yaml")
+	body := `version: "0.4.1"
+categories:
+  decisions:
+    section_id_required: false
+`
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSchema(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Default is true; YAML's "false" is treated as "unset" → stays true.
+	if !s.Categories["decisions"].SectionIDRequired {
+		t.Error("documented limitation regressed: false flipped default-true; either" +
+			" the bool merge changed or the doc needs an update")
+	}
+}

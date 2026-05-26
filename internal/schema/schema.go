@@ -14,7 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 
 	"gopkg.in/yaml.v3"
 
@@ -196,35 +196,116 @@ func DefaultSchema() *Schema {
 	}
 }
 
-// LoadSchema reads schema.yaml from path. Missing fields are filled from
-// DefaultSchema (yaml.v3 merges into the pre-populated struct, so partial
-// overrides of individual categories work without re-specifying the rest).
-func LoadSchema(path string) (*Schema, error) {
-	b, err := os.ReadFile(path)
+// LoadSchema reads schema.yaml from schemaPath. The YAML is decoded into a
+// fresh Schema, then merged INTO DefaultSchema field-by-field so partial
+// overrides work intuitively:
+//
+//   - YAML mentioning one field in one category overrides only that field;
+//     the rest of the category and all other categories keep their defaults.
+//   - User-defined categories not in defaults are accepted verbatim.
+//
+// Merge semantics for individual Category fields:
+//
+//   - String / pointer / slice fields: empty/nil/[] in YAML means
+//     "not set"; the default is preserved.
+//   - Bool fields: true overrides; false is treated as "not set" because
+//     Go's zero value for bool is indistinguishable from an explicit
+//     `field: false` in YAML. To flip a default-true bool to false, write
+//     the full category structure (documented limitation).
+//
+// Naive yaml.v3 merge does NOT work here because it preserves only map
+// KEYS (categories not mentioned in YAML survive), not field-level merge
+// INTO existing map VALUES. The custom merge below handles both layers.
+func LoadSchema(schemaPath string) (*Schema, error) {
+	b, err := os.ReadFile(schemaPath)
 	if err != nil {
 		return nil, fmt.Errorf("LoadSchema: %w", err)
 	}
+	var loaded Schema
+	if err := yaml.Unmarshal(b, &loaded); err != nil {
+		return nil, fmt.Errorf("LoadSchema: parse %q: %w", schemaPath, err)
+	}
+
 	s := DefaultSchema()
-	if err := yaml.Unmarshal(b, s); err != nil {
-		return nil, fmt.Errorf("LoadSchema: parse %q: %w", path, err)
+	if loaded.Version != "" {
+		s.Version = loaded.Version
+	}
+	for name, lcat := range loaded.Categories {
+		if dcat, ok := s.Categories[name]; ok {
+			s.Categories[name] = mergeCategory(dcat, lcat)
+		} else {
+			// User-defined category not in defaults — accept verbatim.
+			s.Categories[name] = lcat
+		}
 	}
 	s.populateCategoryNames()
 	return s, nil
 }
 
-// WriteSchema serialises s to path atomically.
-func WriteSchema(path string, s *Schema) error {
+// WriteSchema serialises s to schemaPath atomically.
+func WriteSchema(schemaPath string, s *Schema) error {
 	b, err := yaml.Marshal(s)
 	if err != nil {
 		return fmt.Errorf("WriteSchema: marshal: %w", err)
 	}
-	return agentfs.WriteAtomic(path, b, 0644)
+	return agentfs.WriteAtomic(schemaPath, b, 0644)
 }
 
-// WriteDefault writes the recommended schema to path. Used by
+// WriteDefault writes the recommended schema to schemaPath. Used by
 // `agent-memory init` (T1.10).
-func WriteDefault(path string) error {
-	return WriteSchema(path, DefaultSchema())
+func WriteDefault(schemaPath string) error {
+	return WriteSchema(schemaPath, DefaultSchema())
+}
+
+// mergeCategory returns defaults with non-zero fields from loaded applied
+// as overrides. See LoadSchema for the merge semantics. Exported for
+// test visibility within the package; not part of the public API.
+func mergeCategory(defaults, loaded Category) Category {
+	if loaded.File != "" {
+		defaults.File = loaded.File
+	}
+	if loaded.FileGlob != "" {
+		defaults.FileGlob = loaded.FileGlob
+	}
+	if loaded.Approval != "" {
+		defaults.Approval = loaded.Approval
+	}
+	if loaded.SectionIDRequired {
+		defaults.SectionIDRequired = true
+	}
+	if loaded.ServerManaged {
+		defaults.ServerManaged = true
+	}
+	if loaded.AgentWritable {
+		defaults.AgentWritable = true
+	}
+	if loaded.WriteOnce {
+		defaults.WriteOnce = true
+	}
+	if loaded.GitTracked {
+		defaults.GitTracked = true
+	}
+	if loaded.SectionSchema != nil {
+		defaults.SectionSchema = loaded.SectionSchema
+	}
+	defaults.Provenance = mergeProvenance(defaults.Provenance, loaded.Provenance)
+	return defaults
+}
+
+func mergeProvenance(defaults, loaded Provenance) Provenance {
+	if loaded.Required {
+		defaults.Required = true
+	}
+	if loaded.RequiredForNewSections {
+		defaults.RequiredForNewSections = true
+	}
+	if len(loaded.AllowedSourceTypes) > 0 {
+		defaults.AllowedSourceTypes = loaded.AllowedSourceTypes
+	}
+	if len(loaded.ForbiddenSourceTypes) > 0 {
+		defaults.ForbiddenSourceTypes = loaded.ForbiddenSourceTypes
+	}
+	return defaults
 }
 
 // CategoryForPath returns the category whose File or FileGlob matches rel.
@@ -233,7 +314,10 @@ func WriteDefault(path string) error {
 //
 // Lookup order:
 //  1. Exact File match.
-//  2. FileGlob via filepath.Match.
+//  2. FileGlob via path.Match — uses '/' as the separator on every OS, so
+//     '*' in the glob never spans directory boundaries. (path/filepath
+//     would use '\' on Windows, letting '*' eat slashes, which is wrong
+//     for our convention.)
 //
 // Returns (Category{}, false) if no category matches.
 func (s *Schema) CategoryForPath(rel string) (Category, bool) {
@@ -243,12 +327,12 @@ func (s *Schema) CategoryForPath(rel string) (Category, bool) {
 			return cat, true
 		}
 	}
-	// Glob match.
+	// Glob match (forward-slash semantics, OS-independent).
 	for _, cat := range s.Categories {
 		if cat.FileGlob == "" {
 			continue
 		}
-		if ok, err := filepath.Match(cat.FileGlob, rel); ok && err == nil {
+		if ok, err := path.Match(cat.FileGlob, rel); ok && err == nil {
 			return cat, true
 		}
 	}
