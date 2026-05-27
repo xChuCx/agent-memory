@@ -162,7 +162,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Release()
+	defer func() { _ = l.Release() }()
 
 	got, err := ReadMetadata(path)
 	if err != nil {
@@ -193,7 +193,7 @@ func TestReadMetadata_DefaultsAreFilled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Release()
+	defer func() { _ = l.Release() }()
 
 	got, err := ReadMetadata(path)
 	if err != nil {

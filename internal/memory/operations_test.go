@@ -18,7 +18,7 @@ func TestParseOperation_Dispatch(t *testing.T) {
 		"append_to_section":       "*memory.AppendToSection",
 		"replace_section_content": "*memory.ReplaceSectionContent",
 	}
-	for kind, _ := range cases {
+	for kind := range cases {
 		t.Run(kind, func(t *testing.T) {
 			op, err := ParseOperation(OperationInput{Op: kind, Path: "x.md", Content: "# X\n"})
 			if err != nil {

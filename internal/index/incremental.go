@@ -55,7 +55,7 @@ func (i *Index) UpsertSections(ctx context.Context, sections []SectionDoc) error
 	if err != nil {
 		return fmt.Errorf("UpsertSections: begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for _, s := range sections {
 		if _, err := tx.ExecContext(ctx,
@@ -99,7 +99,7 @@ func (i *Index) DeleteSections(ctx context.Context, file string, sectionIDs []st
 	if err != nil {
 		return fmt.Errorf("DeleteSections: begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for _, id := range sectionIDs {
 		if _, err := tx.ExecContext(ctx,
@@ -125,7 +125,7 @@ func (i *Index) DeleteFile(ctx context.Context, file string) error {
 	if err != nil {
 		return fmt.Errorf("DeleteFile: begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for _, q := range []string{
 		`DELETE FROM memory_search WHERE file = ?`,

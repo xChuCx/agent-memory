@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -134,11 +133,3 @@ func runFetch(ctx context.Context, opts fetchOptions) (*memory.FetchResponse, er
 	})
 }
 
-// writeFetchJSON is a small helper kept symmetric with status.go's
-// writeStatusJSON. Not used by the cobra path (which encodes inline);
-// available for tests.
-func writeFetchJSON(w io.Writer, resp *memory.FetchResponse) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(resp)
-}
