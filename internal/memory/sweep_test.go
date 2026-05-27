@@ -193,8 +193,10 @@ func TestRejectStaged_AppendsToRejectionLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Reason != "" && res.Reason != ReasonStagingNotFound {
-		// rejected_by_user path doesn't set Reason.
+	// The interactive reject path uses Status="rejected_by_user" and
+	// leaves Reason empty (Reason is reserved for the failure codes).
+	if res.Reason != "" {
+		t.Errorf("Reason = %q, want empty (rejected_by_user shouldn't use Reason)", res.Reason)
 	}
 
 	rs, err := ListRejections(memDir)
