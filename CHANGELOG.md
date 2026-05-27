@@ -9,6 +9,25 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **M8 — Benchmark harness.** `internal/bench/` is the new home of
+  reproducible end-to-end benchmarks. A deterministic fixture
+  generator (small / default / large sizes) builds a realistic
+  `.agent-memory/` tree once; benchmarks for `FetchContext`,
+  `ProposeUpdate` (apply / stage / session_log paths), and
+  `RebuildAll` run against that fixture. Plus per-package
+  hot-path benchmarks: `ParseSections` / `Splice` (markdown),
+  `Scan` clean/with-key/with-allowlist (memory), `Search` over
+  small/medium/large indices + `UpsertSections` (index).
+
+  Twenty-one benchmarks total. `scripts/bench.sh` is the runner
+  with consistent flags (`-bench=. -benchmem -count=3 -run=^$`);
+  `benchstat` integration is documented in
+  [docs/bench-harness.md](docs/bench-harness.md) along with the
+  baseline numbers from a local Windows / NVMe run and an
+  interpretation guide (why each path costs what it does).
+
+  Not in scope for M8: CI-gated regression detection. Benchmarks
+  run on-demand; baseline pinning + tolerance policy is M8 batch 2.
 - **M7 — `rebase` CLI.** Recovery path for staged proposals that hit
   `target_drift` on apply (someone edited the base file between
   stage and apply). `agent-memory rebase <id> [--force] [--json]`
@@ -281,8 +300,9 @@ Tracked for **Release 0.2 / 0.3**:
   against a new base after external edits.
 - **M7 — Git merge driver**: documented in manifest but `init
   --with-merge-driver` is currently a no-op.
-- **M8 — Benchmark / eval harness**: `internal/e2e/` has a latency
-  regression guard but no formal bench scaffold.
+- **M8 — Benchmark / eval harness**: ~~`internal/e2e/` has a latency
+  regression guard but no formal bench scaffold.~~ Landed in
+  [Unreleased](#unreleased--release-02-in-progress).
 - **Multi-runtime adapters**: ~~only Claude Code ships in 0.1. Cursor,
   Codex, Gemini, etc. land in 0.2.~~ Three new adapters (cursor,
   agents, gemini) landed in
