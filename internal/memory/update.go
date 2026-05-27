@@ -92,6 +92,12 @@ type ProposeResponse struct {
 	Findings             []Finding                 `json:"findings,omitempty"`
 	Violations           []schema.SectionViolation `json:"violations,omitempty"`
 	ProvenanceViolations []string                  `json:"provenance_violations,omitempty"`
+
+	// AutoStage reports git auto-stage / auto-commit outcomes when the
+	// applied path produced a write AND manifest.git.auto_stage_changes
+	// is true. nil on stage or reject; nil on apply when the feature is
+	// off. See internal/memory/autostage.go.
+	AutoStage *AutoStageResult `json:"auto_stage,omitempty"`
 }
 
 // UpdateDeps bundles the orchestrator's dependencies. Index is optional —
@@ -332,7 +338,7 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 			"routing resolved to server_only; agent cannot write this category",
 			final), nil
 	case schema.ApprovalApply:
-		return applyImmediately(ctx, deps, fileOrder, postState, fileOps, final)
+		return applyImmediately(ctx, deps, fileOrder, postState, fileOps, final, req.Intent, req.Rationale)
 	case schema.ApprovalStage:
 		return stageProposal(req, deps, fileOrder, preState, postState, resolved, final)
 	}
@@ -345,6 +351,9 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 
 // applyImmediately writes post-state bytes to disk atomically for every
 // affected file and re-indexes them. The lock is held by the caller.
+//
+// intent and rationale are passed through to the optional git auto-stage
+// step at the end so the commit message can identify the change.
 func applyImmediately(
 	ctx context.Context,
 	deps UpdateDeps,
@@ -352,6 +361,8 @@ func applyImmediately(
 	postState map[string][]byte,
 	fileOps map[string][]opCat,
 	routing Routing,
+	intent Intent,
+	rationale string,
 ) (*ProposeResponse, error) {
 	for _, rel := range fileOrder {
 		abs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
@@ -374,10 +385,17 @@ func applyImmediately(
 		}
 	}
 
+	// Best-effort git auto-stage + auto-commit per manifest.git.* flags.
+	// Result attached to the response; no error path can fail the apply
+	// here — the bytes already landed via WriteAtomic.
+	repoRoot := filepath.Dir(deps.MemoryDir)
+	autoStage := maybeAutoStage(deps, repoRoot, fileOrder, intent, rationale)
+
 	return &ProposeResponse{
-		Status:  StatusApplied,
-		Files:   append([]string(nil), fileOrder...),
-		Routing: routing,
+		Status:    StatusApplied,
+		Files:     append([]string(nil), fileOrder...),
+		Routing:   routing,
+		AutoStage: &autoStage,
 	}, nil
 }
 

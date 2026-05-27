@@ -38,6 +38,11 @@ type ApplyResult struct {
 	Message   string        `json:"message,omitempty"`
 	Files     []string      `json:"files,omitempty"`
 	Drift     []DriftReport `json:"drift,omitempty"`
+
+	// AutoStage carries git auto-stage / commit outcomes when the apply
+	// produced writes AND manifest.git.auto_stage_changes is true. nil
+	// on rejection; nil on success when the feature is disabled.
+	AutoStage *AutoStageResult `json:"auto_stage,omitempty"`
 }
 
 // DriftReport describes a single target whose current disk state no longer
@@ -339,6 +344,14 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (*Apply
 		}
 	}
 
+	// Best-effort git auto-stage + auto-commit per manifest.git.* flags.
+	// Run BEFORE removing the staging dir so a future debug session that
+	// inspects the staging files still has them; the auto-stage outcome
+	// is purely informational either way.
+	repoRoot := filepath.Dir(deps.MemoryDir)
+	autoStage := maybeAutoStage(deps, repoRoot, proposal.Files,
+		proposal.Request.Intent, proposal.Request.Rationale)
+
 	// Remove the staging directory now that everything is on disk. Failure
 	// here is non-fatal: the apply succeeded; the user can clean up manually.
 	_ = os.RemoveAll(filepath.Join(deps.MemoryDir, "staging", stagingID))
@@ -347,6 +360,7 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (*Apply
 		StagingID: stagingID,
 		Status:    StatusApplied,
 		Files:     append([]string(nil), proposal.Files...),
+		AutoStage: &autoStage,
 	}, nil
 }
 

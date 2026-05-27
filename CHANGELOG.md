@@ -5,6 +5,32 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Release 0.2 (in progress)
+
+### Added
+
+- **M4 — Git auto-stage / auto-commit on apply.** Two new manifest
+  knobs and four lines of orchestration: when
+  `manifest.git.auto_stage_changes: true`, every applied file is
+  `git add`-ed; when `manifest.git.auto_commit: true` is also set, a
+  commit is created with a prefix-+-intent-+-rationale message. Opt-in
+  — defaults to off so existing v0.1 deployments upgrade without
+  behaviour change.
+  - `internal/git/commit.go` exposes `AddPaths(root, paths)` and
+    `Commit(root, message)` with safe no-op semantics for non-git
+    projects, missing `git` binary, and empty staged index.
+  - `internal/memory/autostage.go` adds `shouldStage(file, schema,
+    gitCfg)` (category-aware policy that honours `track_local` /
+    `track_sessions` overrides) and `maybeAutoStage(...)` (feature-
+    gated wrapper that surfaces results without ever failing the
+    apply).
+  - `ProposeResponse.AutoStage` and `ApplyResult.AutoStage` carry the
+    outcome through to CLI + MCP consumers.
+  - Auto-stage NEVER runs `git push`, `--no-verify`, `git reset`,
+    `git checkout --`, or `git add .`. The file list is always
+    explicit.
+  - Documented in [docs/patterns/git-auto-stage.md](docs/patterns/git-auto-stage.md).
+
 ## [0.1.0] — 2026-05-27
 
 First public-shape release. Implements the Core Contract from
@@ -151,10 +177,11 @@ Claude Code adapter.
 
 Tracked for **Release 0.2 / 0.3**:
 
-- **M4 — Git integration**: auto-stage / auto-commit on apply (via
+- **M4 — Git integration**: ~~auto-stage / auto-commit on apply (via
   `manifest.git.track_local` / `track_sessions` / `auto_stage_changes`)
-  is not yet implemented. Manual `git add` of applied files is needed
-  if the project tracks them.
+  is not yet implemented.~~ Landed in
+  [Unreleased](#unreleased--release-02-in-progress); opt-in via
+  manifest flags.
 - **M5 batch 2 — Staging TTL sweeper**: `manifest.staging.ttl_seconds`
   is parsed but not enforced. Old staged proposals accumulate until
   manually rejected.
