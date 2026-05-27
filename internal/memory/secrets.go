@@ -34,6 +34,17 @@ type ScanOpts struct {
 	// real-but-unrecognised tokens.
 	EntropyThreshold float64
 	EntropyMinLength int
+
+	// PIIScanSSNAndCC enables high-confidence PII detection (SSN shape +
+	// credit card with Luhn validation). Both patterns are extremely rare
+	// in legitimate technical content; default-on in DefaultManifest.
+	PIIScanSSNAndCC bool
+
+	// PIIScanEmail enables email-address detection. Opt-in because emails
+	// appear legitimately in documentation (maintainer addresses, support
+	// contacts, example syntax). Use allowlist regions for legitimate
+	// occurrences when this is on.
+	PIIScanEmail bool
 }
 
 // DefaultScanOpts returns the recommended scanner configuration per
@@ -160,6 +171,12 @@ func Scan(content []byte, opts ScanOpts) []Finding {
 			}
 		}
 	}
+
+	// PII pass — high-confidence + opt-in email. Runs after the secret
+	// + entropy passes so allowlist regions and dedup behave consistently.
+	// See pii.go for the patterns.
+	findings = scanPIIInto(findings, content, opts)
+
 	return findings
 }
 

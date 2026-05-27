@@ -490,6 +490,171 @@ func TestProposeUpdate_ResponseCarriesRouting(t *testing.T) {
 // makeStagingID smoke
 // =============================================================================
 
+// =============================================================================
+// Hardening: allowlist limits + PII detection through orchestrator
+// =============================================================================
+
+func TestProposeUpdate_RejectsPII_SSN(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+	// PIIScan is on in DefaultManifest, so this should reject.
+	resp, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent: IntentUpdateCurrent,
+			Operations: []OperationInput{
+				{
+					Op:       "create_file",
+					Path:     "local/current.shared.md",
+					Content:  "# Current\n\nNote: SSN 123-45-6789 leaked here.\n",
+					IfExists: "replace",
+				},
+			},
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+	if resp.Reason != ReasonPIIDetected {
+		t.Fatalf("Reason = %q, want %q (msg=%s)", resp.Reason, ReasonPIIDetected, resp.Message)
+	}
+	if len(resp.Findings) == 0 {
+		t.Error("Findings should be populated on pii_detected")
+	}
+	// No SSN bytes in any field — same leak guard as secret scanner.
+	for _, f := range resp.Findings {
+		for _, field := range []string{f.Type, f.ApproximateLocation} {
+			if strings.Contains(field, "123-45") {
+				t.Errorf("PII finding leaked digits via %q field", field)
+			}
+		}
+	}
+}
+
+func TestProposeUpdate_RejectsPII_CreditCard(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+	resp, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent: IntentUpdateCurrent,
+			Operations: []OperationInput{
+				{
+					Op:       "create_file",
+					Path:     "local/current.shared.md",
+					Content:  "# Current\n\nTest card: 4242 4242 4242 4242\n",
+					IfExists: "replace",
+				},
+			},
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+	if resp.Reason != ReasonPIIDetected {
+		t.Fatalf("Reason = %q, want %q (msg=%s)", resp.Reason, ReasonPIIDetected, resp.Message)
+	}
+}
+
+func TestProposeUpdate_MixedSecretAndPII_ReportsSecret(t *testing.T) {
+	// When BOTH a credential AND PII are present, the orchestrator
+	// reports secret_detected (most severe wins).
+	memDir, mf, sch := updateFixture(t)
+	resp, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent: IntentUpdateCurrent,
+			Operations: []OperationInput{
+				{
+					Op:       "create_file",
+					Path:     "local/current.shared.md",
+					Content:  "# Current\n\nKey: AKIAIOSFODNN7EXAMPLE\nSSN: 123-45-6789\n",
+					IfExists: "replace",
+				},
+			},
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+	if resp.Reason != ReasonSecretDetected {
+		t.Errorf("Reason = %q, want secret_detected (secret should win over PII)", resp.Reason)
+	}
+}
+
+func TestProposeUpdate_AllowsCleanEmailByDefault(t *testing.T) {
+	// PIIScanEmail is OFF by default — legitimate emails in
+	// documentation shouldn't trigger rejection.
+	memDir, mf, sch := updateFixture(t)
+	resp, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent: IntentUpdateCurrent,
+			Operations: []OperationInput{
+				{
+					Op:       "create_file",
+					Path:     "local/current.shared.md",
+					Content:  "# Current\n\nContact maintainer@example.com for help.\n",
+					IfExists: "replace",
+				},
+			},
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+	if resp.Status != StatusApplied {
+		t.Errorf("email + email-scan-off should apply; got Status=%q Reason=%q",
+			resp.Status, resp.Reason)
+	}
+}
+
+func TestProposeUpdate_RejectsAllowlistLimitExceeded(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+
+	// Build a body with one huge allowlist region — exceeds the
+	// default MaxBytesPerRegion (512). 600 bytes inside.
+	bigBody := strings.Repeat("documentation example token format. ", 17) // ~600 chars
+	src := "# Current\n\n" +
+		"<!-- @secret-scan: allow reason=\"docs\" -->\n" +
+		bigBody +
+		"\n<!-- @secret-scan: end -->\n"
+	resp, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent: IntentUpdateCurrent,
+			Operations: []OperationInput{
+				{
+					Op:       "create_file",
+					Path:     "local/current.shared.md",
+					Content:  src,
+					IfExists: "replace",
+				},
+			},
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+	if resp.Reason != ReasonAllowlistLimitExceeded {
+		t.Fatalf("Reason = %q, want %q (msg=%s)", resp.Reason, ReasonAllowlistLimitExceeded, resp.Message)
+	}
+	if !strings.Contains(resp.Message, "max allowed = 512") {
+		t.Errorf("message should mention the breached limit: %q", resp.Message)
+	}
+}
+
+func TestProposeUpdate_AllowlistLimits_CanBeDisabled(t *testing.T) {
+	// Setting all limits to 0 disables the check entirely. Useful
+	// escape hatch for repos with legitimate need for big allowlist
+	// regions (rare).
+	memDir, mf, sch := updateFixture(t)
+	mf.Security.AllowlistLimits.MaxBytesPerFile = 0
+	mf.Security.AllowlistLimits.MaxRegionsPerFile = 0
+	mf.Security.AllowlistLimits.MaxBytesPerRegion = 0
+
+	bigBody := strings.Repeat("documentation token format example. ", 30) // ~1.1 KB
+	src := "# Current\n\n" +
+		"<!-- @secret-scan: allow reason=\"docs\" -->\n" +
+		bigBody +
+		"\n<!-- @secret-scan: end -->\n"
+	resp, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent: IntentUpdateCurrent,
+			Operations: []OperationInput{
+				{
+					Op:       "create_file",
+					Path:     "local/current.shared.md",
+					Content:  src,
+					IfExists: "replace",
+				},
+			},
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+	if resp.Status != StatusApplied {
+		t.Errorf("zero limits should disable the check; got Status=%q Reason=%q Msg=%s",
+			resp.Status, resp.Reason, resp.Message)
+	}
+}
+
 func TestMakeStagingID_Format(t *testing.T) {
 	id := makeStagingID(ProposeRequest{
 		Intent:    IntentRecordDecision,

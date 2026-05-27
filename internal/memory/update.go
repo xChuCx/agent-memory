@@ -55,6 +55,8 @@ const (
 	ReasonLockHeld              = "lock_held"
 	ReasonTargetDrift           = "target_drift"
 	ReasonStagingNotFound       = "staging_not_found"
+	ReasonAllowlistLimitExceeded = "allowlist_limit_exceeded"
+	ReasonPIIDetected           = "pii_detected"
 )
 
 // ============================================================================
@@ -287,19 +289,32 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 			}
 		}
 
-		// Allowlist extract + secret scan on the final bytes.
+		// Allowlist extract + limits check + secret/PII scan on the
+		// final bytes.
 		if deps.Manifest.Security.SecretScan {
 			regions, allowErr := ExtractAllowlistRegions(cur)
 			if allowErr != nil {
 				return reject(ReasonAllowlistParseError,
 					fmt.Sprintf("%s: %v", rel, allowErr)), nil
 			}
+			limits := AllowlistLimits{
+				MaxBytesPerFile:   deps.Manifest.Security.AllowlistLimits.MaxBytesPerFile,
+				MaxRegionsPerFile: deps.Manifest.Security.AllowlistLimits.MaxRegionsPerFile,
+				MaxBytesPerRegion: deps.Manifest.Security.AllowlistLimits.MaxBytesPerRegion,
+			}
+			if limitMsg := CheckAllowlistLimits(regions, limits); limitMsg != "" {
+				return reject(ReasonAllowlistLimitExceeded,
+					fmt.Sprintf("%s: %s", rel, limitMsg)), nil
+			}
 			scanOpts := DefaultScanOpts()
 			scanOpts.Allowlist = regions
+			scanOpts.PIIScanSSNAndCC = deps.Manifest.Security.PIIScan
+			scanOpts.PIIScanEmail = deps.Manifest.Security.PIIScanEmail
 			findings := Scan(cur, scanOpts)
 			if len(findings) > 0 {
-				return rejectWithFindings(ReasonSecretDetected,
-					fmt.Sprintf("%s: %d secret finding(s)", rel, len(findings)),
+				reason := ClassifyFindings(findings)
+				return rejectWithFindings(reason,
+					fmt.Sprintf("%s: %d finding(s)", rel, len(findings)),
 					findings), nil
 			}
 		}

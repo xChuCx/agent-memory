@@ -128,3 +128,51 @@ func IsAllowlisted(start, end int, regions []AllowlistRegion) bool {
 	}
 	return false
 }
+
+// AllowlistLimits caps how much of a file's content can sit inside
+// secret-scanner allowlist regions. The allowlist is a per-region
+// escape hatch for documenting token FORMATS (a few dozen bytes per
+// example). Without a cap, a careless or malicious agent could wrap
+// a 5 KB region around a real credential and bypass the scanner.
+//
+// A field set to 0 means "unlimited for that dimension" (the
+// orchestrator skips the corresponding check). Defaults shipped via
+// manifest.security.allowlist_limits: see config.DefaultManifest.
+type AllowlistLimits struct {
+	MaxBytesPerFile   int // sum of bytes inside all regions
+	MaxRegionsPerFile int // count of regions
+	MaxBytesPerRegion int // single largest region
+}
+
+// CheckAllowlistLimits verifies regions against limits. Returns an
+// empty string when all checks pass; a human-readable description of
+// the first hit limit otherwise. The orchestrator passes this string
+// through as the rejection Message.
+//
+// Limits are checked in this order (lowest-impact wins for the error
+// message; if both region-count and total-bytes are exceeded, the
+// region-count message is what the user sees first):
+//
+//  1. MaxRegionsPerFile  — count of regions
+//  2. MaxBytesPerRegion  — single largest region
+//  3. MaxBytesPerFile    — sum across all regions
+func CheckAllowlistLimits(regions []AllowlistRegion, limits AllowlistLimits) string {
+	if limits.MaxRegionsPerFile > 0 && len(regions) > limits.MaxRegionsPerFile {
+		return fmt.Sprintf("allowlist regions = %d, max allowed = %d",
+			len(regions), limits.MaxRegionsPerFile)
+	}
+	total := 0
+	for i, r := range regions {
+		size := r.ByteEnd - r.ByteStart
+		if limits.MaxBytesPerRegion > 0 && size > limits.MaxBytesPerRegion {
+			return fmt.Sprintf("allowlist region[%d] size = %d bytes, max allowed = %d (reason=%q)",
+				i, size, limits.MaxBytesPerRegion, r.Reason)
+		}
+		total += size
+	}
+	if limits.MaxBytesPerFile > 0 && total > limits.MaxBytesPerFile {
+		return fmt.Sprintf("allowlist total = %d bytes across %d region(s), max allowed = %d",
+			total, len(regions), limits.MaxBytesPerFile)
+	}
+	return ""
+}

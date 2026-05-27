@@ -9,6 +9,29 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **Security hardening — allowlist limits + PII detection.** Two new
+  guardrails on top of v0.1.0's regex + entropy secret scanner:
+  - **Allowlist size limits** (`manifest.security.allowlist_limits`):
+    `max_bytes_per_file` (default 1024), `max_regions_per_file`
+    (default 10), `max_bytes_per_region` (default 512). Prevents
+    `<!-- @secret-scan: allow reason="..." -->` from being abused to
+    wrap multi-KB regions around real credentials. Field = 0 means
+    "disabled" (escape hatch for projects with legitimate need).
+    New reject reason: `allowlist_limit_exceeded`.
+  - **PII detection** (`manifest.security.pii_scan` default ON):
+    SSN-shape (`\d{3}-\d{2}-\d{4}`) and credit-card with Luhn
+    validation. Both are extremely rare in legitimate technical
+    content — Luhn gate drops the 13-19-digit false-positive rate
+    by an order of magnitude. New reject reason: `pii_detected`.
+  - **Email detection** (`manifest.security.pii_scan_email` default
+    OFF): opt-in because emails legitimately appear in
+    documentation. When enabled, allowlist regions can exempt
+    specific addresses.
+  - `ClassifyFindings` merges mixed credential + PII results into a
+    single reason: any credential present → `secret_detected`; only
+    PII → `pii_detected`. Mirror reasons added on the rebase path:
+    `rebase_pii_detected` alongside existing `rebase_secret_detected`.
+  - Documented in [docs/patterns/security-hardening.md](docs/patterns/security-hardening.md).
 - **Release infrastructure** ([goreleaser](https://goreleaser.com/) +
   GitHub Actions workflow). Pushing a `v*` tag triggers
   `.github/workflows/release.yml`, which builds binaries for

@@ -5,6 +5,98 @@ import (
 	"testing"
 )
 
+// =============================================================================
+// CheckAllowlistLimits — the hardening guardrail
+// =============================================================================
+
+func TestCheckAllowlistLimits_Passes_WhenAllWithinLimits(t *testing.T) {
+	regions := []AllowlistRegion{
+		{ByteStart: 0, ByteEnd: 100, Reason: "a"},
+		{ByteStart: 200, ByteEnd: 300, Reason: "b"},
+	}
+	limits := AllowlistLimits{
+		MaxBytesPerFile:   1024,
+		MaxRegionsPerFile: 10,
+		MaxBytesPerRegion: 512,
+	}
+	if msg := CheckAllowlistLimits(regions, limits); msg != "" {
+		t.Errorf("CheckAllowlistLimits unexpectedly rejected: %q", msg)
+	}
+}
+
+func TestCheckAllowlistLimits_RegionCountExceeded(t *testing.T) {
+	regions := make([]AllowlistRegion, 11)
+	for i := range regions {
+		regions[i] = AllowlistRegion{ByteStart: i * 10, ByteEnd: i*10 + 5, Reason: "x"}
+	}
+	limits := AllowlistLimits{MaxRegionsPerFile: 10}
+	msg := CheckAllowlistLimits(regions, limits)
+	if msg == "" || !strings.Contains(msg, "regions = 11") {
+		t.Errorf("expected region-count error mentioning 11, got %q", msg)
+	}
+}
+
+func TestCheckAllowlistLimits_SingleRegionTooLarge(t *testing.T) {
+	regions := []AllowlistRegion{
+		{ByteStart: 0, ByteEnd: 1000, Reason: "huge"},
+	}
+	limits := AllowlistLimits{MaxBytesPerRegion: 512}
+	msg := CheckAllowlistLimits(regions, limits)
+	if msg == "" || !strings.Contains(msg, "max allowed = 512") {
+		t.Errorf("expected per-region size error, got %q", msg)
+	}
+	if !strings.Contains(msg, `reason="huge"`) {
+		t.Errorf("error should mention the region's reason: %q", msg)
+	}
+}
+
+func TestCheckAllowlistLimits_TotalBytesExceeded(t *testing.T) {
+	// Each region is within MaxBytesPerRegion, but the sum exceeds
+	// MaxBytesPerFile.
+	regions := []AllowlistRegion{
+		{ByteStart: 0, ByteEnd: 400, Reason: "a"},
+		{ByteStart: 500, ByteEnd: 900, Reason: "b"},
+		{ByteStart: 1000, ByteEnd: 1400, Reason: "c"},
+	}
+	limits := AllowlistLimits{
+		MaxBytesPerFile:   1000,
+		MaxRegionsPerFile: 10,
+		MaxBytesPerRegion: 500,
+	}
+	msg := CheckAllowlistLimits(regions, limits)
+	if msg == "" || !strings.Contains(msg, "max allowed = 1000") {
+		t.Errorf("expected total-bytes error mentioning 1000-byte cap, got %q", msg)
+	}
+}
+
+func TestCheckAllowlistLimits_ZeroLimitsDisableCheck(t *testing.T) {
+	// Limits all 0 → no check fires regardless of region counts/sizes.
+	regions := make([]AllowlistRegion, 100)
+	for i := range regions {
+		regions[i] = AllowlistRegion{ByteStart: i * 10000, ByteEnd: i*10000 + 5000, Reason: "x"}
+	}
+	if msg := CheckAllowlistLimits(regions, AllowlistLimits{}); msg != "" {
+		t.Errorf("zero limits should disable the check; got error %q", msg)
+	}
+}
+
+func TestCheckAllowlistLimits_RegionCountCheckedFirst(t *testing.T) {
+	// If both region-count AND total-bytes would fire, the region-count
+	// error wins (documented order). 11 regions of 1 byte each.
+	regions := make([]AllowlistRegion, 11)
+	for i := range regions {
+		regions[i] = AllowlistRegion{ByteStart: i * 100, ByteEnd: i*100 + 1, Reason: "x"}
+	}
+	limits := AllowlistLimits{
+		MaxBytesPerFile:   5,
+		MaxRegionsPerFile: 10,
+	}
+	msg := CheckAllowlistLimits(regions, limits)
+	if !strings.Contains(msg, "regions = 11") {
+		t.Errorf("region-count error should win; got %q", msg)
+	}
+}
+
 func TestExtractAllowlistRegions_NoMarkers(t *testing.T) {
 	regions, err := ExtractAllowlistRegions([]byte("plain text\nno markers here\n"))
 	if err != nil {

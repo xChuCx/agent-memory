@@ -25,11 +25,12 @@ const (
 // Reason codes for RebaseResult. Stable wire identifiers — CLI / tests
 // match against them.
 const (
-	ReasonForceRequired     = "force_required"
-	ReasonUnresolvableDrift = "unresolvable_drift"
-	ReasonRebasePlanFailed  = "rebase_plan_failed"
-	ReasonRebaseSecret      = "rebase_secret_detected"
-	ReasonRebaseInvalidMD   = "rebase_invalid_markdown"
+	ReasonForceRequired      = "force_required"
+	ReasonUnresolvableDrift  = "unresolvable_drift"
+	ReasonRebasePlanFailed   = "rebase_plan_failed"
+	ReasonRebaseSecret       = "rebase_secret_detected"
+	ReasonRebasePIIDetected  = "rebase_pii_detected"
+	ReasonRebaseInvalidMD    = "rebase_invalid_markdown"
 )
 
 // RebaseResult is what RebaseStaged returns.
@@ -268,24 +269,40 @@ func rebaseReplan(
 				fmt.Sprintf("%s: %v", rel, err), drifts), nil
 		}
 
-		// Re-scan for secrets — a malicious or accidental edit of the
-		// on-disk base could introduce one that ends up in the re-spliced
-		// post-state.
+		// Re-scan for secrets + PII — a malicious or accidental edit of
+		// the on-disk base could introduce one that ends up in the
+		// re-spliced post-state. Same security guarantee as
+		// propose_update's apply path.
 		if deps.Manifest.Security.SecretScan {
 			regions, allowErr := ExtractAllowlistRegions(cur)
 			if allowErr != nil {
 				return rebaseRejection(stagingID, ReasonAllowlistParseError,
 					fmt.Sprintf("%s: %v", rel, allowErr), drifts), nil
 			}
+			limits := AllowlistLimits{
+				MaxBytesPerFile:   deps.Manifest.Security.AllowlistLimits.MaxBytesPerFile,
+				MaxRegionsPerFile: deps.Manifest.Security.AllowlistLimits.MaxRegionsPerFile,
+				MaxBytesPerRegion: deps.Manifest.Security.AllowlistLimits.MaxBytesPerRegion,
+			}
+			if limitMsg := CheckAllowlistLimits(regions, limits); limitMsg != "" {
+				return rebaseRejection(stagingID, ReasonAllowlistLimitExceeded,
+					fmt.Sprintf("%s: %s", rel, limitMsg), drifts), nil
+			}
 			scanOpts := DefaultScanOpts()
 			scanOpts.Allowlist = regions
+			scanOpts.PIIScanSSNAndCC = deps.Manifest.Security.PIIScan
+			scanOpts.PIIScanEmail = deps.Manifest.Security.PIIScanEmail
 			findings := Scan(cur, scanOpts)
 			if len(findings) > 0 {
+				reason := ReasonRebaseSecret
+				if ClassifyFindings(findings) == ReasonPIIDetected {
+					reason = ReasonRebasePIIDetected
+				}
 				return &RebaseResult{
 					StagingID: stagingID,
 					Status:    StatusRejected,
-					Reason:    ReasonRebaseSecret,
-					Message:   fmt.Sprintf("%s: %d secret finding(s) after rebase", rel, len(findings)),
+					Reason:    reason,
+					Message:   fmt.Sprintf("%s: %d finding(s) after rebase", rel, len(findings)),
 					Drift:     drifts,
 					Findings:  findings,
 				}, nil

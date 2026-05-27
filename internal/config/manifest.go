@@ -75,8 +75,31 @@ type Staging struct {
 
 // Security holds security-engine policy.
 type Security struct {
-	SecretScan                    bool `yaml:"secret_scan"`
-	RejectUntrustedDurableUpdates bool `yaml:"reject_untrusted_durable_updates"`
+	SecretScan                    bool                `yaml:"secret_scan"`
+	RejectUntrustedDurableUpdates bool                `yaml:"reject_untrusted_durable_updates"`
+	PIIScan                       bool                `yaml:"pii_scan"`
+	PIIScanEmail                  bool                `yaml:"pii_scan_email,omitempty"`
+	AllowlistLimits               AllowlistLimitsSpec `yaml:"allowlist_limits,omitempty"`
+}
+
+// AllowlistLimitsSpec caps how much content allowlist-marker regions
+// can cover in a single file. A limit of 0 means "disabled".
+//
+// The allowlist mechanism is intentionally a per-region escape hatch
+// for documenting token formats (`ghp_AaBbCc...example, not real`).
+// Without limits, a malicious or careless agent could wrap multi-KB
+// regions around real credentials and bypass the scanner entirely.
+// These caps keep allowlists in their intended size range.
+//
+// Defaults (DefaultManifest):
+//
+//	MaxBytesPerFile:   1024 — five 200-byte format examples fit comfortably
+//	MaxRegionsPerFile: 10   — more regions usually signals over-escaping
+//	MaxBytesPerRegion: 512  — single largest region; a token + surrounding prose
+type AllowlistLimitsSpec struct {
+	MaxBytesPerFile   int `yaml:"max_bytes_per_file,omitempty"`
+	MaxRegionsPerFile int `yaml:"max_regions_per_file,omitempty"`
+	MaxBytesPerRegion int `yaml:"max_bytes_per_region,omitempty"`
 }
 
 // Git holds git-integration settings.
@@ -152,6 +175,13 @@ func DefaultManifest() *Manifest {
 		Security: Security{
 			SecretScan:                    true,
 			RejectUntrustedDurableUpdates: true,
+			PIIScan:                       true,  // SSN + credit-card-Luhn; rare in legitimate text
+			PIIScanEmail:                  false, // opt-in: emails appear in legitimate documentation
+			AllowlistLimits: AllowlistLimitsSpec{
+				MaxBytesPerFile:   1024,
+				MaxRegionsPerFile: 10,
+				MaxBytesPerRegion: 512,
+			},
 		},
 		Git: Git{
 			CommitMessagePrefix: "chore(memory):",
