@@ -1,0 +1,185 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// =============================================================================
+// runInstall: claude adapter
+// =============================================================================
+
+func TestRunInstall_ClaudeProjectLocal(t *testing.T) {
+	root := t.TempDir()
+	res, err := runInstall(installOptions{
+		Adapter: "claude",
+		Root:    root,
+	})
+	if err != nil {
+		t.Fatalf("runInstall: %v", err)
+	}
+	if res.Adapter != "claude" {
+		t.Errorf("Adapter = %q, want claude", res.Adapter)
+	}
+	wantPath := filepath.Join(root, ".claude", "skills", "agent-memory", "SKILL.md")
+	if len(res.Files) != 1 || res.Files[0] != wantPath {
+		t.Errorf("Files = %v, want [%s]", res.Files, wantPath)
+	}
+	body, _ := os.ReadFile(wantPath)
+	if !strings.Contains(string(body), "memory.fetch_context") {
+		t.Error("installed SKILL.md missing tool reference")
+	}
+}
+
+func TestRunInstall_UnknownAdapter(t *testing.T) {
+	_, err := runInstall(installOptions{
+		Adapter: "not-a-real-adapter",
+		Root:    t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown adapter")
+	}
+	if !strings.Contains(err.Error(), "unknown adapter") {
+		t.Errorf("err = %q, want mention of 'unknown adapter'", err)
+	}
+}
+
+func TestRunInstall_RefusesOverwriteWithoutForce(t *testing.T) {
+	root := t.TempDir()
+	// First install: populates the skill.
+	if _, err := runInstall(installOptions{Adapter: "claude", Root: root}); err != nil {
+		t.Fatal(err)
+	}
+	// Second install (no force): nothing written, file is skipped.
+	res, err := runInstall(installOptions{Adapter: "claude", Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Files) != 0 {
+		t.Errorf("Files = %v, want empty (no overwrite)", res.Files)
+	}
+	if len(res.Skipped) != 1 {
+		t.Errorf("Skipped = %v, want one entry", res.Skipped)
+	}
+}
+
+func TestRunInstall_ForceOverwrites(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, ".claude", "skills", "agent-memory")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("stale\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := runInstall(installOptions{
+		Adapter: "claude",
+		Root:    root,
+		Force:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Files) != 1 {
+		t.Errorf("Files = %v, want [installed path]", res.Files)
+	}
+	got, _ := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if !strings.Contains(string(got), "memory.propose_update") {
+		t.Error("force install didn't replace stale content")
+	}
+}
+
+// =============================================================================
+// Cobra integration: end-to-end through NewRootCmd
+// =============================================================================
+
+func TestCobra_InstallClaude_HumanOutput(t *testing.T) {
+	root := t.TempDir()
+	cmd := NewRootCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"install", "claude", "--root", root})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("install claude: %v (stderr=%q)", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Installed claude adapter") {
+		t.Errorf("stdout missing install banner: %q", stdout.String())
+	}
+	// Skill file is actually on disk.
+	wantPath := filepath.Join(root, ".claude", "skills", "agent-memory", "SKILL.md")
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Errorf("skill file not at %s: %v", wantPath, err)
+	}
+}
+
+func TestCobra_InstallClaude_JSON(t *testing.T) {
+	root := t.TempDir()
+	cmd := NewRootCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"install", "claude", "--root", root, "--json"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("install claude --json: %v (stderr=%q)", err, stderr.String())
+	}
+	var got InstallResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("output not JSON: %v\n%s", err, stdout.String())
+	}
+	if got.Adapter != "claude" {
+		t.Errorf("Adapter = %q, want claude", got.Adapter)
+	}
+	if len(got.Files) != 1 {
+		t.Errorf("Files = %v, want one entry", got.Files)
+	}
+}
+
+func TestCobra_InstallClaude_NoForceShowsPreserved(t *testing.T) {
+	root := t.TempDir()
+	cmd := NewRootCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+
+	// First install: writes the skill.
+	cmd.SetArgs([]string{"install", "claude", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+
+	// Second install (no --force): "already installed" banner + preserved.
+	cmd2 := NewRootCmd()
+	cmd2.SetOut(&stdout)
+	cmd2.SetErr(&stdout)
+	cmd2.SetArgs([]string{"install", "claude", "--root", root})
+	if err := cmd2.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "already installed") {
+		t.Errorf("missing 'already installed' banner: %q", out)
+	}
+	if !strings.Contains(out, "--force") {
+		t.Errorf("missing hint about --force: %q", out)
+	}
+}
+
+func TestCobra_InstallUnknownAdapter_ReturnsError(t *testing.T) {
+	cmd := NewRootCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"install", "not-real", "--root", t.TempDir()})
+
+	if err := cmd.Execute(); err == nil {
+		t.Error("expected non-zero exit for unknown adapter")
+	}
+}
