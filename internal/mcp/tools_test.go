@@ -2,36 +2,53 @@ package mcp
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/cli"
+	"github.com/agent-memory/agent-memory/internal/config"
+	"github.com/agent-memory/agent-memory/internal/schema"
 )
 
-// mcpFixture inits an .agent-memory/ in a temp dir (via the same init we
-// ship in the CLI) and seeds one extra anchored section so the search
-// path has something to find.
+// mcpFixture scaffolds an .agent-memory/ in a temp dir directly via the
+// config/schema primitives, NOT via cli's init command.
+//
+// Why not call cli.NewRootCmd? internal/cli imports internal/mcp (for the
+// `mcp` subcommand), so importing cli from here forms a test-time import
+// cycle:
+//
+//   mcp/tools_test.go → cli → mcp
+//
+// Building the same layout directly through the same primitives keeps
+// the test independent and stays in lockstep with `agent-memory init`
+// (both paths use config.WriteDefault and schema.WriteDefault).
 func mcpFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	// We borrow cli's init logic — it's the canonical bootstrap and we
-	// want to stay in lockstep with what `agent-memory init` produces.
-	root := cli.NewRootCmd()
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
-	root.SetArgs([]string{"init", "--root", dir, "--name", "mcp-test"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("init: %v", err)
+	memDir := filepath.Join(dir, ".agent-memory")
+
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.WriteFile(
-		filepath.Join(dir, ".agent-memory", "modules", "auth.md"),
-		[]byte("## Token Rotation\n<!-- @id: token-rotation -->\n\nRefresh tokens rotate on every successful use.\n"),
-		0644,
-	); err != nil {
-		t.Fatal(err)
+	for _, d := range []string{"modules", "local", "meta"} {
+		must(os.MkdirAll(filepath.Join(memDir, d), 0755))
+	}
+	must(schema.WriteDefault(filepath.Join(memDir, "meta", "schema.yaml")))
+	must(config.WriteDefault(filepath.Join(memDir, "meta", "manifest.yaml"), "mcp-test"))
+
+	files := map[string]string{
+		"conventions.md": "# Conventions\n<!-- @id: conventions -->\n\nRun `go test ./...` before merging.\n",
+		"index.md":       "# Agent Memory Index\n<!-- @generated -->\n\nLast validated: <init>\n",
+		"decisions.md":   "# Decisions\n<!-- @id: decisions -->\n\nProject decisions land here.\n",
+		"pitfalls.md":    "# Pitfalls\n<!-- @id: pitfalls -->\n\nKnown traps.\n",
+		filepath.Join("modules", "auth.md"): "## Token Rotation\n<!-- @id: token-rotation -->\n\nRefresh tokens rotate on every successful use.\n",
+	}
+	for rel, body := range files {
+		must(os.WriteFile(filepath.Join(memDir, rel), []byte(body), 0644))
 	}
 	return dir
 }
