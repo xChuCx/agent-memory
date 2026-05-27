@@ -9,9 +9,15 @@ import (
 )
 
 // ProgramVersion is the user-visible version string for `agent-memory version`.
-// Tracks the design doc version (currently v0.4.1) plus an "-mvp-dev" suffix
-// while the MVP is in development. Release builds will be re-tagged.
-const ProgramVersion = "0.4.1-mvp-dev"
+// Follows semver; bumped at every release tag. Decoupled from DesignDocVersion
+// — the design doc has its own version line that tracks the spec, while the
+// program version tracks shipped binaries.
+const ProgramVersion = "0.1.0"
+
+// DesignDocVersion is the spec revision this binary implements. Printed
+// alongside ProgramVersion in `status --json` and useful for matching a
+// binary's behaviour back to a written design.
+const DesignDocVersion = "v0.4.1"
 
 // NewRootCmd builds the agent-memory root command with all subcommands attached.
 func NewRootCmd() *cobra.Command {
