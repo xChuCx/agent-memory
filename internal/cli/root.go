@@ -34,6 +34,8 @@ agent-memory-implementation-plan.md in the repository root.`,
 	root.AddCommand(NewInitCmd())
 	root.AddCommand(NewStatusCmd())
 	root.AddCommand(NewDoctorCmd())
+	root.AddCommand(NewFetchCmd())
+	root.AddCommand(NewMCPCmd())
 
 	return root
 }

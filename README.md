@@ -44,7 +44,7 @@ Verify the build:
 # 0.4.1-mvp-dev
 ```
 
-## CLI (M1)
+## CLI (M1 + M2)
 
 ```bash
 agent-memory init [--root DIR] [--name NAME] [--force]
@@ -58,11 +58,20 @@ agent-memory doctor [--root DIR]
         # Diagnose layout issues. Advisory; exits 0 even when findings
         # are reported.
 
+agent-memory fetch [QUERY] [--root DIR] [--budget N] [--scope X,Y] [--exclude-archive] [--json]
+        # Return a budgeted Markdown context pack from .agent-memory/.
+        # Empty QUERY returns the bootstrap pack (current.<branch>.md
+        # + current.shared.md + conventions + index summary).
+
+agent-memory mcp [--root DIR] [--stdio]
+        # Start the MCP server (JSON-RPC over stdio). Exposes
+        # memory.fetch_context for agents like Claude Code.
+
 agent-memory version
         # Print the binary version and exit.
 ```
 
-M2 will add `fetch` and the MCP server (`mcp --stdio`). M3 adds `review`/`apply`/`reject`/`rebase`. M6 adds `install <adapter>`.
+M3 will add `review`/`apply`/`reject`/`rebase` and the `memory.propose_update` MCP tool. M6 adds `install <adapter>`.
 
 The pre-M1 spikes live under `spikes/` and run via:
 

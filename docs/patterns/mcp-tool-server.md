@@ -1,7 +1,7 @@
 # Pattern: MCP Tool Server
 
-**Status:** Sketched against the official Go SDK API. Validation in spike S2 (manual test against Claude Code).
-**Owner:** `internal/mcp/` (from M2).
+**Status:** Partially implemented in [`internal/mcp/`](../../internal/mcp). `memory.fetch_context` is live as of M2 (T2.10). `memory.propose_update` and `memory.status` land in M3.
+**Owner:** `internal/mcp/` (M2+).
 **Tracks design:** [Design Doc v0.4.1 §14, §15](../../agent-memory-design-doc-v0.4.1.md).
 
 ## Problem
