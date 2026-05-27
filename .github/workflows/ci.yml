@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache: true
       - name: go vet
         run: go vet ./...
@@ -29,6 +29,23 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: go test -race ./...
 
+  e2e:
+    # End-to-end smoke: compiles the binary and drives every Release 0.1
+    # subcommand + the MCP server through real subprocess calls. Linux only —
+    # the test exercises platform-portable logic, and subprocess startup +
+    # SQLite warmup is heavier than the unit suite. The build matrix above
+    # already covers per-OS compatibility of the inner packages.
+    name: e2e (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: go test -tags=e2e
+        run: go test -tags=e2e -v -timeout 120s ./internal/e2e/...
+
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -36,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
           cache: true
       - uses: golangci/golangci-lint-action@v6
         with:
