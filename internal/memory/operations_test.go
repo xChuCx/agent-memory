@@ -235,7 +235,10 @@ func TestAppendSection_PlanWithoutTrailingNewline(t *testing.T) {
 	}
 }
 
-func TestAppendSection_PlanIntoParent(t *testing.T) {
+func TestAppendSection_PlanIntoParent_FirstChildSlot(t *testing.T) {
+	// Parent "module" (level 1) has child "token-rotation" (level 2). A new
+	// h2 child should land at the first-child slot — before token-rotation,
+	// not at the parent's range end (which would be after ## Other).
 	op := &AppendSection{
 		FilePath:        "modules/auth.md",
 		ParentSectionID: "module",
@@ -248,14 +251,46 @@ func TestAppendSection_PlanIntoParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, _ := agentmd.Splice([]byte(sampleMarkdown), []agentmd.SpliceOp{plan})
-	// "Sub" should appear after "Intro." and before "## Token Rotation".
 	subIdx := strings.Index(string(out), "## Sub")
 	tokenIdx := strings.Index(string(out), "## Token Rotation")
 	if subIdx < 0 || tokenIdx < 0 {
 		t.Fatalf("missing markers\n%s", out)
 	}
 	if subIdx > tokenIdx {
-		t.Errorf("Sub inserted after Token Rotation; expected before")
+		t.Errorf("Sub inserted after Token Rotation; expected before (first-child slot)")
+	}
+	// "Intro." paragraph must survive ABOVE the new Sub.
+	introIdx := strings.Index(string(out), "Intro.")
+	if introIdx < 0 || introIdx > subIdx {
+		t.Errorf("Intro paragraph lost or moved below Sub")
+	}
+}
+
+func TestAppendSection_PlanIntoParent_NoChildrenFallbackToParentEnd(t *testing.T) {
+	// Parent "token-rotation" (level 2) has no h3 children in sampleMarkdown.
+	// A new h3 should land at parent.ByteEnd — just before "## Other".
+	op := &AppendSection{
+		FilePath:        "modules/auth.md",
+		ParentSectionID: "token-rotation",
+		Heading:         "Implementation Notes",
+		Level:           3,
+		Content:         []byte("### Implementation Notes\n<!-- @id: impl-notes -->\n\nnotes\n"),
+	}
+	plan, err := op.Plan([]byte(sampleMarkdown))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := agentmd.Splice([]byte(sampleMarkdown), []agentmd.SpliceOp{plan})
+	implIdx := strings.Index(string(out), "### Implementation Notes")
+	otherIdx := strings.Index(string(out), "## Other")
+	oldIdx := strings.Index(string(out), "Old content.")
+	if implIdx < 0 || otherIdx < 0 || oldIdx < 0 {
+		t.Fatalf("missing markers\n%s", out)
+	}
+	// Order: Old content < Implementation Notes < Other.
+	if !(oldIdx < implIdx && implIdx < otherIdx) {
+		t.Errorf("expected order old<impl<other, got old=%d impl=%d other=%d",
+			oldIdx, implIdx, otherIdx)
 	}
 }
 

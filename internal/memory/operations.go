@@ -310,8 +310,21 @@ func (op *ReplaceSection) Plan(src []byte) (agentmd.SpliceOp, error) {
 // ============================================================================
 
 // AppendSection adds a new section to the file. If ParentSectionID is set,
-// the new section is inserted at the end of that parent (before the next
-// sibling/ancestor heading). Otherwise it goes at the end of the file.
+// the new section is inserted at the "first child slot" of that parent —
+// the position of the parent's first existing child (a section inside the
+// parent's byte range with strictly greater HeadingLevel). When the parent
+// has no children, the insert falls back to parent.ByteEnd (just before
+// the parent's next sibling/ancestor heading or EOF).
+//
+// Without ParentSectionID the new section is appended at EOF.
+//
+// Why the "first child slot" semantic: a level-1 parent subsumes ALL
+// subsequent sections until the next level-1 heading (or EOF). Inserting
+// at parent.ByteEnd would put the new child AFTER every other section in
+// the file, which is rarely what the agent intends. Inserting before the
+// first existing child keeps the new section visually "at the top of the
+// parent's contents" — matching how a human would add a sub-section to
+// a chapter.
 //
 // Content must start with the heading line. The orchestrator's
 // AssignMissingIDs pass will inject an @id anchor on the next index pass
@@ -356,27 +369,43 @@ func (op *AppendSection) Targets() []OperationTarget {
 }
 
 func (op *AppendSection) Plan(src []byte) (agentmd.SpliceOp, error) {
-	if op.ParentSectionID == "" {
-		// Append at end of file. Make sure there's a newline separating
-		// the new heading from preceding content.
-		insert := op.Content
-		if len(src) > 0 && src[len(src)-1] != '\n' {
-			insert = append([]byte("\n"), insert...)
+	insertAt := len(src) // default: EOF append
+
+	if op.ParentSectionID != "" {
+		sections, err := agentmd.ParseSections(src)
+		if err != nil {
+			return agentmd.SpliceOp{}, fmt.Errorf("append_section: parse: %w", err)
 		}
-		return agentmd.SpliceOp{
-			ByteStart:   len(src),
-			ByteEnd:     len(src),
-			Replacement: insert,
-		}, nil
+		parent, ok := agentmd.FindByID(sections, op.ParentSectionID)
+		if !ok || parent == nil {
+			return agentmd.SpliceOp{}, fmt.Errorf("append_section: parent section not found: %q", op.ParentSectionID)
+		}
+
+		// First child slot: the first heading strictly inside the parent's
+		// range with a greater HeadingLevel. ParseSections returns sections
+		// in document order, so the first match is the earliest child.
+		insertAt = parent.ByteEnd
+		for _, s := range sections {
+			if s.ByteStart > parent.ByteStart && s.ByteStart < parent.ByteEnd && s.HeadingLevel > parent.HeadingLevel {
+				insertAt = s.ByteStart
+				break
+			}
+		}
 	}
-	parent, err := resolveSection(src, op.ParentSectionID, "", 0, 0)
-	if err != nil {
-		return agentmd.SpliceOp{}, fmt.Errorf("append_section: parent: %w", err)
+
+	// Newline guard: if the insertion point sits at EOF and src lacks a
+	// trailing newline, prepend one so the new heading lands on its own
+	// line. Mid-file positions are always after a '\n' (we splice at the
+	// start of a heading line), so no guard needed there.
+	insert := op.Content
+	if insertAt == len(src) && len(src) > 0 && src[len(src)-1] != '\n' {
+		insert = append([]byte("\n"), insert...)
 	}
+
 	return agentmd.SpliceOp{
-		ByteStart:   parent.ByteEnd,
-		ByteEnd:     parent.ByteEnd,
-		Replacement: op.Content,
+		ByteStart:   insertAt,
+		ByteEnd:     insertAt,
+		Replacement: insert,
 	}, nil
 }
 
