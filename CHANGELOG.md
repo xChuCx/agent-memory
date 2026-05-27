@@ -9,6 +9,22 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **M7 — `rebuild-index` CLI.** Wraps the existing
+  `index.RebuildAll` (which already powered fetch's auto-rebuild on
+  an empty index) behind an explicit user command:
+  `agent-memory rebuild-index [--root DIR] [--clobber]
+  [--no-assign-ids] [--json]`. Two modes:
+  - **Default** runs `DELETE FROM` on the three index tables and
+    re-walks `memDir`. Fast; keeps the SQLite file in place.
+  - **`--clobber`** removes `meta/index.sqlite`, `-wal`, `-shm`,
+    `-journal` siblings before reopening fresh. For genuine SQLite
+    corruption where `DELETE FROM` itself would fail.
+  Holds the cross-process advisory lock for the duration so a
+  concurrent `propose_update` cannot race the wipe-then-rebuild
+  window. `--assign-ids` (default on) injects missing
+  `<!-- @id: ... -->` anchors on files in categories that require
+  them. Documented in
+  [docs/patterns/rebuild-index.md](docs/patterns/rebuild-index.md).
 - **M5 batch 2 — Staging TTL sweeper + rejection audit log.** Closes
   the two staging-lifecycle gaps from v0.1: stale proposals
   accumulating with no cleanup, and rejections leaving no audit
@@ -213,9 +229,12 @@ Tracked for **Release 0.2 / 0.3**:
   trace beyond the directory being gone.~~ Landed in
   [Unreleased](#unreleased--release-02-in-progress) —
   `meta/rejection-log.jsonl`.
-- **M7 — `rebuild-index` / `rebase` commands**: index repair must be
-  done by deleting `meta/index.sqlite*` and re-running fetch (which
-  auto-rebuilds).
+- **M7 — `rebase` command**: ~~index repair must be done by deleting
+  `meta/index.sqlite*` and re-running fetch (which auto-rebuilds).~~
+  `rebuild-index` landed in
+  [Unreleased](#unreleased--release-02-in-progress). `rebase` (move
+  staged proposals onto a new base after external edits) is still
+  deferred.
 - **M7 — Git merge driver**: documented in manifest but `init
   --with-merge-driver` is currently a no-op.
 - **M8 — Benchmark / eval harness**: `internal/e2e/` has a latency

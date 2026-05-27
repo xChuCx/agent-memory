@@ -46,6 +46,7 @@ agent-memory-implementation-plan.md in the repository root.`,
 	root.AddCommand(NewApplyCmd())
 	root.AddCommand(NewRejectCmd())
 	root.AddCommand(NewSweepCmd())
+	root.AddCommand(NewRebuildIndexCmd())
 	root.AddCommand(NewInstallCmd())
 
 	return root
