@@ -7,7 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/agent-memory/agent-memory/internal/adapters/agents"
 	"github.com/agent-memory/agent-memory/internal/adapters/claude"
+	"github.com/agent-memory/agent-memory/internal/adapters/cursor"
+	"github.com/agent-memory/agent-memory/internal/adapters/gemini"
 )
 
 // InstallResult is the structured shape returned by `agent-memory install`.
@@ -20,9 +23,13 @@ type InstallResult struct {
 }
 
 // supportedAdapters lists the adapter identifiers `install` accepts.
-// Future adapters (cursor, codex, ...) extend this slice and the
-// dispatch switch in runInstall.
-var supportedAdapters = []string{claude.AdapterName}
+// Each entry must also have a dispatch case in runInstall below.
+var supportedAdapters = []string{
+	claude.AdapterName,
+	cursor.AdapterName,
+	agents.AdapterName,
+	gemini.AdapterName,
+}
 
 // NewInstallCmd returns the `agent-memory install` subcommand.
 func NewInstallCmd() *cobra.Command {
@@ -81,17 +88,26 @@ type installOptions struct {
 // runInstall dispatches on the adapter name. Each adapter implements its
 // own filesystem layout; runInstall maps the CLI flags onto that adapter's
 // Options struct.
+//
+// User-global support varies per adapter:
+//   - claude / cursor: both project + user-global.
+//   - agents / gemini: project-only (no widely-agreed home-dir
+//     convention for AGENTS.md / GEMINI.md). UserGlobal: true returns
+//     a clear error from the adapter.
 func runInstall(opts installOptions) (*InstallResult, error) {
+	// Centralise the "default Root to cwd" rule so each adapter case
+	// stays tiny.
+	root := opts.Root
+	if !opts.UserGlobal && root == "" {
+		r, err := resolveRoot("")
+		if err != nil {
+			return nil, err
+		}
+		root = r
+	}
+
 	switch opts.Adapter {
 	case claude.AdapterName:
-		root := opts.Root
-		if !opts.UserGlobal && root == "" {
-			r, err := resolveRoot("")
-			if err != nil {
-				return nil, err
-			}
-			root = r
-		}
 		res, err := claude.Install(claude.Options{
 			Root:       root,
 			UserGlobal: opts.UserGlobal,
@@ -100,11 +116,41 @@ func runInstall(opts installOptions) (*InstallResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("install %s: %w", opts.Adapter, err)
 		}
-		return &InstallResult{
-			Adapter: res.Adapter,
-			Files:   res.Files,
-			Skipped: res.Skipped,
-		}, nil
+		return &InstallResult{Adapter: res.Adapter, Files: res.Files, Skipped: res.Skipped}, nil
+
+	case cursor.AdapterName:
+		res, err := cursor.Install(cursor.Options{
+			Root:       root,
+			UserGlobal: opts.UserGlobal,
+			Force:      opts.Force,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("install %s: %w", opts.Adapter, err)
+		}
+		return &InstallResult{Adapter: res.Adapter, Files: res.Files, Skipped: res.Skipped}, nil
+
+	case agents.AdapterName:
+		res, err := agents.Install(agents.Options{
+			Root:       root,
+			UserGlobal: opts.UserGlobal,
+			Force:      opts.Force,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("install %s: %w", opts.Adapter, err)
+		}
+		return &InstallResult{Adapter: res.Adapter, Files: res.Files, Skipped: res.Skipped}, nil
+
+	case gemini.AdapterName:
+		res, err := gemini.Install(gemini.Options{
+			Root:       root,
+			UserGlobal: opts.UserGlobal,
+			Force:      opts.Force,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("install %s: %w", opts.Adapter, err)
+		}
+		return &InstallResult{Adapter: res.Adapter, Files: res.Files, Skipped: res.Skipped}, nil
+
 	default:
 		return nil, fmt.Errorf("install: unknown adapter %q (supported: %s)",
 			opts.Adapter, strings.Join(supportedAdapters, ", "))

@@ -110,7 +110,16 @@ agent-memory reject STAGING_ID [--json] [--root DIR]
         # Discard a staged proposal.
 
 agent-memory install <adapter> [--user-global] [--force] [--json]
-        # Materialise agent-runtime adapter assets. Supported: claude.
+        # Materialise agent-runtime adapter assets.
+        # Supported: claude, cursor, agents, gemini.
+
+agent-memory rebuild-index [--root DIR] [--clobber] [--no-assign-ids] [--json]
+        # Recreate the FTS5 shadow index from canonical Markdown files.
+        # Use for SQLite corruption, schema changes, or after manual .md edits.
+
+agent-memory sweep [--root DIR] [--ttl DURATION] [--dry-run] [--json]
+        # Remove staged proposals past the manifest's staging.ttl_seconds.
+        # Each removal also writes a ttl_expired entry to meta/rejection-log.jsonl.
 
 agent-memory version
         # Print binary version and exit.
@@ -125,8 +134,22 @@ Exposed by `agent-memory mcp` over stdio JSON-RPC:
 | `memory.fetch_context` | Read a budgeted Markdown context pack. |
 | `memory.propose_update` | Submit structured edits (apply or stage). |
 
-The Claude Code skill installed by `agent-memory install claude`
-documents when and how an agent should call each one.
+## Agent-runtime adapters
+
+`agent-memory install <adapter>` drops a worked instruction file at the
+location each runtime reads from:
+
+| Adapter | Target file | Notes |
+|---------|------------|-------|
+| `claude` | `.claude/skills/agent-memory/SKILL.md` | Claude Code skill format. `--user-global` writes to `~/.claude/skills/`. |
+| `cursor` | `.cursor/rules/agent-memory.mdc` | Cursor MDC rule with description-based matching. `--user-global` writes to `~/.cursor/rules/`. |
+| `agents` | `AGENTS.md` (repo root) | Industry-broad convention. Read by OpenAI Codex CLI, Cursor's agent mode, Sourcegraph Cody, etc. Project-local only. |
+| `gemini` | `GEMINI.md` (repo root) | Gemini CLI long-term project context. Project-local only. |
+
+Each file teaches the runtime when to call `memory.fetch_context` and
+`memory.propose_update`, the intent vocabulary, provenance rules, and
+debugging reject reasons. The same behavioural model across all four;
+each adapter just wraps it in the runtime's native format.
 
 ## Architecture (at a glance)
 

@@ -9,6 +9,27 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **M6 batch 2 — Three new agent-runtime adapters.** `agent-memory
+  install` now ships four targets:
+  - `claude` (existing) → `.claude/skills/agent-memory/SKILL.md`,
+    Claude Code skill format with YAML frontmatter.
+  - `cursor` → `.cursor/rules/agent-memory.mdc`, Cursor IDE MDC rule
+    with description-based matching. Project-local AND `--user-global`
+    (`~/.cursor/rules/`).
+  - `agents` → `AGENTS.md` at the repo root. Industry-broad plain
+    markdown convention read by OpenAI Codex CLI, Cursor's agent
+    mode, Sourcegraph Cody, and others. **Project-local only** —
+    `--user-global` is rejected because there's no agreed home-dir
+    location.
+  - `gemini` → `GEMINI.md` at the repo root. Gemini CLI long-term
+    project memory. Project-local only.
+
+  Each adapter follows the contract documented in
+  [docs/patterns/adapter-installation.md](docs/patterns/adapter-installation.md):
+  embedded asset, `Install(Options) (*Result, error)`, atomic writes,
+  refuse-overwrite-without-Force, idempotent default. Same uniform
+  CLI result shape across all four so JSON consumers see consistent
+  output.
 - **M7 — `rebuild-index` CLI.** Wraps the existing
   `index.RebuildAll` (which already powered fetch's auto-rebuild on
   an empty index) behind an explicit user command:
@@ -239,8 +260,10 @@ Tracked for **Release 0.2 / 0.3**:
   --with-merge-driver` is currently a no-op.
 - **M8 — Benchmark / eval harness**: `internal/e2e/` has a latency
   regression guard but no formal bench scaffold.
-- **Multi-runtime adapters**: only Claude Code ships in 0.1. Cursor,
-  Codex, Gemini, etc. land in 0.2.
+- **Multi-runtime adapters**: ~~only Claude Code ships in 0.1. Cursor,
+  Codex, Gemini, etc. land in 0.2.~~ Three new adapters (cursor,
+  agents, gemini) landed in
+  [Unreleased](#unreleased--release-02-in-progress).
 - **MCP server registration**: `install claude` writes the SKILL.md
   but does not edit `~/.claude/mcp_servers.json`. Users still
   configure the MCP server entry manually.

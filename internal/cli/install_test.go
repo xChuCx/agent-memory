@@ -183,3 +183,124 @@ func TestCobra_InstallUnknownAdapter_ReturnsError(t *testing.T) {
 		t.Error("expected non-zero exit for unknown adapter")
 	}
 }
+
+// =============================================================================
+// Multi-adapter coverage: every supported adapter installs cleanly
+// through the CLI dispatch.
+// =============================================================================
+
+func TestRunInstall_CursorProjectLocal(t *testing.T) {
+	root := t.TempDir()
+	res, err := runInstall(installOptions{Adapter: "cursor", Root: root})
+	if err != nil {
+		t.Fatalf("runInstall: %v", err)
+	}
+	if res.Adapter != "cursor" {
+		t.Errorf("Adapter = %q, want cursor", res.Adapter)
+	}
+	want := filepath.Join(root, ".cursor", "rules", "agent-memory.mdc")
+	if len(res.Files) != 1 || res.Files[0] != want {
+		t.Errorf("Files = %v, want [%s]", res.Files, want)
+	}
+}
+
+func TestRunInstall_AgentsProjectLocal(t *testing.T) {
+	root := t.TempDir()
+	res, err := runInstall(installOptions{Adapter: "agents", Root: root})
+	if err != nil {
+		t.Fatalf("runInstall: %v", err)
+	}
+	want := filepath.Join(root, "AGENTS.md")
+	if len(res.Files) != 1 || res.Files[0] != want {
+		t.Errorf("Files = %v, want [%s]", res.Files, want)
+	}
+}
+
+func TestRunInstall_GeminiProjectLocal(t *testing.T) {
+	root := t.TempDir()
+	res, err := runInstall(installOptions{Adapter: "gemini", Root: root})
+	if err != nil {
+		t.Fatalf("runInstall: %v", err)
+	}
+	want := filepath.Join(root, "GEMINI.md")
+	if len(res.Files) != 1 || res.Files[0] != want {
+		t.Errorf("Files = %v, want [%s]", res.Files, want)
+	}
+}
+
+func TestRunInstall_AgentsRejectsUserGlobal(t *testing.T) {
+	_, err := runInstall(installOptions{Adapter: "agents", UserGlobal: true})
+	if err == nil {
+		t.Fatal("expected error: agents adapter does not support --user-global")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("err = %q, want mention of 'not supported'", err)
+	}
+}
+
+func TestRunInstall_GeminiRejectsUserGlobal(t *testing.T) {
+	_, err := runInstall(installOptions{Adapter: "gemini", UserGlobal: true})
+	if err == nil {
+		t.Fatal("expected error: gemini adapter does not support --user-global")
+	}
+}
+
+func TestRunInstall_AllAdaptersInSupportedList(t *testing.T) {
+	for _, want := range []string{"claude", "cursor", "agents", "gemini"} {
+		found := false
+		for _, got := range supportedAdapters {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("supportedAdapters missing %q (full list: %v)", want, supportedAdapters)
+		}
+	}
+}
+
+func TestCobra_InstallCursor(t *testing.T) {
+	root := t.TempDir()
+	cmd := NewRootCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"install", "cursor", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("install cursor: %v\n%s", err, stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".cursor", "rules", "agent-memory.mdc")); err != nil {
+		t.Errorf("cursor rule not at expected path: %v", err)
+	}
+}
+
+func TestCobra_InstallAgents(t *testing.T) {
+	root := t.TempDir()
+	cmd := NewRootCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"install", "agents", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("install agents: %v\n%s", err, stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Errorf("AGENTS.md not at root: %v", err)
+	}
+}
+
+func TestCobra_InstallGemini(t *testing.T) {
+	root := t.TempDir()
+	cmd := NewRootCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"install", "gemini", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("install gemini: %v\n%s", err, stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "GEMINI.md")); err != nil {
+		t.Errorf("GEMINI.md not at root: %v", err)
+	}
+}
