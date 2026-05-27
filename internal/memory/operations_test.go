@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
-	"github.com/agent-memory/agent-memory/internal/schema"
 )
 
 // ---------- ParseOperation ----------
@@ -435,5 +434,3 @@ func TestValidate_NilSchemaIsAcceptable(t *testing.T) {
 	}
 }
 
-// Just keep schema import used.
-var _ = schema.DefaultSchema
