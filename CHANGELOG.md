@@ -7,7 +7,33 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
-_Working ground for Release 0.3. Nothing landed yet._
+### Added
+
+- **Release infrastructure** ([goreleaser](https://goreleaser.com/) +
+  GitHub Actions workflow). Pushing a `v*` tag triggers
+  `.github/workflows/release.yml`, which builds binaries for
+  Linux/macOS/Windows × amd64/arm64 (static, CGo-free thanks to
+  modernc.org/sqlite), archives them with README + CHANGELOG (tar.gz
+  / .zip per OS), generates SHA-256 checksums, and publishes a
+  GitHub Release with everything attached. Release notes are
+  auto-generated from git history (docs/test/chore commits filtered
+  out) with a header pointing to the curated CHANGELOG.md.
+
+  `ProgramVersion` was switched from `const "0.X.Y"` to
+  `var = "dev"` so source builds (`go build`) identify as `dev`
+  while goreleaser stamps the actual tag via `-ldflags
+  '-X .../cli.ProgramVersion=v0.X.Y'`. No more per-release source
+  bump needed — the tag is the source of truth.
+
+  CI gains a `goreleaser-check` job that validates
+  `.goreleaser.yml` syntax on every PR + main push, so a broken
+  config surfaces before it breaks a real tag push.
+
+### Changed
+
+- `internal/cli.ProgramVersion` is now `var` (was `const`).
+  Pre-built v0.2.0 binaries still report `0.2.0` because the
+  ldflags stamp is applied per build; nothing changes for users.
 
 ## [0.2.0] — 2026-05-27
 

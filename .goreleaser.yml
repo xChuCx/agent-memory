@@ -1,0 +1,118 @@
+# goreleaser v2 config for agent-memory.
+#
+# Triggered by .github/workflows/release.yml on push of v* tags. Builds
+# static binaries for Linux/macOS/Windows × amd64/arm64, archives them
+# with README + CHANGELOG, computes SHA-256 checksums, and creates a
+# GitHub Release with the lot attached.
+#
+# Local validation:
+#   goreleaser check                  # parse + lint the config
+#   goreleaser release --snapshot --clean   # dry-run a full build
+#
+# Documented at https://goreleaser.com/customization/.
+version: 2
+
+project_name: agent-memory
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: agent-memory
+    main: ./cmd/agent-memory
+    binary: agent-memory
+
+    # modernc.org/sqlite is pure Go (no CGo), so we ship static
+    # binaries on every platform. This also keeps the CI builder
+    # simple — no C toolchain matrix needed.
+    env:
+      - CGO_ENABLED=0
+
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+    # Strip symbol table + DWARF debug info. Cuts the binary by ~30%.
+    # The ProgramVersion stamp injects the actual tag at link time;
+    # see internal/cli/root.go for the variable.
+    ldflags:
+      - -s -w
+      - -X github.com/agent-memory/agent-memory/internal/cli.ProgramVersion=v{{ .Version }}
+
+archives:
+  - id: default
+    # name_template defaults to a sensible "{project}_{version}_{os}_{arch}"
+    # in goreleaser v2; we spell it out for clarity.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+    # tar.gz for Linux + macOS; zip for Windows (zip is the platform's
+    # native expectation, and Windows users without 7zip / WSL can't
+    # easily unpack tar.gz).
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+    # Stuff every archive carries.
+    files:
+      - README.md
+      - CHANGELOG.md
+      # LICENSE — TBD; add to .gitignore exempt list and include here
+      # once a license is chosen (see implementation plan §18).
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  # Snapshot version format for `goreleaser release --snapshot`.
+  # Useful for local "what would the next release look like" runs.
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+# Build a brief auto-generated changelog from git history. Filter
+# noise — docs/test/chore/lint don't belong in user-facing release
+# notes. For the full curated changelog, the release header points to
+# CHANGELOG.md.
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^docs\\("
+      - "^test:"
+      - "^chore:"
+      - "^chore\\("
+      - "^fix\\(lint\\):"
+      - "^fix\\(ci\\):"
+      - "^release:"
+
+release:
+  github:
+    owner: xChuCx
+    name: agent-memory
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+  header: |
+    See [CHANGELOG.md](https://github.com/xChuCx/agent-memory/blob/{{ .Tag }}/CHANGELOG.md) for the curated, human-edited changelog.
+
+    The auto-generated git-history summary below excludes docs/test/chore commits.
+  footer: |
+    **Full git changelog:** [{{ .PreviousTag }}...{{ .Tag }}](https://github.com/xChuCx/agent-memory/compare/{{ .PreviousTag }}...{{ .Tag }})
+
+    Verify a downloaded archive:
+
+    ```
+    sha256sum -c {{ .ProjectName }}_{{ .Version }}_checksums.txt
+    ```

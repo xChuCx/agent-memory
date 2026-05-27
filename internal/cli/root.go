@@ -9,14 +9,22 @@ import (
 )
 
 // ProgramVersion is the user-visible version string for `agent-memory version`.
-// Follows semver; bumped at every release tag. Decoupled from DesignDocVersion
-// — the design doc has its own version line that tracks the spec, while the
-// program version tracks shipped binaries.
-const ProgramVersion = "0.2.0"
+// Default value is "dev" so `go build ./cmd/agent-memory` produces a binary
+// that clearly identifies itself as a development build. Release builds via
+// goreleaser stamp the actual git tag in via -ldflags, e.g.:
+//
+//	go build -ldflags='-X github.com/agent-memory/agent-memory/internal/cli.ProgramVersion=v0.3.0' ./cmd/agent-memory
+//
+// See .goreleaser.yml and .github/workflows/release.yml.
+//
+// var, not const, so the linker can override it. The exported name is
+// stable; only the value is configurable at build time.
+var ProgramVersion = "dev"
 
 // DesignDocVersion is the spec revision this binary implements. Printed
 // alongside ProgramVersion in `status --json` and useful for matching a
-// binary's behaviour back to a written design.
+// binary's behaviour back to a written design. Hardcoded — the spec only
+// moves with documented design-doc bumps, not per release.
 const DesignDocVersion = "v0.4.1"
 
 // NewRootCmd builds the agent-memory root command with all subcommands attached.

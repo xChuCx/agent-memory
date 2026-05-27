@@ -1,0 +1,49 @@
+# Triggered on push of a v* tag (semver). Builds the binary matrix via
+# goreleaser, computes checksums, and publishes a GitHub Release with
+# every archive attached.
+#
+# Manual fire path: push a tag (`git push origin v0.X.Y`). The release
+# job runs against THAT tag's checkout — no need to also push main.
+#
+# Failure path: if goreleaser fails (config error, build break), no
+# Release is created. The tag itself stays on the remote; fix the
+# underlying issue and re-push the tag with `git push --force origin
+# vX.Y.Z` (after `git tag -d` + `git tag -a` locally) to retrigger.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  # goreleaser needs write access to create the Release object and
+  # upload archives. No other scope needed.
+  contents: write
+
+jobs:
+  goreleaser:
+    name: goreleaser release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history is required so goreleaser can compute the
+          # auto-changelog (commit range from previous tag to this one).
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

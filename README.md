@@ -217,6 +217,48 @@ agent-memory-implementation-plan.md     build plan
 CHANGELOG.md                            per-release feature list
 ```
 
+## Releases
+
+Tag-driven via [goreleaser](https://goreleaser.com/). Pushing a `v*`
+tag triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml),
+which builds the binary matrix and publishes a GitHub Release with
+archives attached.
+
+Matrix per release:
+
+- `linux_amd64`, `linux_arm64`
+- `darwin_amd64`, `darwin_arm64`
+- `windows_amd64`, `windows_arm64`
+
+Each archive contains the `agent-memory` binary, `README.md`, and
+`CHANGELOG.md`. A sibling `agent-memory_<version>_checksums.txt`
+provides SHA-256 hashes.
+
+```bash
+# Verify a downloaded archive
+sha256sum -c agent-memory_0.2.0_checksums.txt
+```
+
+Local dry-run of the release pipeline (requires `goreleaser`
+installed):
+
+```bash
+goreleaser check                       # parse + validate .goreleaser.yml
+goreleaser release --snapshot --clean  # full build with no upload
+```
+
+Source builds always identify as `dev`:
+
+```
+$ go build -o agent-memory ./cmd/agent-memory
+$ ./agent-memory version
+dev
+```
+
+Release builds via goreleaser stamp the actual tag through
+`-ldflags='-X .../cli.ProgramVersion=v0.X.Y'`.
+
 ## License
 
 TBD. See [Implementation Plan §18 Open Decisions](agent-memory-implementation-plan.md).
