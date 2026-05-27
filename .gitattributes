@@ -1,0 +1,40 @@
+# Force LF line endings for ALL text files in the repository, on every
+# checkout, on every OS.
+#
+# Why this exists: testdata fixtures and embedded assets (SKILL.md, the
+# markdown engine's testdata/*.md) are byte-compared in tests. A
+# Windows checkout that converts LF → CRLF on the way out makes those
+# tests fail by exactly the count of newlines in the file. eol=lf says
+# "store as LF AND check out as LF, regardless of core.autocrlf".
+
+* text=auto eol=lf
+
+# Explicit re-state for the file types we care about, so a contributor
+# eyeballing this file sees the rule without having to understand the
+# fallback ordering.
+*.go        text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.toml      text eol=lf
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.sql       text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+# Binaries — never touch their bytes.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+*.tgz  binary
+*.db       binary
+*.sqlite   binary
+*.sqlite3  binary

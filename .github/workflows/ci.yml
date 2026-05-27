@@ -55,6 +55,13 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
+      # The default `version: latest` resolves to a pre-built binary
+      # compiled with Go 1.24, which refuses to load a go.mod targeting
+      # Go 1.25 (one of our transitive deps requires the higher version).
+      # `install-mode: goinstall` builds golangci-lint from source with
+      # the project's Go toolchain instead, so the linter's runtime Go
+      # version always matches the module's go directive.
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          install-mode: goinstall
