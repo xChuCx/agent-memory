@@ -53,6 +53,8 @@ const (
 	ReasonProvenanceViolation   = "provenance_violation"
 	ReasonServerOnlyCategory    = "server_only_category"
 	ReasonLockHeld              = "lock_held"
+	ReasonTargetDrift           = "target_drift"
+	ReasonStagingNotFound       = "staging_not_found"
 )
 
 // ============================================================================
@@ -490,7 +492,7 @@ func stageProposal(
 	}
 
 	// proposal.json: archived for audit + replay.
-	envelope := stagedProposal{
+	envelope := StagedProposal{
 		StagingID: stagingID,
 		StagedAt:  time.Now().UTC().Format(time.RFC3339),
 		Request:   req,
@@ -513,15 +515,6 @@ func stageProposal(
 		Routing:   routing,
 		StagingID: stagingID,
 	}, nil
-}
-
-// stagedProposal is the JSON envelope written to staging/<id>/proposal.json.
-type stagedProposal struct {
-	StagingID string         `json:"staging_id"`
-	StagedAt  string         `json:"staged_at"`
-	Request   ProposeRequest `json:"request"`
-	Routing   Routing        `json:"routing"`
-	Files     []string       `json:"files"`
 }
 
 // sectionHash returns the ContentHash of the section identified by id in src,

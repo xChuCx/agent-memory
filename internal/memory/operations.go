@@ -57,6 +57,30 @@ func (p DriftPolicy) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + p.String() + `"`), nil
 }
 
+// UnmarshalJSON reverses MarshalJSON for the M5 apply path, which round-
+// trips target-checksums.json off disk. An unknown identifier is an error
+// — silently mapping it to the zero value would mask staging-file
+// corruption.
+func (p *DriftPolicy) UnmarshalJSON(b []byte) error {
+	s := string(b)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	switch s {
+	case "require_section_content_match":
+		*p = RequireSectionContentMatch
+	case "require_section_resolvable":
+		*p = RequireSectionResolvable
+	case "require_file_absent":
+		*p = RequireFileAbsent
+	case "require_file_present":
+		*p = RequireFilePresent
+	default:
+		return fmt.Errorf("DriftPolicy: unknown identifier %q", s)
+	}
+	return nil
+}
+
 // OperationTarget describes a single (file, optional section) the operation
 // depends on for its drift check. The orchestrator (T3.7) materialises
 // Hash from disk at staging time.

@@ -180,7 +180,7 @@ func TestProposeUpdate_RecordDecision_Stages(t *testing.T) {
 
 	// proposal.json must round-trip.
 	pb, _ := os.ReadFile(proposal)
-	var env stagedProposal
+	var env StagedProposal
 	if err := json.Unmarshal(pb, &env); err != nil {
 		t.Errorf("proposal.json malformed: %v", err)
 	}
