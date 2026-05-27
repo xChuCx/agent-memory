@@ -201,8 +201,12 @@ func TestScan_DoesNotEchoTokenValue(t *testing.T) {
 
 func TestScan_EntropyDoesNotDoubleFireWithRegex(t *testing.T) {
 	// A line containing a JWT should produce a "jwt" finding but NOT
-	// also a separate "high_entropy" finding for the same line.
-	src := []byte("auth: eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjoidGVzdEAyMDI1MTIzNDU2In0.abcDEFghijKLMnopQRSTuvw\n")
+	// also a separate "high_entropy" finding for the same line. Each
+	// segment must be valid base64-urlsafe (no '@' or other punctuation
+	// outside [A-Za-z0-9_-]) for the regex to match all three parts.
+	// Segments 2 and 3 are long enough (>= 32 chars) to be entropy
+	// candidates — which is exactly the case we want dedup to suppress.
+	src := []byte("auth: eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjoidGVzdC11c2VyLTEyMzQ1Njc4OTAifQ.AbCdEfGhIjKlMnOpQrStUvWxYz0123456789\n")
 	got := Scan(src, DefaultScanOpts())
 	if findingsOfType(got, "jwt") == 0 {
 		t.Errorf("jwt not detected: %+v", got)
