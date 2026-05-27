@@ -39,10 +39,14 @@ func New(root, version string) *Server {
 }
 
 // RegisterTools attaches the agent-facing tools to the server. M2 registers
-// memory.fetch_context only; M3 will add propose_update and status.
+// memory.fetch_context only; M3 adds memory.propose_update (T3.9). A future
+// memory.status tool lands in M3 batch 4.
 func (s *Server) RegisterTools() error {
 	if err := registerFetchContext(s.server, s.root); err != nil {
 		return fmt.Errorf("register memory.fetch_context: %w", err)
+	}
+	if err := registerProposeUpdate(s.server, s.root); err != nil {
+		return fmt.Errorf("register memory.propose_update: %w", err)
 	}
 	return nil
 }
