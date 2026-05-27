@@ -106,7 +106,7 @@ func InsertSection(ctx context.Context, db *sql.DB, s Section) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO memory_search (file, section_id, title, headings, content, tags)
@@ -137,7 +137,7 @@ func UpsertSection(ctx context.Context, db *sql.DB, s Section) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM memory_search WHERE file = ? AND section_id = ?`,

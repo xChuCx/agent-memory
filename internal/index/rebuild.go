@@ -153,7 +153,7 @@ func (i *Index) wipeAll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for _, q := range []string{
 		`DELETE FROM memory_search`,
 		`DELETE FROM memory_sections`,
