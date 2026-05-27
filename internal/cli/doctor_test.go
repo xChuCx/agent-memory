@@ -148,6 +148,44 @@ func TestDoctor_ReportsSchemaParseError(t *testing.T) {
 	}
 }
 
+func TestDoctor_FlagsStaleStaging(t *testing.T) {
+	// Use sweepFixture (defined in sweep_test.go) — it stages one
+	// already-expired proposal under a manifest with TTL=1h.
+	root, _, _ := sweepFixture(t)
+
+	findings, err := runDoctor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundStale := false
+	for _, f := range findings {
+		if strings.Contains(f.Message, "past TTL") && f.Severity == SeverityInfo {
+			foundStale = true
+			break
+		}
+	}
+	if !foundStale {
+		t.Errorf("expected info finding for stale staging, got: %+v", findings)
+	}
+}
+
+func TestDoctor_NoStaleAdvisoryWhenAllFresh(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "fresh"}); err != nil {
+		t.Fatal(err)
+	}
+	// No proposals staged → no advisory.
+	findings, err := runDoctor(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range findings {
+		if strings.Contains(f.Message, "past TTL") {
+			t.Errorf("unexpected stale-staging advisory on fresh repo: %+v", f)
+		}
+	}
+}
+
 func TestDoctor_HumanOutput_AllPassed(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "p"}); err != nil {

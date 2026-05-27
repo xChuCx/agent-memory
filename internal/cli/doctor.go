@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/agent-memory/agent-memory/internal/config"
+	"github.com/agent-memory/agent-memory/internal/memory"
 	"github.com/agent-memory/agent-memory/internal/schema"
 )
 
@@ -114,8 +116,10 @@ func runDoctor(rootFlag string) ([]Finding, error) {
 		}
 	}
 
-	// Manifest: load + Validate.
+	// Manifest: load + Validate. We hold the loaded manifest below for the
+	// staging-TTL check, but only if Validate succeeded.
 	manifestPath := filepath.Join(memDir, "meta", "manifest.yaml")
+	var manifest *config.Manifest
 	if m, err := config.LoadManifest(manifestPath); err != nil {
 		findings = append(findings, Finding{
 			Severity: SeverityError,
@@ -126,6 +130,8 @@ func runDoctor(rootFlag string) ([]Finding, error) {
 			Severity: SeverityError,
 			Message:  fmt.Sprintf("manifest invalid: %v", err),
 		})
+	} else {
+		manifest = m
 	}
 
 	// Schema: load + Validate.
@@ -140,6 +146,22 @@ func runDoctor(rootFlag string) ([]Finding, error) {
 			Severity: SeverityError,
 			Message:  fmt.Sprintf("schema invalid: %v", err),
 		})
+	}
+
+	// Stale staged proposals: count how many sit past the manifest TTL
+	// and emit an advisory `info` finding. Doctor never auto-sweeps;
+	// it just nudges the user toward `agent-memory sweep`.
+	if manifest != nil && manifest.Staging.TTLSeconds > 0 {
+		ttl := time.Duration(manifest.Staging.TTLSeconds) * time.Second
+		if res, err := memory.SweepStale(memDir, ttl, true); err == nil && len(res.Expired) > 0 {
+			findings = append(findings, Finding{
+				Severity: SeverityInfo,
+				Message: fmt.Sprintf(
+					"%d staged proposal(s) past TTL (%s); run `agent-memory sweep` to remove",
+					len(res.Expired), ttl,
+				),
+			})
+		}
 	}
 
 	// Stable order for deterministic output.

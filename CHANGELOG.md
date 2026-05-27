@@ -9,6 +9,29 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **M5 batch 2 — Staging TTL sweeper + rejection audit log.** Closes
+  the two staging-lifecycle gaps from v0.1: stale proposals
+  accumulating with no cleanup, and rejections leaving no audit
+  trail.
+  - `agent-memory sweep [--root DIR] [--ttl DURATION] [--dry-run]
+    [--json]` walks `.agent-memory/staging/` and removes every
+    proposal older than `manifest.staging.ttl_seconds` (or `--ttl`).
+    Each removal also writes a `ttl_expired` entry to the audit log.
+  - `meta/rejection-log.jsonl` is the new append-only JSONL audit
+    log. One entry per discarded proposal (`user_rejected` from
+    `agent-memory reject <id>`, `ttl_expired` from sweep) carrying
+    `rejected_at`, `reason`, `staging_id`, `intent`, `rationale`,
+    `files`, `staged_at`, `age_seconds`.
+  - `agent-memory doctor` gains an advisory `info` finding for
+    proposals past TTL, nudging the user toward `agent-memory sweep`
+    without taking action itself.
+  - `RejectStaged` now writes the audit log entry as well as removing
+    the directory. Best-effort: a log write failure doesn't undo the
+    removal.
+  - Sweep is **explicit only** — no background goroutine, no
+    auto-sweep on `propose_update`, no surprise removals while the
+    user isn't looking.
+  - Documented in [docs/patterns/staging-ttl-and-rejection-log.md](docs/patterns/staging-ttl-and-rejection-log.md).
 - **M4 — Git auto-stage / auto-commit on apply.** Two new manifest
   knobs and four lines of orchestration: when
   `manifest.git.auto_stage_changes: true`, every applied file is
@@ -182,11 +205,14 @@ Tracked for **Release 0.2 / 0.3**:
   is not yet implemented.~~ Landed in
   [Unreleased](#unreleased--release-02-in-progress); opt-in via
   manifest flags.
-- **M5 batch 2 — Staging TTL sweeper**: `manifest.staging.ttl_seconds`
-  is parsed but not enforced. Old staged proposals accumulate until
-  manually rejected.
-- **M5 batch 2 — Rejection audit log**: discarded proposals leave no
-  trace beyond the directory being gone.
+- **M5 batch 2 — Staging TTL sweeper**: ~~`manifest.staging.ttl_seconds`
+  is parsed but not enforced.~~ Landed in
+  [Unreleased](#unreleased--release-02-in-progress) — explicit
+  `agent-memory sweep` CLI.
+- **M5 batch 2 — Rejection audit log**: ~~discarded proposals leave no
+  trace beyond the directory being gone.~~ Landed in
+  [Unreleased](#unreleased--release-02-in-progress) —
+  `meta/rejection-log.jsonl`.
 - **M7 — `rebuild-index` / `rebase` commands**: index repair must be
   done by deleting `meta/index.sqlite*` and re-running fetch (which
   auto-rebuilds).

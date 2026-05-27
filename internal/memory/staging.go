@@ -364,13 +364,18 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (*Apply
 	}, nil
 }
 
-// RejectStaged removes staging/<stagingID>/ from disk. Cheap; no drift
-// checks, no lock acquisition (the proposal isn't touching any other
-// memory file).
+// RejectStaged removes staging/<stagingID>/ from disk and appends an
+// audit entry to meta/rejection-log.jsonl with reason="user_rejected".
+// Cheap; no drift checks, no lock acquisition (the proposal isn't
+// touching any other memory file).
 //
 // Returns ReasonStagingNotFound through the ApplyResult (NOT as a Go
 // error) when the directory doesn't exist — symmetric with ApplyStaged's
 // contract. Real filesystem errors during removal propagate as Go errors.
+//
+// The rejection log write is best-effort: a logging failure doesn't
+// undo the removal. See sweep.go for the shared rejectStagedWithReason
+// helper that also serves the TTL sweeper.
 func RejectStaged(memDir, stagingID string) (*ApplyResult, error) {
 	if !StagingExists(memDir, stagingID) {
 		return &ApplyResult{
@@ -380,8 +385,8 @@ func RejectStaged(memDir, stagingID string) (*ApplyResult, error) {
 			Message:   fmt.Sprintf("no staging directory at %s", filepath.Join("staging", stagingID)),
 		}, nil
 	}
-	if err := os.RemoveAll(filepath.Join(memDir, "staging", stagingID)); err != nil {
-		return nil, fmt.Errorf("RejectStaged: remove %s: %w", stagingID, err)
+	if _, err := rejectStagedWithReason(memDir, stagingID, RejectionReasonUser); err != nil {
+		return nil, fmt.Errorf("RejectStaged: %w", err)
 	}
 	return &ApplyResult{
 		StagingID: stagingID,
