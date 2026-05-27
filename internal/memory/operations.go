@@ -33,6 +33,30 @@ const (
 	RequireFilePresent
 )
 
+// String renders the DriftPolicy as a stable snake_case identifier used in
+// staged target-checksums.json and CLI output. Keep these values stable —
+// the M5 apply path matches against them.
+func (p DriftPolicy) String() string {
+	switch p {
+	case RequireSectionContentMatch:
+		return "require_section_content_match"
+	case RequireSectionResolvable:
+		return "require_section_resolvable"
+	case RequireFileAbsent:
+		return "require_file_absent"
+	case RequireFilePresent:
+		return "require_file_present"
+	default:
+		return fmt.Sprintf("drift_policy(%d)", int(p))
+	}
+}
+
+// MarshalJSON renders DriftPolicy as its String() form, not as the integer
+// iota value. Staged targets must be human-readable on disk.
+func (p DriftPolicy) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + p.String() + `"`), nil
+}
+
 // OperationTarget describes a single (file, optional section) the operation
 // depends on for its drift check. The orchestrator (T3.7) materialises
 // Hash from disk at staging time.
