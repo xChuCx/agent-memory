@@ -12,7 +12,7 @@ import (
 // Follows semver; bumped at every release tag. Decoupled from DesignDocVersion
 // — the design doc has its own version line that tracks the spec, while the
 // program version tracks shipped binaries.
-const ProgramVersion = "0.1.0"
+const ProgramVersion = "0.2.0"
 
 // DesignDocVersion is the spec revision this binary implements. Printed
 // alongside ProgramVersion in `status --json` and useful for matching a

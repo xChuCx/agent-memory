@@ -5,15 +5,24 @@ memory updates out. Branch-aware. Secret-safe. Byte-preserving. Two tools.
 
 ## Status
 
-**Release 0.1** — first stable cut. Implements the Core Contract from
-[Design Doc v0.4.1](agent-memory-design-doc-v0.4.1.md): an MCP server
-that reads project memory and writes durable knowledge back, with
-structured operations, drift-checked staging, secret scanning, and a
-Claude Code adapter.
+**Release 0.2** — quality-of-life kit on top of v0.1.0's Core Contract.
+Six closed milestones beyond 0.1:
 
-See [CHANGELOG.md](CHANGELOG.md) for what's in 0.1 and what's deferred to
-0.2 / 0.3 (git auto-stage, staging TTL sweeper, rebuild-index, additional
-agent-runtime adapters).
+- **M4** Git auto-stage / auto-commit on apply (opt-in via manifest)
+- **M5 b2** Staging TTL sweeper + rejection audit log
+- **M6 b2** Three new agent-runtime adapters: Cursor (`.cursor/rules/`),
+  AGENTS.md (industry-broad convention), GEMINI.md
+- **M7** `rebuild-index` (FTS shadow regen) and `rebase` (re-plan
+  staged proposals against a new base after external edits)
+- **M8** Benchmark harness with deterministic fixtures + per-package
+  hot-path benches
+
+The Core Contract from v0.1.0 (Design Doc v0.4.1: MCP server, structured
+operations, drift-checked staging, secret scanning, Claude Code adapter)
+is unchanged — all 0.2 work is additive.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full 0.2 changelist and what's
+deferred to 0.3 (git merge driver).
 
 | Document | Purpose |
 |---|---|
@@ -42,7 +51,7 @@ go build -o agent-memory ./cmd/agent-memory
 
 # Verify
 ./agent-memory version
-# → 0.1.0
+# → 0.2.0
 
 # Read context
 ./agent-memory fetch                # bootstrap pack

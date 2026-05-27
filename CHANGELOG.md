@@ -5,7 +5,17 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Release 0.2 (in progress)
+## [Unreleased]
+
+_Working ground for Release 0.3. Nothing landed yet._
+
+## [0.2.0] — 2026-05-27
+
+Quality-of-life release on top of v0.1.0's Core Contract: git
+auto-stage, staging TTL sweeper + audit log, three new agent-runtime
+adapters, full-tree index rebuild, drift-recovery rebase, and a
+benchmark harness. Six closed milestone kits; one stretch (git merge
+driver) deferred to Release 0.3.
 
 ### Added
 
@@ -331,4 +341,5 @@ What 0.1 does NOT defend against:
 This is the first release; no migration path required. The on-disk
 schema (`meta/schema.yaml` version `0.4.1`) is the baseline.
 
+[0.2.0]: https://github.com/xChuCx/agent-memory/releases/tag/v0.2.0
 [0.1.0]: https://github.com/xChuCx/agent-memory/releases/tag/v0.1.0
