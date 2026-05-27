@@ -109,6 +109,11 @@ agent-memory apply STAGING_ID [--json] [--root DIR]
 agent-memory reject STAGING_ID [--json] [--root DIR]
         # Discard a staged proposal.
 
+agent-memory rebase STAGING_ID [--force] [--json] [--root DIR]
+        # Re-plan a staged proposal against the current disk state
+        # after target_drift. --force is required for soft drifts
+        # (acknowledges accepting the new base as planning input).
+
 agent-memory install <adapter> [--user-global] [--force] [--json]
         # Materialise agent-runtime adapter assets.
         # Supported: claude, cursor, agents, gemini.

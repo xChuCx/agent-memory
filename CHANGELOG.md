@@ -9,6 +9,29 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **M7 — `rebase` CLI.** Recovery path for staged proposals that hit
+  `target_drift` on apply (someone edited the base file between
+  stage and apply). `agent-memory rebase <id> [--force] [--json]`
+  re-runs each operation's Plan against the now-current disk bytes
+  and writes refreshed staged files + target hashes, so the next
+  `apply` succeeds.
+  - Classifies each drift as **hard block** (file/section gone —
+    rebase impossible) vs **soft drift** (section still resolves,
+    only its hash differs — rebase-able with `--force`).
+  - `--force` is mandatory for soft drifts: it's the user's
+    explicit ack that "the new base content is acceptable as the
+    re-planning input". Without it, rebase prints a diagnostic and
+    exits non-zero.
+  - Re-splice runs the **same** validation pipeline as
+    `propose_update`: ValidateMarkdown + secret scan. A malicious
+    or accidental edit that injects a credential into the base
+    is caught here (`reason: rebase_secret_detected`); no staged
+    files are written.
+  - Provenance and routing are NOT re-checked — those were locked
+    in at original stage time.
+  - Does NOT apply to disk, reset `staged_at`, or touch the
+    rejection audit log. Pure stage-area recovery.
+  - Documented in [docs/patterns/rebase.md](docs/patterns/rebase.md).
 - **M6 batch 2 — Three new agent-runtime adapters.** `agent-memory
   install` now ships four targets:
   - `claude` (existing) → `.claude/skills/agent-memory/SKILL.md`,
@@ -250,12 +273,12 @@ Tracked for **Release 0.2 / 0.3**:
   trace beyond the directory being gone.~~ Landed in
   [Unreleased](#unreleased--release-02-in-progress) —
   `meta/rejection-log.jsonl`.
-- **M7 — `rebase` command**: ~~index repair must be done by deleting
-  `meta/index.sqlite*` and re-running fetch (which auto-rebuilds).~~
-  `rebuild-index` landed in
-  [Unreleased](#unreleased--release-02-in-progress). `rebase` (move
-  staged proposals onto a new base after external edits) is still
-  deferred.
+- **M7 — `rebase` / `rebuild-index` commands**: ~~index repair must
+  be done by deleting `meta/index.sqlite*` and re-running fetch.~~
+  Both landed in
+  [Unreleased](#unreleased--release-02-in-progress). `rebuild-index`
+  rebuilds the FTS shadow; `rebase` re-plans staged proposals
+  against a new base after external edits.
 - **M7 — Git merge driver**: documented in manifest but `init
   --with-merge-driver` is currently a no-op.
 - **M8 — Benchmark / eval harness**: `internal/e2e/` has a latency
