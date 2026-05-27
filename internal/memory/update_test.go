@@ -142,7 +142,7 @@ func TestProposeUpdate_RecordDecision_Stages(t *testing.T) {
 				Path:         "decisions.md",
 				Heading:      "Use Postgres",
 				HeadingLevel: 2,
-				Content:      "## Use Postgres\n<!-- @id: use-postgres -->\n\nGo with Postgres.\n",
+				Content:      "## Use Postgres\n<!-- @id: use-postgres -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nGo with Postgres.\n",
 			},
 		},
 	}
@@ -381,7 +381,7 @@ func TestProposeUpdate_RejectsProvenanceMissing(t *testing.T) {
 					Path:         "decisions.md",
 					Heading:      "Adopt Foo",
 					HeadingLevel: 2,
-					Content:      "## Adopt Foo\n<!-- @id: adopt-foo -->\n\nFoo it is.\n",
+					Content:      "## Adopt Foo\n<!-- @id: adopt-foo -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nFoo it is.\n",
 				},
 			},
 			// no Sources
@@ -407,7 +407,7 @@ func TestProposeUpdate_RejectsForbiddenSourceType(t *testing.T) {
 					Path:         "decisions.md",
 					Heading:      "Adopt Bar",
 					HeadingLevel: 2,
-					Content:      "## Adopt Bar\n<!-- @id: adopt-bar -->\n\nBar it is.\n",
+					Content:      "## Adopt Bar\n<!-- @id: adopt-bar -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nBar it is.\n",
 				},
 			},
 		},

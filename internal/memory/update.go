@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -266,25 +267,66 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 				fmt.Sprintf("%s: %v", rel, err)), nil
 		}
 
-		// Per-section schema validation on the final bytes.
-		// Skipped when the category declares no SectionSchema.
+		// Per-section schema validation: validate ONLY sections this
+		// proposal created or modified. Legacy untouched sections from
+		// before the schema landed in DefaultSchema stay valid until the
+		// user edits them. Skipped when the category declares no
+		// SectionSchema.
+		//
+		// "Affected" is determined by comparing each section's DIRECT
+		// body (heading + immediate prose, excluding nested descendants)
+		// pre vs post. This matters when an op like `append_section`
+		// adds a child under an existing parent: the parent's full
+		// content range expands (new child is now inside it), but the
+		// parent's own body didn't change. directBody captures the
+		// parent-vs-descendants distinction.
 		cat := fileOps[rel][0].category
 		if cat.SectionSchema != nil {
-			sections, perr := agentmd.ParseSections(cur)
+			postSections, perr := agentmd.ParseSections(cur)
 			if perr != nil {
 				return reject(ReasonInvalidMarkdown,
 					fmt.Sprintf("%s: parse sections: %v", rel, perr)), nil
 			}
+			isWholeFileNew := len(preState[rel]) == 0
+			preBodyByID := map[string][]byte{}
+			if !isWholeFileNew {
+				preSections, _ := agentmd.ParseSections(preState[rel])
+				for i, s := range preSections {
+					if s.AnchorID != "" {
+						preBodyByID[s.AnchorID] = directBody(preState[rel], preSections, i)
+					}
+				}
+			}
 			var allViolations []schema.SectionViolation
-			for _, sec := range sections {
+			for i, sec := range postSections {
+				affected := isWholeFileNew
+				if !affected && sec.AnchorID != "" {
+					preBody, wasPresent := preBodyByID[sec.AnchorID]
+					postBody := directBody(cur, postSections, i)
+					affected = !wasPresent || !bytes.Equal(preBody, postBody)
+				}
+				if !affected {
+					continue
+				}
 				bodyStart := findSectionBodyStart(cur, sec.ByteStart)
 				body := cur[bodyStart:sec.ByteEnd]
 				v := schema.ValidateSection(cat, body)
+				// Annotate with the section's identity so the response
+				// message tells the agent WHICH section failed.
+				ident := sec.AnchorID
+				if ident == "" {
+					ident = fmt.Sprintf("%q (no @id)", sec.HeadingText)
+				} else {
+					ident = "@id=" + ident
+				}
+				for vi := range v {
+					v[vi].Message = fmt.Sprintf("section %s: %s", ident, v[vi].Message)
+				}
 				allViolations = append(allViolations, v...)
 			}
 			if len(allViolations) > 0 {
 				return rejectWithViolations(ReasonValidationFailed,
-					fmt.Sprintf("%s: %d section schema violations", rel, len(allViolations)),
+					fmt.Sprintf("%s: %d section schema violation(s)", rel, len(allViolations)),
 					allViolations), nil
 			}
 		}

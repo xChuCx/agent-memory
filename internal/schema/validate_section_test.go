@@ -173,6 +173,84 @@ Status: active
 	}
 }
 
+func TestParseFieldLines_BoldEmphasisFields(t *testing.T) {
+	// Markdown convention: bold-wrapped field labels. The parser
+	// should treat them as if the bold markers weren't there.
+	body := []byte(`**Date:** 2026-05-26
+**Status:** active
+**Confidence:** confirmed
+`)
+	fields := parseFieldLines(body)
+	want := map[string]string{
+		"Date":       "2026-05-26",
+		"Status":     "active",
+		"Confidence": "confirmed",
+	}
+	for k, v := range want {
+		if got := fields[k]; got != v {
+			t.Errorf("fields[%q] = %q, want %q (all fields: %+v)", k, got, v, fields)
+		}
+	}
+}
+
+func TestParseFieldLines_ItalicEmphasisFields(t *testing.T) {
+	// Markdown italic markers around field labels also parse cleanly.
+	body := []byte(`*Date:* 2026-05-26
+*Status:* active
+`)
+	fields := parseFieldLines(body)
+	if fields["Date"] != "2026-05-26" {
+		t.Errorf("italic Date: got %q, want 2026-05-26 (full: %+v)", fields["Date"], fields)
+	}
+	if fields["Status"] != "active" {
+		t.Errorf("italic Status: got %q", fields["Status"])
+	}
+}
+
+func TestParseFieldLines_MixedEmphasisAndPlain(t *testing.T) {
+	// Realistic decisions.md body: some fields bold, some plain, some
+	// followed by free-prose body text.
+	body := []byte(`**Date:** 2026-05-27
+Status: active
+**Confidence:** confirmed
+
+We will use Postgres for the transactional store.
+
+- Pro: ops maturity
+- Con: heavier dependency
+`)
+	fields := parseFieldLines(body)
+	if fields["Date"] != "2026-05-27" {
+		t.Errorf("Date: got %q", fields["Date"])
+	}
+	if fields["Status"] != "active" {
+		t.Errorf("Status: got %q", fields["Status"])
+	}
+	if fields["Confidence"] != "confirmed" {
+		t.Errorf("Confidence: got %q", fields["Confidence"])
+	}
+	// Bullets must not be misread as fields.
+	if _, present := fields["Pro"]; present {
+		t.Errorf("bullet 'Pro:' was misread as a field: %+v", fields)
+	}
+}
+
+func TestParseFieldLines_AsteriskBulletStillSkipped(t *testing.T) {
+	// `* foo` (with space) is still a bullet, despite the parser now
+	// accepting `**Date:**` patterns. The mandatory-space rule keeps
+	// the distinction.
+	body := []byte(`* a bullet: with colon
+**Date:** 2026-05-26
+`)
+	fields := parseFieldLines(body)
+	if _, present := fields["a bullet"]; present {
+		t.Errorf("`* foo` bullet was misread as a field: %+v", fields)
+	}
+	if fields["Date"] != "2026-05-26" {
+		t.Errorf("Date should still parse after a bullet line: %q", fields["Date"])
+	}
+}
+
 func TestParseFieldLines_DuplicatesFirstWins(t *testing.T) {
 	body := []byte(`Date: 2026-05-26
 Date: 1900-01-01

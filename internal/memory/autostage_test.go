@@ -366,7 +366,7 @@ func TestApplyStaged_AutoStagesOnApply(t *testing.T) {
 					Path:         "decisions.md",
 					Heading:      "Auto-stage",
 					HeadingLevel: 2,
-					Content:      "## Auto-stage\n<!-- @id: auto-stage -->\n\nDecided.\n",
+					Content:      "## Auto-stage\n<!-- @id: auto-stage -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nDecided.\n",
 				},
 			},
 		}, deps)

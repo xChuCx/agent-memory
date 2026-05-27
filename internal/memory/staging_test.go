@@ -28,7 +28,7 @@ func stageDecision(t *testing.T) (memDir, stagingID string, deps UpdateDeps) {
 					Path:         "decisions.md",
 					Heading:      "Stage Test",
 					HeadingLevel: 2,
-					Content:      "## Stage Test\n<!-- @id: stage-test -->\n\nDecided.\n",
+					Content:      "## Stage Test\n<!-- @id: stage-test -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nDecided.\n",
 				},
 			},
 		}, deps)
@@ -93,7 +93,7 @@ func TestListStaged_ReturnsStagedChronological(t *testing.T) {
 					Path:         "decisions.md",
 					Heading:      "Second",
 					HeadingLevel: 2,
-					Content:      "## Second\n<!-- @id: second -->\n\nMore.\n",
+					Content:      "## Second\n<!-- @id: second -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nMore.\n",
 				},
 			},
 		}, deps)

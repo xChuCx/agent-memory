@@ -158,6 +158,27 @@ func defaultSchema() *Schema {
 					AllowedSourceTypes:   []string{"file", "test", "user"},
 					ForbiddenSourceTypes: []string{"external", "inference"},
 				},
+				// Decisions carry structured metadata. The orchestrator
+				// validates only sections this proposal created or
+				// modified, so legacy sections written before this
+				// schema landed stay untouched until the user edits
+				// them.
+				//
+				// Required fields per section:
+				//   Date       — ISO 8601 date (when the decision was made)
+				//   Status     — active | superseded | deprecated | proposed
+				//   Confidence — confirmed | inferred | user-provided
+				//
+				// The parser accepts plain (`Date: ...`), bold
+				// (`**Date:** ...`), and italic (`*Date:* ...`) field
+				// shapes interchangeably.
+				SectionSchema: &SectionSchema{
+					PerSectionRequiredFields: []FieldSpec{
+						{Name: "Date", Pattern: `^\d{4}-\d{2}-\d{2}$`},
+						{Name: "Status", Enum: []string{"active", "superseded", "deprecated", "proposed"}},
+						{Name: "Confidence", Enum: []string{"confirmed", "inferred", "user-provided"}},
+					},
+				},
 			},
 			"pitfalls": {
 				File:              "pitfalls.md",

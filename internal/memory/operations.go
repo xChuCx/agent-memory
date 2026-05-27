@@ -606,3 +606,38 @@ func findSectionBodyStart(src []byte, sectionStart int) int {
 	}
 	return i
 }
+
+// directBody returns the bytes of the section at sections[idx]'s body
+// only — heading and optional @id anchor stripped off, descendant
+// (deeper-level) sections excluded.
+//
+// Used by the orchestrator's "affected sections" check (update.go):
+// when an op adds a new child under an existing parent, the parent's
+// full content range expands to include the new child, but the parent's
+// own authored body didn't change. directBody captures that distinction.
+//
+// sections must be the slice ParseSections returned over src; the
+// document-order invariant lets directBody find the first descendant
+// in O(N) without a tree lookup.
+func directBody(src []byte, sections []agentmd.Section, idx int) []byte {
+	if idx < 0 || idx >= len(sections) {
+		return nil
+	}
+	sec := sections[idx]
+	bodyStart := findSectionBodyStart(src, sec.ByteStart)
+	bodyEnd := sec.ByteEnd
+	// Walk subsequent sections in document order. The first one whose
+	// ByteStart sits inside sec's range is sec's first descendant; cut
+	// the body off right before it.
+	for j := idx + 1; j < len(sections); j++ {
+		if sections[j].ByteStart >= sec.ByteEnd {
+			break // sections[j] is outside sec entirely
+		}
+		bodyEnd = sections[j].ByteStart
+		break
+	}
+	if bodyStart > bodyEnd {
+		return nil
+	}
+	return src[bodyStart:bodyEnd]
+}

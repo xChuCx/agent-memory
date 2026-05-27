@@ -80,7 +80,7 @@ func TestRunProposeUpdate_StagesRecordDecision(t *testing.T) {
 				Path:         "decisions.md",
 				Heading:      "MCP Test Decision",
 				HeadingLevel: 2,
-				Content:      "## MCP Test Decision\n<!-- @id: mcp-test-decision -->\n\nDecided here.\n",
+				Content:      "## MCP Test Decision\n<!-- @id: mcp-test-decision -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nDecided here.\n",
 			},
 		},
 	})

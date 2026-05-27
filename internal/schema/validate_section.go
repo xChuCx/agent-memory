@@ -115,24 +115,66 @@ func validateFieldValue(fs FieldSpec, value string) []SectionViolation {
 // Duplicate field names: the first occurrence wins. This is consistent
 // with the ADR-like format from design doc §10.4 where each field appears
 // once.
+//
+// Accepted shapes (all yield Name=Date, Value=2026-05-27):
+//
+//	Date: 2026-05-27
+//	**Date:** 2026-05-27        ← markdown bold
+//	*Date:* 2026-05-27          ← markdown italic
+//
+// Rejected (treated as non-field content):
+//
+//	- foo                       ← bullet (mandatory space after marker)
+//	* foo                       ← bullet
+//	# Heading                   ← heading
+//	> blockquote                ← blockquote
+//	    continuation            ← indented (continuation / code)
+//	https://example.com:8080    ← `looksLikeFieldName` rejects the URL scheme
 func parseFieldLines(body []byte) map[string]string {
 	fields := map[string]string{}
 	sc := bufio.NewScanner(bytes.NewReader(body))
 	for sc.Scan() {
 		line := sc.Text()
-		// Skip lines that start with whitespace (continuation, list item, etc.).
-		if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '-' || line[0] == '*' {
+		if line == "" {
 			continue
 		}
-		idx := strings.Index(line, ":")
+		// Skip indented continuation, headings, blockquotes.
+		switch line[0] {
+		case ' ', '\t', '#', '>':
+			continue
+		}
+		// Bullet markers require the space-after to qualify. `**Bold`
+		// (bold emphasis) and `*italic` (italic emphasis) start with
+		// the same marker but no separating space, and we want those
+		// to parse.
+		if len(line) >= 2 && (line[0] == '-' || line[0] == '*') && line[1] == ' ' {
+			continue
+		}
+
+		// Strip leading markdown emphasis (** or *). Walk one or two
+		// leading asterisks; the closing pair sits inside / after the
+		// name and is stripped below.
+		work := line
+		for len(work) > 0 && work[0] == '*' {
+			work = work[1:]
+		}
+
+		idx := strings.Index(work, ":")
 		if idx <= 0 {
 			continue
 		}
-		name := strings.TrimSpace(line[:idx])
+		name := strings.TrimSpace(work[:idx])
+		// Strip closing emphasis from the name half ("Date**" → "Date").
+		name = strings.TrimSpace(strings.TrimRight(name, "*"))
 		if !looksLikeFieldName(name) {
 			continue
 		}
-		value := strings.TrimSpace(line[idx+1:])
+		value := strings.TrimSpace(work[idx+1:])
+		// Strip emphasis from BOTH sides of the value: the closing
+		// bold/italic markers from "**Date:** value" sit at the start
+		// of the value half; a value-side trailing emphasis variant
+		// like "value**" sits at the end. Trim removes both.
+		value = strings.TrimSpace(strings.Trim(value, "*"))
 		if _, exists := fields[name]; !exists {
 			fields[name] = value
 		}

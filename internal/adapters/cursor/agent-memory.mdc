@@ -109,7 +109,7 @@ durable decisions trace to code, tests, or the user.
         "path": "decisions.md",
         "heading": "Use Postgres for Transactional Storage",
         "heading_level": 2,
-        "content": "## Use Postgres for Transactional Storage\n<!-- @id: use-postgres -->\n\n**Date:** 2026-05-27\n**Status:** Active\n**Confidence:** confirmed\n\nWe will use Postgres for the transactional store.\n"
+        "content": "## Use Postgres for Transactional Storage\n<!-- @id: use-postgres -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nWe will use Postgres for the transactional store.\n"
       }
     ]
   }

@@ -9,6 +9,34 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **Section schema maturity.** Real `SectionSchema` lands for the
+  `decisions` category in `DefaultSchema()`: three required fields
+  per section — Date (ISO 8601), Status (enum: active / superseded /
+  deprecated / proposed), Confidence (enum: confirmed / inferred /
+  user-provided). The validator that was wired but dormant in v0.1.0
+  now does real work for new + modified decisions.
+  - **Parser handles markdown emphasis.** `**Date:** 2026-05-27`,
+    `*Date:* 2026-05-27`, and plain `Date: 2026-05-27` all parse
+    identically. Bullet detection still works (mandatory space after
+    the marker distinguishes `* foo` from `**bold**`).
+  - **Affected-only validation.** The orchestrator validates only
+    sections this proposal *created or modified*, using a
+    `directBody` comparison (heading + immediate prose, excluding
+    nested descendants). Legacy decisions written before the schema
+    landed stay valid until edited; an `append_section` that adds a
+    child under a parent doesn't trigger spurious "parent's full
+    range changed" re-validation.
+  - **Per-violation identity in error messages.** Rejection messages
+    now name the offending section: `section @id=use-postgres:
+    required field missing` so the agent can fix the right one when
+    multiple sections are involved.
+  - Adapter docs (SKILL.md, AGENTS.md, GEMINI.md, cursor MDC) updated
+    to use lowercase enum values (`Status: active`, not `Active`).
+  - Migration: forward-only safe. Existing v0.2.0 repos with their
+    own `meta/schema.yaml` keep working unchanged. Fresh
+    `agent-memory init` writes the new defaults. Existing repos
+    opt in by adding `section_schema:` blocks to their schema.yaml.
+  - Documented in [docs/patterns/section-schema.md](docs/patterns/section-schema.md).
 - **Security hardening — allowlist limits + PII detection.** Two new
   guardrails on top of v0.1.0's regex + entropy secret scanner:
   - **Allowlist size limits** (`manifest.security.allowlist_limits`):

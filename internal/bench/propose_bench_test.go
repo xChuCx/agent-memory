@@ -81,7 +81,7 @@ func BenchmarkProposeUpdate_StageDecision(b *testing.B) {
 						Heading:      fmt.Sprintf("Bench Decision %d", i),
 						HeadingLevel: 2,
 						Content: fmt.Sprintf(
-							"## Bench Decision %d\n<!-- @id: bench-%d -->\n\nbench body %d.\n",
+							"## Bench Decision %d\n<!-- @id: bench-%d -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nbench body %d.\n",
 							i, i, i),
 					},
 				},

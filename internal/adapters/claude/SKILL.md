@@ -129,7 +129,7 @@ User and you concluded on a database choice:
         "path": "decisions.md",
         "heading": "Use Postgres for Transactional Storage",
         "heading_level": 2,
-        "content": "## Use Postgres for Transactional Storage\n<!-- @id: use-postgres -->\n\n**Date:** 2026-05-27\n**Status:** Active\n**Confidence:** confirmed\n\nWe will use Postgres for the transactional store. SQLite was considered but the team prefers Postgres's operational maturity.\n"
+        "content": "## Use Postgres for Transactional Storage\n<!-- @id: use-postgres -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nWe will use Postgres for the transactional store. SQLite was considered but the team prefers Postgres's operational maturity.\n"
       }
     ]
   }

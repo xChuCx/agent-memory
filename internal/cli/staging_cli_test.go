@@ -46,7 +46,7 @@ func stagingFixture(t *testing.T) (root, stagingID string) {
 					Path:         "decisions.md",
 					Heading:      "CLI Test",
 					HeadingLevel: 2,
-					Content:      "## CLI Test\n<!-- @id: cli-test -->\n\nDecided.\n",
+					Content:      "## CLI Test\n<!-- @id: cli-test -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nDecided.\n",
 				},
 			},
 		}, memory.UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})

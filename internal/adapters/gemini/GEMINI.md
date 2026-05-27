@@ -125,7 +125,7 @@ Do **not** retry blind. Read the message and fix the root cause first.
         "path": "decisions.md",
         "heading": "Use Postgres for Transactional Storage",
         "heading_level": 2,
-        "content": "## Use Postgres for Transactional Storage\n<!-- @id: use-postgres -->\n\n**Date:** 2026-05-27\n**Status:** Active\n\nWe will use Postgres.\n"
+        "content": "## Use Postgres for Transactional Storage\n<!-- @id: use-postgres -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nWe will use Postgres.\n"
       }
     ]
   }

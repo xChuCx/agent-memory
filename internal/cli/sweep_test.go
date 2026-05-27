@@ -55,7 +55,7 @@ func sweepFixture(t *testing.T) (root, oldID, youngID string) {
 						Path:         "decisions.md",
 						Heading:      "Sweep " + rationale,
 						HeadingLevel: 2,
-						Content:      "## Sweep " + rationale + "\n<!-- @id: sweep-" + rationale + " -->\n\nbody\n",
+						Content:      "## Sweep " + rationale + "\n<!-- @id: sweep-" + rationale + " -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nbody\n",
 					},
 				},
 			}, deps)
