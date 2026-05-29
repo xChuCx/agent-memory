@@ -234,6 +234,14 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Changed
 
+- **`fetch` now matches ANY query term (OR), not all (AND).** Multi-word
+  natural-language queries ("how does token refresh work") previously
+  required every word to co-occur in one section and so matched almost
+  nothing — the main recall problem dogfooding surfaced. `sanitizeFTSMatch`
+  now OR-joins the quoted terms; BM25 ranks the partial matches (more / rarer
+  terms → higher) and the budget keeps the top. The bootstrap current-state
+  files are still prepended first, so OR can't crowd them out.
+
 - `internal/cli.ProgramVersion` is now `var` (was `const`).
   Pre-built v0.2.0 binaries still report `0.2.0` because the
   ldflags stamp is applied per build; nothing changes for users.
@@ -254,9 +262,8 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   the FTS5 `MATCH` parser and failed with `SQL logic error` /
   `no such column`. The query is now treated as natural language:
   `Search` tokenizes it and quotes each term (`sanitizeFTSMatch`), so
-  metacharacters match literally; terms are implicitly AND-ed. A query
-  with no alphanumeric content is treated like an empty query. Found by
-  dogfooding.
+  metacharacters match literally. A query with no alphanumeric content is
+  treated like an empty query. Found by dogfooding.
 
 ## [0.2.0] — 2026-05-27
 

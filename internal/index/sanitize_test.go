@@ -7,13 +7,13 @@ func TestSanitizeFTSMatch(t *testing.T) {
 		"":                     "",
 		"   ":                  "",
 		"---":                  "",
-		"refresh token":        `"refresh" "token"`,
-		"auto-apply":           `"auto" "apply"`,
-		"memory.fetch_context": `"memory" "fetch" "context"`,
-		"AND OR NEAR":          `"AND" "OR" "NEAR"`, // reserved words → literal terms
-		`a "b" c`:              `"a" "b" "c"`,       // embedded quotes/operators stripped
-		"x:y (z)":              `"x" "y" "z"`,       // column-filter + parens neutralized
-		"café 2.0":             `"café" "2" "0"`,    // unicode letters survive
+		"refresh token":        `"refresh" OR "token"`,
+		"auto-apply":           `"auto" OR "apply"`,
+		"memory.fetch_context": `"memory" OR "fetch" OR "context"`,
+		"AND OR NEAR":          `"AND" OR "OR" OR "NEAR"`, // reserved words → literal terms
+		`a "b" c`:              `"a" OR "b" OR "c"`,       // embedded quotes/operators stripped
+		"x:y (z)":              `"x" OR "y" OR "z"`,       // column-filter + parens neutralized
+		"café 2.0":             `"café" OR "2" OR "0"`,    // unicode letters survive
 	}
 	for in, want := range cases {
 		if got := sanitizeFTSMatch(in); got != want {
@@ -46,6 +46,29 @@ func TestSearch_SpecialCharsDoNotCrash(t *testing.T) {
 	}
 	if len(res) == 0 {
 		t.Error("auto-apply should match the 'auto ... apply' section")
+	}
+}
+
+// TestSearch_MatchesAnyTerm_OR is the recall regression: a multi-word query
+// where only ONE word is present must still match (implicit-AND used to
+// return nothing here). BM25 then ranks across whatever matched.
+func TestSearch_MatchesAnyTerm_OR(t *testing.T) {
+	idx, ctx := openTestIndex(t)
+	if err := idx.UpsertSections(ctx, []SectionDoc{
+		sectionDoc("modules/auth.md", "rt", "Refresh", "refresh tokens rotate on every successful use"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// "refresh" is present; "zzznotpresent" matches nothing. OR → 1 hit.
+	res, err := idx.Search(ctx, "refresh zzznotpresent", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("OR query should match on 'refresh' alone, got %d hits", len(res))
+	}
+	if res[0].SectionID != "rt" {
+		t.Errorf("SectionID = %q, want rt", res[0].SectionID)
 	}
 }
 

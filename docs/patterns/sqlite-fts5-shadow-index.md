@@ -95,10 +95,12 @@ LIMIT ?;
   FTS5 metacharacters (`-`, `:`, `"`, `*`, `AND`/`OR`/`NEAR`) reach the
   query parser and crash with `SQL logic error` / `no such column`.
   `sanitizeFTSMatch` (query.go) extracts `[\p{L}\p{N}]+` runs and
-  double-quotes each as a literal term (implicit AND between them); a query
-  with no alphanumeric content becomes empty (no rows). The full section
-  body (`content` column) is also selected so content-level ranking signals
-  can inspect it.
+  double-quotes each as a literal term, OR-joined so a multi-word query
+  retrieves the best partial matches (BM25 ranks them; match-all would make
+  natural-language queries return almost nothing); a query with no
+  alphanumeric content becomes empty (no rows). The full section body
+  (`content` column) is also selected so content-level ranking signals can
+  inspect it.
 
 ## Driver
 

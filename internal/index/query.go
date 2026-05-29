@@ -44,8 +44,9 @@ var ErrNotFound = errors.New("index: row not found")
 // sanitizeFTSMatch tokenizes it and quotes each term, so punctuation,
 // hyphens (`auto-apply`), and reserved words (AND/OR/NEAR) are matched
 // literally instead of crashing the parser with a syntax/"no such column"
-// error. Terms are implicitly AND-ed (FTS5 default). A query with no
-// alphanumeric tokens returns no results without error — callers (the
+// error. Terms are OR-ed (match any) and ranked by BM25, so a multi-word
+// natural-language query retrieves the best partial matches. A query with
+// no alphanumeric tokens returns no results without error — callers (the
 // fetch pipeline) handle the empty case by returning the bootstrap pack.
 func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
 	match := sanitizeFTSMatch(query)
@@ -90,9 +91,15 @@ func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchRe
 // FTS5 MATCH expression. It extracts maximal letter/digit runs as terms and
 // wraps each in double quotes, so every term is a literal phrase: FTS5
 // operators (AND/OR/NOT/NEAR), column filters (`x:y`), prefixes (`*`),
-// hyphens, and quotes can't reach the parser. Terms are space-joined, which
-// FTS5 reads as implicit AND. Returns "" when the query has no alphanumeric
-// content (caller treats this like an empty query).
+// hyphens, and quotes can't reach the parser. Returns "" when the query has
+// no alphanumeric content (caller treats this like an empty query).
+//
+// Terms are joined with OR, not AND: a natural-language query ("how does
+// token refresh work") should retrieve the best PARTIAL matches, not require
+// every word in one section. BM25 then ranks — a section matching more (and
+// rarer) terms scores higher — and the budget greedily keeps the top of that
+// ranking. Implicit-AND made multi-word queries match almost nothing, which
+// dogfooding flagged as the main recall problem.
 //
 // Terms contain only [\p{L}\p{N}] by construction, so there are no embedded
 // double quotes to escape.
@@ -107,7 +114,7 @@ func sanitizeFTSMatch(query string) string {
 			return
 		}
 		if !first {
-			b.WriteByte(' ')
+			b.WriteString(" OR ")
 		}
 		b.WriteByte('"')
 		b.WriteString(term.String())
