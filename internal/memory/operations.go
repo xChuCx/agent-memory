@@ -691,15 +691,14 @@ func directBody(src []byte, sections []agentmd.Section, idx int) []byte {
 	sec := sections[idx]
 	bodyStart := findSectionBodyStart(src, sec.ByteStart)
 	bodyEnd := sec.ByteEnd
-	// Walk subsequent sections in document order. The first one whose
-	// ByteStart sits inside sec's range is sec's first descendant; cut
-	// the body off right before it.
-	for j := idx + 1; j < len(sections); j++ {
-		if sections[j].ByteStart >= sec.ByteEnd {
-			break // sections[j] is outside sec entirely
-		}
-		bodyEnd = sections[j].ByteStart
-		break
+	// ParseSections returns document order, so sections[idx+1] is the
+	// immediately-following section. If it starts inside sec's range it
+	// is sec's first descendant — cut the body off right before it.
+	// (A parent's first child always directly follows it in document
+	// order, before any sibling.) Anything at/after sec.ByteEnd is a
+	// sibling/ancestor and leaves the body running to sec.ByteEnd.
+	if next := idx + 1; next < len(sections) && sections[next].ByteStart < sec.ByteEnd {
+		bodyEnd = sections[next].ByteStart
 	}
 	if bodyStart > bodyEnd {
 		return nil

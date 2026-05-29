@@ -162,10 +162,11 @@ func TestApply_RegeneratesIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(filepath.Join(memDir, "index.md"))
-	if !strings.Contains(string(before), "(no entries yet)") &&
-		!strings.Contains(string(before), "no entries yet") {
-		// decisions.md seed is just "# Decisions\n" → no anchored sections.
-		// Topic map should report "no entries yet" for decisions.
+	// The decisions.md seed is just "# Decisions\n" — no anchored
+	// sections — so the topic map reports "no entries yet" before the
+	// apply.
+	if !strings.Contains(string(before), "no entries yet") {
+		t.Errorf("seed index should report 'no entries yet' for decisions:\n%s", before)
 	}
 
 	// Apply a decision (stages → apply).
