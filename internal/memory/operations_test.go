@@ -353,6 +353,52 @@ func TestAppendToSection_Targets_ResolvablePolicy(t *testing.T) {
 	}
 }
 
+func TestAppendToSection_SpacingAroundNextHeading(t *testing.T) {
+	// Append a bullet to A; it must follow A's body directly and leave a
+	// blank line before ## B (not glue to the heading).
+	src := []byte("# Doc\n<!-- @id: doc -->\n\n## A\n<!-- @id: a -->\n\nbody A\n\n## B\n<!-- @id: b -->\n\nbody B\n")
+	op := &AppendToSection{FilePath: "f.md", SectionID: "a", Content: []byte("- new\n")}
+	plan, err := op.Plan(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := agentmd.Splice(src, []agentmd.SpliceOp{plan})
+	got := string(out)
+	if !strings.Contains(got, "body A\n- new\n") {
+		t.Errorf("bullet should follow body A directly:\n%s", got)
+	}
+	if !strings.Contains(got, "- new\n\n## B") {
+		t.Errorf("expected a blank line between the bullet and ## B:\n%s", got)
+	}
+	if strings.Contains(got, "- new\n## B") {
+		t.Errorf("bullet glued to ## B (missing blank line):\n%s", got)
+	}
+}
+
+func TestAppendSection_BlankLineBeforeNewHeading(t *testing.T) {
+	// Source ends with a single trailing newline; the new heading must be
+	// preceded by a blank line, not abut the previous line.
+	src := []byte("# Doc\n<!-- @id: doc -->\n\nintro\n")
+	op := &AppendSection{
+		FilePath: "f.md",
+		Heading:  "New",
+		Level:    2,
+		Content:  []byte("## New\n<!-- @id: new -->\n\nbody\n"),
+	}
+	plan, err := op.Plan(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := agentmd.Splice(src, []agentmd.SpliceOp{plan})
+	got := string(out)
+	if !strings.Contains(got, "intro\n\n## New") {
+		t.Errorf("expected a blank line before the new heading:\n%s", got)
+	}
+	if strings.Contains(got, "intro\n## New") {
+		t.Errorf("new heading glued to previous line (missing blank line):\n%s", got)
+	}
+}
+
 // ---------- ReplaceSectionContent ----------
 
 func TestReplaceSectionContent_KeepsHeadingAndAnchor(t *testing.T) {

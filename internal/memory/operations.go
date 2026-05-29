@@ -506,20 +506,11 @@ func (op *AppendSection) Plan(src []byte) (agentmd.SpliceOp, error) {
 		}
 	}
 
-	// Newline guard: if the insertion point sits at EOF and src lacks a
-	// trailing newline, prepend one so the new heading lands on its own
-	// line. Mid-file positions are always after a '\n' (we splice at the
-	// start of a heading line), so no guard needed there.
-	insert := op.Content
-	if insertAt == len(src) && len(src) > 0 && src[len(src)-1] != '\n' {
-		insert = append([]byte("\n"), insert...)
-	}
-
-	return agentmd.SpliceOp{
-		ByteStart:   insertAt,
-		ByteEnd:     insertAt,
-		Replacement: insert,
-	}, nil
+	// Insert as a new section: one blank line before the new heading and a
+	// blank line after it before whatever follows (or a single newline at
+	// EOF). spliceAppend normalizes the seam so the heading never abuts the
+	// previous section's last line.
+	return spliceAppend(src, insertAt, op.Content, "\n\n"), nil
 }
 
 // ============================================================================
@@ -567,14 +558,13 @@ func (op *AppendToSection) Plan(src []byte) (agentmd.SpliceOp, error) {
 	if err != nil {
 		return agentmd.SpliceOp{}, fmt.Errorf("append_to_section: %w", err)
 	}
-	// Section ends at byte before next heading (or EOF). The trailing
-	// newline of the section's last line is already there; insert at
-	// ByteEnd places content cleanly between sections.
-	return agentmd.SpliceOp{
-		ByteStart:   sec.ByteEnd,
-		ByteEnd:     sec.ByteEnd,
-		Replacement: op.Content,
-	}, nil
+	// Append to the END of the section's CONTENT — after its last non-blank
+	// line, not after its trailing blank line. Inserting at sec.ByteEnd
+	// (which sits past the blank line that separates this section from the
+	// next heading) would detach the new text from the body and glue it to
+	// the following heading. lead="\n" keeps the new text part of this
+	// section; spliceAppend restores the blank line before the next heading.
+	return spliceAppend(src, sec.ByteEnd, op.Content, "\n"), nil
 }
 
 // ============================================================================
@@ -721,6 +711,45 @@ func headingLineEnd(src []byte, sectionStart int) int {
 // isArchivePath reports whether rel (forward-slash) is inside archive/.
 func isArchivePath(rel string) bool {
 	return strings.HasPrefix(rel, "archive/")
+}
+
+// spliceAppend builds a whitespace-normalized insertion of `block` at the end
+// of the content that precedes `boundary` — the byte offset of the next
+// heading, or len(src) at EOF.
+//
+// The naive "insert at sec.ByteEnd" splices AFTER a section's trailing blank
+// line, which detaches the new text from the section body and glues it to the
+// following heading. Instead this finds the last non-whitespace byte before
+// `boundary`, drops the existing trailing whitespace there, and re-emits a
+// clean seam: `lead` between the prior content and the block, then one blank
+// line before the following heading (or a single newline at EOF). The block's
+// own trailing newlines are trimmed first so separation is exact. Only the
+// few bytes at the seam are rewritten; everything else is byte-preserved.
+//
+// lead is "\n" for append_to_section (the block continues the section's
+// content) and "\n\n" for append_section (a new section needs a blank line
+// before its heading).
+func spliceAppend(src []byte, boundary int, block []byte, lead string) agentmd.SpliceOp {
+	contentEnd := boundary
+	for contentEnd > 0 && isHspaceOrNewline(src[contentEnd-1]) {
+		contentEnd--
+	}
+	repl := bytes.TrimRight(block, "\r\n")
+	if contentEnd > 0 {
+		repl = append([]byte(lead), repl...)
+	}
+	if boundary < len(src) {
+		repl = append(repl, '\n', '\n') // blank line before the following heading
+	} else {
+		repl = append(repl, '\n') // EOF: single terminating newline
+	}
+	return agentmd.SpliceOp{ByteStart: contentEnd, ByteEnd: boundary, Replacement: repl}
+}
+
+// isHspaceOrNewline reports whether b is ASCII horizontal whitespace or a
+// line break — the bytes spliceAppend trims when locating content end.
+func isHspaceOrNewline(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
 // ============================================================================

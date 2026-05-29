@@ -9,6 +9,19 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **`agent-memory propose` — CLI write path.** Create proposals without an
+  MCP server, through the same `memory.ProposeUpdate` pipeline (validation,
+  secret/PII scan, provenance, routing). Flags cover the common
+  single-operation case (`--intent --op --path --section-id --heading
+  --heading-level --content/--content-file/- --source type:ref
+  --confidence --rationale …`); `--from-json -` takes a full multi-operation
+  `ProposeRequest` (rejecting unknown fields). `--apply` immediately applies
+  a result that would otherwise stage — the developer running the command is
+  the reviewer — by composing the existing `ApplyStaged` (drift re-check +
+  index + git auto-stage); the agent-facing MCP path keeps its review gate.
+  `--json` output; non-zero exit on rejection. See
+  [docs/patterns/cli-propose.md](docs/patterns/cli-propose.md).
+
 - **Staging-ID prefix matching + `--latest`.** `review`, `apply`,
   `reject`, and `rebase` no longer require the full 30-character
   staging id. `memory.ResolveStagingID` accepts a full id, any unique
@@ -264,6 +277,14 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `Search` tokenizes it and quotes each term (`sanitizeFTSMatch`), so
   metacharacters match literally. A query with no alphanumeric content is
   treated like an empty query. Found by dogfooding.
+
+- **`append_section` / `append_to_section` no longer abut the next
+  heading.** Inserting at the section's `ByteEnd` placed the new text after
+  the section's trailing blank line, detaching it from the body and gluing
+  it to the following heading (visible in `review --diff` dogfooding). A
+  new `spliceAppend` helper inserts after the last non-blank line and
+  re-emits a clean seam — one blank line before the next heading (single
+  trailing newline at EOF), byte-preserving elsewhere. Found by dogfooding.
 
 ## [0.2.0] — 2026-05-27
 

@@ -109,8 +109,17 @@ agent-memory mcp [--root DIR]
         # Start the MCP server (stdio). Exposes memory.fetch_context and
         # memory.propose_update.
 
-agent-memory review [STAGING_ID] [--show] [--json] [--root DIR]
-        # List staged proposals or inspect one.
+agent-memory propose --intent INTENT --op OP --path PATH [op flags...]
+                     [--content STR | --content-file FILE|-] [--source type:ref]
+                     [--confidence C] [--apply] [--from-json FILE|-] [--json]
+        # Create a proposal WITHOUT an MCP server, through the same
+        # validate / secret-scan / route pipeline. --from-json takes a full
+        # multi-op ProposeRequest; --apply immediately lands a result that
+        # would otherwise stage (you are the reviewer).
+
+agent-memory review [STAGING_ID] [--diff] [--show] [--json] [--root DIR]
+        # List staged proposals or inspect one. --diff shows a unified diff
+        # of each staged file vs the current on-disk version.
 
 agent-memory apply STAGING_ID [--json] [--root DIR]
         # Re-validate drift and apply a staged proposal.
