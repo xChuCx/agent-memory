@@ -46,6 +46,22 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   multipliers. See
   [docs/patterns/context-pack-dedup.md](docs/patterns/context-pack-dedup.md).
 
+- **Fetch ranking signals wired (§20.4).** Three previously-unimplemented
+  signals now re-rank search hits:
+  - **active-branch reference ×1.3** — a section whose body mentions the
+    current branch (suppressed for generic `main`/`master`/… branches).
+  - **decision/pitfall → changed file ×1.4** — a `decisions.md` or
+    `pitfalls.md` section citing a file with uncommitted changes
+    (`git status`), surfacing prior art for what you're editing.
+  - **low-confidence ×0.8** — a section declaring `Confidence:`
+    inferred/stale/unknown is downweighted vs `confirmed`.
+
+  Content-level signals read the indexed section body, now returned as
+  `index.SearchResult.Content`; `ActiveBranch` + `ChangedFiles` (new
+  `git.ChangedFiles`) are resolved by the CLI/MCP caller and passed in
+  `FetchDeps`. Multipliers are package constants. See
+  [docs/patterns/ranking-signals.md](docs/patterns/ranking-signals.md).
+
 ### Changed (contract)
 
 - **propose_update output shapes (§15.2).** Applied responses now carry

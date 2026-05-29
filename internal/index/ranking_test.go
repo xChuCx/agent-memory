@@ -1,6 +1,7 @@
 package index
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -128,6 +129,107 @@ func TestApplyRankingSignals_EmptyScopeStringIgnored(t *testing.T) {
 	out := ApplyRankingSignals(results, RankingContext{Scope: []string{""}})
 	if out[0].Score != rawScore {
 		t.Errorf("empty scope shouldn't apply boost; got %v", out[0].Score)
+	}
+}
+
+func mkResultContent(file, content string) SearchResult {
+	return SearchResult{File: file, SectionID: "x", Score: rawScore, Content: content}
+}
+
+func TestApplyRankingSignals_ActiveBranchBoost(t *testing.T) {
+	results := []SearchResult{
+		mkResultContent("decisions.md", "We deferred this until the feature/auth-rotation branch lands."),
+		mkResultContent("modules/payments.md", "Unrelated payments note."),
+	}
+	out := ApplyRankingSignals(results, RankingContext{ActiveBranch: "feature/auth-rotation"})
+	if out[0].File != "decisions.md" {
+		t.Errorf("branch-referencing section should rank first, got %s", out[0].File)
+	}
+	for _, r := range out {
+		if r.File == "decisions.md" && r.Score != rawScore*ActiveBranchBoost {
+			t.Errorf("active-branch score = %v, want %v", r.Score, rawScore*ActiveBranchBoost)
+		}
+		if r.File == "modules/payments.md" && r.Score != rawScore {
+			t.Errorf("non-referencing score = %v, want unchanged %v", r.Score, rawScore)
+		}
+	}
+}
+
+func TestApplyRankingSignals_ActiveBranchGenericIgnored(t *testing.T) {
+	// "main" mentioned in content must NOT boost — too generic.
+	results := []SearchResult{mkResultContent("decisions.md", "the main entry point lives in cmd/")}
+	out := ApplyRankingSignals(results, RankingContext{ActiveBranch: "main"})
+	if out[0].Score != rawScore {
+		t.Errorf("generic branch must not boost; score = %v, want %v", out[0].Score, rawScore)
+	}
+}
+
+func TestApplyRankingSignals_ChangedFileRefBoost(t *testing.T) {
+	results := []SearchResult{
+		mkResultContent("decisions.md", "Decision about internal/index/ranking.go and its signals."),
+		mkResultContent("modules/markdown-engine.md", "Also mentions internal/index/ranking.go but is a module."),
+	}
+	out := ApplyRankingSignals(results, RankingContext{
+		ChangedFiles: []string{"internal/index/ranking.go"},
+	})
+	// Only the decisions.md hit gets the ×1.4 boost; the module reference does not.
+	for _, r := range out {
+		switch r.File {
+		case "decisions.md":
+			if r.Score != rawScore*ChangedRefBoost {
+				t.Errorf("decision changed-ref score = %v, want %v", r.Score, rawScore*ChangedRefBoost)
+			}
+		case "modules/markdown-engine.md":
+			if r.Score != rawScore {
+				t.Errorf("module changed-ref must NOT boost; score = %v, want %v", r.Score, rawScore)
+			}
+		}
+	}
+	if out[0].File != "decisions.md" {
+		t.Errorf("boosted decision should rank first, got %s", out[0].File)
+	}
+}
+
+func TestApplyRankingSignals_LowConfidencePenalty(t *testing.T) {
+	results := []SearchResult{
+		mkResultContent("decisions.md", "## A\n<!-- @id: a -->\n**Confidence:** inferred\n\nBody."),
+		mkResultContent("decisions.md", "## B\n<!-- @id: b -->\n**Confidence:** confirmed\n\nBody."),
+	}
+	out := ApplyRankingSignals(results, RankingContext{})
+	// confirmed stays -10; inferred → -10×0.8 = -8 (worse) → ranks second.
+	if out[0].SectionID != "x" || !strings.Contains(out[0].Content, "confirmed") {
+		t.Errorf("confirmed section should rank first, got %q", out[0].Content)
+	}
+	for _, r := range out {
+		if strings.Contains(r.Content, "inferred") && r.Score != rawScore*LowConfidencePenalty {
+			t.Errorf("low-confidence score = %v, want %v", r.Score, rawScore*LowConfidencePenalty)
+		}
+	}
+}
+
+func TestSectionConfidence(t *testing.T) {
+	cases := map[string]string{
+		"**Confidence:** inferred":      "inferred",
+		"Confidence: confirmed":         "confirmed",
+		"- Confidence: stale (see #12)": "stale",
+		"_Confidence:_ user-provided":   "user-provided",
+		"no field here":                 "",
+		"## Heading\n\nbody only":       "",
+	}
+	for in, want := range cases {
+		if got := sectionConfidence(in); got != want {
+			t.Errorf("sectionConfidence(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, low := range []string{"inferred", "stale", "unknown"} {
+		if !isLowConfidence("Confidence: " + low) {
+			t.Errorf("%q should be low confidence", low)
+		}
+	}
+	for _, ok := range []string{"confirmed", "user-provided"} {
+		if isLowConfidence("Confidence: " + ok) {
+			t.Errorf("%q should NOT be low confidence", ok)
+		}
 	}
 }
 

@@ -15,6 +15,7 @@ type SearchResult struct {
 	Headings  string
 	Snippet   string  // FTS5 snippet() output, marked with [..]
 	Score     float64 // bm25() — lower is better in FTS5
+	Content   string  // full indexed section body; feeds content-based ranking signals
 }
 
 // SectionInfo mirrors a memory_sections row. Returned by GetSection /
@@ -55,7 +56,8 @@ func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchRe
 		   title,
 		   headings,
 		   snippet(memory_search, 4, '[', ']', '...', 16) AS snip,
-		   bm25(memory_search) AS score
+		   bm25(memory_search) AS score,
+		   content
 		 FROM memory_search
 		 WHERE memory_search MATCH ?
 		 ORDER BY score
@@ -70,7 +72,7 @@ func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchRe
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.File, &r.SectionID, &r.Title, &r.Headings, &r.Snippet, &r.Score); err != nil {
+		if err := rows.Scan(&r.File, &r.SectionID, &r.Title, &r.Headings, &r.Snippet, &r.Score, &r.Content); err != nil {
 			return nil, fmt.Errorf("Search: scan: %w", err)
 		}
 		results = append(results, r)

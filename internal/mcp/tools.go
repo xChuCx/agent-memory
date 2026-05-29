@@ -102,6 +102,9 @@ func runFetchContext(ctx context.Context, root string, logger *slog.Logger, inpu
 	if err != nil {
 		branch = agentgit.BranchInfo{} // non-fatal; fetch falls back to shared local state
 	}
+	// Best-effort changed-file list for the changed-file-reference ranking
+	// signal; absence (no git / clean tree) simply applies no boost.
+	changed, _ := agentgit.ChangedFiles(root)
 
 	fetched, err := memory.BuildContextPack(ctx, memory.FetchRequest{
 		Query:          input.Query,
@@ -110,12 +113,13 @@ func runFetchContext(ctx context.Context, root string, logger *slog.Logger, inpu
 		Include:        input.Include,
 		ExcludeArchive: input.ExcludeArchive,
 	}, memory.FetchDeps{
-		Idx:       idx,
-		Schema:    sch,
-		Manifest:  manifest,
-		MemoryDir: memDir,
-		Branch:    branch,
-		Logger:    logger,
+		Idx:          idx,
+		Schema:       sch,
+		Manifest:     manifest,
+		MemoryDir:    memDir,
+		Branch:       branch,
+		ChangedFiles: changed,
+		Logger:       logger,
 	})
 	if err != nil {
 		return nil, err

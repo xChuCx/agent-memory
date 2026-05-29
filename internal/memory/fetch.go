@@ -87,6 +87,12 @@ type FetchDeps struct {
 	MemoryDir string // absolute path to .agent-memory/
 	Branch    git.BranchInfo
 
+	// ChangedFiles are repo-relative paths with uncommitted changes,
+	// resolved by the caller (CLI / MCP) via git.ChangedFiles. Feeds the
+	// "decisions/pitfalls referencing changed files" ranking signal. Empty
+	// is fine (no boost) — outside a git repo, or on a clean tree.
+	ChangedFiles []string
+
 	// Logger is optional; nil → discard. See UpdateDeps.log().
 	Logger *slog.Logger
 }
@@ -203,9 +209,11 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 	}
 
 	results = index.ApplyRankingSignals(results, index.RankingContext{
-		Scope: req.Scope,
-		// FreshFiles / StaleFiles wired in M2.x once freshness markers
-		// are persisted; for M2 baseline these stay empty.
+		Scope:        req.Scope,
+		ActiveBranch: deps.Branch.Name,
+		ChangedFiles: deps.ChangedFiles,
+		// FreshFiles / StaleFiles wired once freshness markers are
+		// persisted (design §20.3); for now these stay empty.
 	})
 
 	// Optional hard exclusion of archive.

@@ -118,6 +118,10 @@ func runFetch(ctx context.Context, opts fetchOptions) (*memory.FetchResponse, er
 		branch = agentgit.BranchInfo{}
 	}
 
+	// Best-effort: changed files feed the changed-file-reference ranking
+	// signal. A failure (no git, not a repo) just means no boost.
+	changed, _ := agentgit.ChangedFiles(root)
+
 	return memory.BuildContextPack(ctx, memory.FetchRequest{
 		Query:          opts.Query,
 		Scope:          opts.Scope,
@@ -125,11 +129,12 @@ func runFetch(ctx context.Context, opts fetchOptions) (*memory.FetchResponse, er
 		Include:        opts.Include,
 		ExcludeArchive: opts.ExcludeArchive,
 	}, memory.FetchDeps{
-		Idx:       idx,
-		Schema:    sch,
-		Manifest:  manifest,
-		MemoryDir: memDir,
-		Branch:    branch,
-		Logger:    cliLogger(),
+		Idx:          idx,
+		Schema:       sch,
+		Manifest:     manifest,
+		MemoryDir:    memDir,
+		Branch:       branch,
+		ChangedFiles: changed,
+		Logger:       cliLogger(),
 	})
 }
