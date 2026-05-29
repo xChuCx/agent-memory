@@ -9,6 +9,29 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **Server-maintained `index.md` regeneration.** The schema reserved
+  `index.md` as `server_managed` since v0.1, but the server never
+  rewrote it after `init` wrote a one-time stub. Now the server
+  regenerates it (design §10.1) as a side effect of every durable
+  write — closing the last red acceptance-gate gap.
+  - `memory.BuildIndexContent` produces the §10.1 routing structure
+    (Always-include / Topic map / Archive / Freshness). The topic map
+    tallies decisions by Status (e.g. "3 active, 2 superseded"), counts
+    pitfall entries, and lists modules; the archive line counts
+    archived contexts.
+  - **Deterministic** — no wall-clock in the body. `RegenerateIndex`
+    writes only when the content actually differs, so an apply that
+    doesn't change the summary leaves `index.md` untouched (no git
+    churn, stable tests).
+  - Regenerated on `init`, on every apply (`applyImmediately` +
+    `ApplyStaged`), and by `rebuild-index`. Best-effort in the apply
+    paths — a regeneration failure never rolls back the durable write.
+  - When it changes and is git-tracked, `index.md` joins the git
+    auto-stage batch and is re-indexed into the FTS shadow.
+  - Freshness/stale tracking remains a documented placeholder until
+    per-section freshness markers (§20.3) land.
+  - Documented in [docs/patterns/index-regeneration.md](docs/patterns/index-regeneration.md).
+
 - **M4 — Archival operations: `archive_section`, `remove_section`,
   `rename_heading`.** Completes the eight-operation set from design
   §15 (was five) and closes the Release 0.2 acceptance gate.

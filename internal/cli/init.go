@@ -10,6 +10,7 @@ import (
 
 	"github.com/agent-memory/agent-memory/internal/config"
 	agentfs "github.com/agent-memory/agent-memory/internal/fs"
+	"github.com/agent-memory/agent-memory/internal/memory"
 	"github.com/agent-memory/agent-memory/internal/schema"
 )
 
@@ -94,6 +95,12 @@ func runInit(out io.Writer, opts initOptions) error {
 	}
 	if err := writeDurableTemplates(memDir); err != nil {
 		return fmt.Errorf("init: write Markdown templates: %w", err)
+	}
+	// Regenerate index.md from the just-written tree so it reflects the
+	// real (empty-template) memory rather than a hand-written stub. The
+	// server owns this file from here on (design §10.1).
+	if _, err := memory.RegenerateIndex(memDir, schema.DefaultSchema()); err != nil {
+		return fmt.Errorf("init: generate index.md: %w", err)
 	}
 	// Empty lock placeholder. gofrs/flock would create it on demand at
 	// first Acquire, but writing it now keeps the layout explicit.

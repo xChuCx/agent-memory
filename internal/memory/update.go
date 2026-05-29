@@ -546,11 +546,26 @@ func applyImmediately(
 		}
 	}
 
+	// Regenerate the server-managed index.md routing file (design §10.1).
+	// Best-effort: a stale index never blocks an apply and can be rebuilt
+	// via `agent-memory rebuild-index`. If it changed and is git-tracked,
+	// fold it into the auto-stage batch so the commit captures it too.
+	stageList := fileOrder
+	if changed, _ := RegenerateIndex(deps.MemoryDir, deps.Schema); changed {
+		if cat, ok := deps.Schema.CategoryForPath(indexFileName); ok && cat.GitTracked {
+			stageList = appendUnique(fileOrder, indexFileName)
+		}
+		if deps.Idx != nil {
+			cat, _ := deps.Schema.CategoryForPath(indexFileName)
+			_ = reindexFile(ctx, deps.Idx, deps.MemoryDir, indexFileName, cat)
+		}
+	}
+
 	// Best-effort git auto-stage + auto-commit per manifest.git.* flags.
 	// Result attached to the response; no error path can fail the apply
 	// here — the bytes already landed via WriteAtomic.
 	repoRoot := filepath.Dir(deps.MemoryDir)
-	autoStage := maybeAutoStage(deps, repoRoot, fileOrder, intent, rationale)
+	autoStage := maybeAutoStage(deps, repoRoot, stageList, intent, rationale)
 
 	return &ProposeResponse{
 		Status:    StatusApplied,
@@ -809,6 +824,20 @@ func categoryForFile(deps UpdateDeps, fileOps map[string][]opCat, rel string) sc
 		return cat
 	}
 	return schema.Category{}
+}
+
+// appendUnique returns base with extra appended only if not already
+// present. Used to fold the regenerated index.md into the auto-stage
+// batch without duplicating it.
+func appendUnique(base []string, extra string) []string {
+	for _, s := range base {
+		if s == extra {
+			return base
+		}
+	}
+	out := make([]string, len(base), len(base)+1)
+	copy(out, base)
+	return append(out, extra)
 }
 
 // sessionsPathForToday returns "sessions/YYYY-MM-DD.md" in the UTC timezone.

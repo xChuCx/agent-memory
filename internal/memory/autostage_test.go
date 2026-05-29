@@ -333,8 +333,18 @@ func TestProposeUpdate_AppliesAndAutoStages(t *testing.T) {
 	if resp.AutoStage.Skipped {
 		t.Errorf("AutoStage.Skipped=true unexpectedly: %+v", resp.AutoStage)
 	}
-	if len(resp.AutoStage.Staged) != 1 {
-		t.Errorf("AutoStage.Staged = %v, want one path", resp.AutoStage.Staged)
+	// The applied edit touches pitfalls.md, and the server regenerates
+	// the durable index.md as a side effect — both git-tracked, so both
+	// land in the auto-stage batch.
+	staged := map[string]bool{}
+	for _, s := range resp.AutoStage.Staged {
+		staged[s] = true
+	}
+	if !staged[".agent-memory/pitfalls.md"] {
+		t.Errorf("AutoStage.Staged missing pitfalls.md: %v", resp.AutoStage.Staged)
+	}
+	if !staged[".agent-memory/index.md"] {
+		t.Errorf("AutoStage.Staged missing regenerated index.md: %v", resp.AutoStage.Staged)
 	}
 	if resp.AutoStage.CommitSHA == "" {
 		t.Error("AutoStage.CommitSHA empty after AutoCommit=true")

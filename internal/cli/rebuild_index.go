@@ -14,6 +14,7 @@ import (
 	"github.com/agent-memory/agent-memory/internal/config"
 	"github.com/agent-memory/agent-memory/internal/index"
 	"github.com/agent-memory/agent-memory/internal/lock"
+	"github.com/agent-memory/agent-memory/internal/memory"
 	"github.com/agent-memory/agent-memory/internal/schema"
 )
 
@@ -156,6 +157,10 @@ func runRebuildIndex(ctx context.Context, opts rebuildIndexOptions) (*RebuildInd
 	}); err != nil {
 		return nil, fmt.Errorf("rebuild-index: %w", err)
 	}
+	// Regenerate the server-managed index.md routing file alongside the
+	// FTS rebuild — the @generated comment even points users at this
+	// command. Best-effort: a stale index.md doesn't fail the rebuild.
+	_, _ = memory.RegenerateIndex(memDir, sch)
 	elapsed := time.Since(start)
 
 	files, err := idx.CountFiles(ctx)

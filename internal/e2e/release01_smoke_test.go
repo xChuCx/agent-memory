@@ -339,6 +339,26 @@ func TestRelease01_EndToEnd(t *testing.T) {
 	})
 
 	// -------------------------------------------------------------------------
+	// 7c. index.md regeneration: the server-managed routing file reflects
+	// the decision applied back in step 6 (e2e-smoke).
+	// -------------------------------------------------------------------------
+	t.Run("index_md_regenerated", func(t *testing.T) {
+		body, err := os.ReadFile(filepath.Join(memDir, "index.md"))
+		if err != nil {
+			t.Fatalf("index.md missing: %v", err)
+		}
+		s := string(body)
+		if !strings.Contains(s, "@generated") {
+			t.Errorf("index.md missing @generated marker:\n%s", s)
+		}
+		// The applied e2e-smoke decision (Status: active) must show in the
+		// topic-map decision summary.
+		if !strings.Contains(s, "decisions.md — durable") || !strings.Contains(s, "active") {
+			t.Errorf("index.md topic map doesn't reflect the applied decision:\n%s", s)
+		}
+	})
+
+	// -------------------------------------------------------------------------
 	// 7b. status (MCP): the third tool returns the §15.11 shape
 	// -------------------------------------------------------------------------
 	t.Run("mcp_status_tool", func(t *testing.T) {

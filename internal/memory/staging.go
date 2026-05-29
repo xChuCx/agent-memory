@@ -344,12 +344,25 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (*Apply
 		}
 	}
 
+	// Regenerate the server-managed index.md (design §10.1). Best-effort;
+	// fold into the auto-stage batch when it changed and is git-tracked.
+	stageList := proposal.Files
+	if changed, _ := RegenerateIndex(deps.MemoryDir, deps.Schema); changed {
+		if cat, ok := deps.Schema.CategoryForPath(indexFileName); ok && cat.GitTracked {
+			stageList = appendUnique(proposal.Files, indexFileName)
+		}
+		if deps.Idx != nil {
+			cat, _ := deps.Schema.CategoryForPath(indexFileName)
+			_ = reindexFile(ctx, deps.Idx, deps.MemoryDir, indexFileName, cat)
+		}
+	}
+
 	// Best-effort git auto-stage + auto-commit per manifest.git.* flags.
 	// Run BEFORE removing the staging dir so a future debug session that
 	// inspects the staging files still has them; the auto-stage outcome
 	// is purely informational either way.
 	repoRoot := filepath.Dir(deps.MemoryDir)
-	autoStage := maybeAutoStage(deps, repoRoot, proposal.Files,
+	autoStage := maybeAutoStage(deps, repoRoot, stageList,
 		proposal.Request.Intent, proposal.Request.Rationale)
 
 	// Remove the staging directory now that everything is on disk. Failure
