@@ -79,7 +79,32 @@ type RebaseResult struct {
 // Returns a Go error only for infrastructure failures (lock open, I/O).
 // Application-level rejections come back in RebaseResult, NOT as errors,
 // symmetric with ProposeUpdate / ApplyStaged.
-func RebaseStaged(ctx context.Context, stagingID string, deps UpdateDeps, force bool) (*RebaseResult, error) {
+func RebaseStaged(ctx context.Context, stagingID string, deps UpdateDeps, force bool) (res *RebaseResult, err error) {
+	log := deps.log()
+	defer func() {
+		if err != nil || res == nil {
+			return
+		}
+		switch res.Status {
+		case StatusRebased:
+			log.Info("staged proposal rebased", "staging_id", stagingID, "files", len(res.Files))
+		case StatusSkippedClean:
+			log.Debug("rebase skipped: no drift", "staging_id", stagingID)
+		default: // rejected
+			// A re-splice can introduce a secret/PII (secret_detected /
+			// pii_detected); that's a security-relevant rejection → WARN.
+			// All other rejections (force_required, unresolvable_drift) are
+			// routine recovery outcomes → INFO. Never log finding bytes;
+			// counts only.
+			if res.Reason == ReasonSecretDetected || res.Reason == ReasonPIIDetected {
+				log.Warn("rebase rejected", "staging_id", stagingID,
+					"reason", res.Reason, "findings", len(res.Findings), "drift", len(res.Drift))
+			} else {
+				log.Info("rebase rejected", "staging_id", stagingID,
+					"reason", res.Reason, "drift", len(res.Drift))
+			}
+		}
+	}()
 	if deps.Manifest == nil || deps.Schema == nil || deps.MemoryDir == "" {
 		return nil, errors.New("RebaseStaged: deps.Manifest, deps.Schema, deps.MemoryDir are required")
 	}

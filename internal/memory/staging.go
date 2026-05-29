@@ -328,7 +328,19 @@ func CheckDrift(memDir string, t OperationTarget) (*DriftReport, error) {
 // destination write). Application-level rejections (drift, missing staging
 // dir, lock held) come back in ApplyResult, NOT as Go errors. This mirrors
 // ProposeUpdate's contract so the MCP wrapper can stay simple.
-func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (*ApplyResult, error) {
+func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *ApplyResult, err error) {
+	log := deps.log()
+	defer func() {
+		if err != nil || res == nil {
+			return
+		}
+		if res.Status == StatusApplied {
+			log.Info("staged proposal applied", "staging_id", stagingID, "files", len(res.Files))
+		} else {
+			log.Info("staged apply rejected", "staging_id", stagingID,
+				"reason", res.Reason, "drift", len(res.Drift))
+		}
+	}()
 	if deps.Manifest == nil || deps.Schema == nil || deps.MemoryDir == "" {
 		return nil, errors.New("ApplyStaged: deps.Manifest, deps.Schema, deps.MemoryDir are required")
 	}

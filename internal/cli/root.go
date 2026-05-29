@@ -5,8 +5,26 @@
 package cli
 
 import (
+	"log/slog"
+	"os"
+
 	"github.com/spf13/cobra"
+
+	"github.com/agent-memory/agent-memory/internal/logging"
 )
+
+// logLevelFlag is bound to the root's persistent --log-level flag. Empty
+// → fall back to $AGENT_MEMORY_LOG, then WARN. Read by cliLogger().
+var logLevelFlag string
+
+// cliLogger builds the logger CLI commands thread into their deps. It
+// always writes to STDERR — stdout is reserved for command output
+// (Markdown packs, --json payloads). Level resolves --log-level, then
+// $AGENT_MEMORY_LOG, then WARN.
+func cliLogger() *slog.Logger {
+	level := logging.ParseLevel(logLevelFlag, logging.LevelFromEnv(slog.LevelWarn))
+	return logging.New(os.Stderr, level)
+}
 
 // ProgramVersion is the user-visible version string for `agent-memory version`.
 // Default value is "dev" so `go build ./cmd/agent-memory` produces a binary
@@ -43,6 +61,9 @@ agent-memory-implementation-plan.md in the repository root.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+
+	root.PersistentFlags().StringVar(&logLevelFlag, "log-level", "",
+		"log verbosity to stderr: debug|info|warn|error (default warn, or $AGENT_MEMORY_LOG)")
 
 	root.AddCommand(NewVersionCmd())
 	root.AddCommand(NewInitCmd())

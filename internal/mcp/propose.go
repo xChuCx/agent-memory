@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -59,13 +60,13 @@ type ProposeUpdateOutput struct {
 // runProposeUpdate only returns a Go error for infrastructure failures
 // (missing .agent-memory/, index open failure, etc.) so the agent sees
 // rejection details in the structured output, not a transport-level error.
-func registerProposeUpdate(server *mcpsdk.Server, root string) error {
+func registerProposeUpdate(server *mcpsdk.Server, root string, logger *slog.Logger) error {
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, input ProposeUpdateInput) (
 		*mcpsdk.CallToolResult,
 		ProposeUpdateOutput,
 		error,
 	) {
-		out, err := runProposeUpdate(ctx, root, input)
+		out, err := runProposeUpdate(ctx, root, logger, input)
 		if err != nil {
 			return nil, ProposeUpdateOutput{}, err
 		}
@@ -86,8 +87,9 @@ func registerProposeUpdate(server *mcpsdk.Server, root string) error {
 }
 
 // runProposeUpdate is the request-level handler. Separated from the closure
-// so unit tests can drive it without spinning up an MCP transport.
-func runProposeUpdate(ctx context.Context, root string, input ProposeUpdateInput) (*ProposeUpdateOutput, error) {
+// so unit tests can drive it without spinning up an MCP transport. logger
+// may be nil (tests) — UpdateDeps.log() falls back to a no-op logger.
+func runProposeUpdate(ctx context.Context, root string, logger *slog.Logger, input ProposeUpdateInput) (*ProposeUpdateOutput, error) {
 	memDir := filepath.Join(root, memoryDirName)
 
 	manifest, err := config.LoadManifest(filepath.Join(memDir, "meta", "manifest.yaml"))
@@ -120,6 +122,7 @@ func runProposeUpdate(ctx context.Context, root string, input ProposeUpdateInput
 		Schema:    sch,
 		MemoryDir: memDir,
 		Idx:       idx,
+		Logger:    logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("memory.propose_update: %w", err)

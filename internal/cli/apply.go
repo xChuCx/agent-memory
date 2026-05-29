@@ -94,6 +94,7 @@ func runApply(ctx context.Context, rootFlag, stagingID string) (*memory.ApplyRes
 		Schema:    sch,
 		MemoryDir: memDir,
 		Idx:       idx,
+		Logger:    cliLogger(),
 	})
 }
 

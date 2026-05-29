@@ -113,6 +113,7 @@ func runRebase(ctx context.Context, rootFlag, stagingID string, force bool) (*me
 		Schema:    sch,
 		MemoryDir: memDir,
 		Idx:       idx,
+		Logger:    cliLogger(),
 	}, force)
 }
 

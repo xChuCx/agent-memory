@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	agentfs "github.com/agent-memory/agent-memory/internal/fs"
 	"github.com/agent-memory/agent-memory/internal/index"
 	"github.com/agent-memory/agent-memory/internal/lock"
+	"github.com/agent-memory/agent-memory/internal/logging"
 	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
 	"github.com/agent-memory/agent-memory/internal/schema"
 )
@@ -144,7 +146,25 @@ type UpdateDeps struct {
 	Schema    *schema.Schema
 	MemoryDir string       // absolute path to .agent-memory/
 	Idx       *index.Index // optional
+
+	// Logger receives structured events from the orchestrator + staging
+	// engine. Optional: nil → a discard logger (see log()). NEVER logs
+	// matched secret bytes; only Finding.Type / .Line.
+	Logger *slog.Logger
 }
+
+// log returns the deps' logger, or a no-op discard logger when none was
+// wired in — so call sites never have to nil-check.
+func (d UpdateDeps) log() *slog.Logger {
+	if d.Logger != nil {
+		return d.Logger
+	}
+	return nopLogger
+}
+
+// nopLogger is the shared discard logger used when a deps struct has no
+// Logger. Cheap to reuse — slog.DiscardHandler is stateless.
+var nopLogger = logging.Nop()
 
 // ============================================================================
 // ProposeUpdate — the pipeline
@@ -175,7 +195,34 @@ type UpdateDeps struct {
 //
 // Any single step's failure short-circuits to ProposeResponse{Status: rejected}
 // with a stable Reason code.
-func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*ProposeResponse, error) {
+func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (resp *ProposeResponse, err error) {
+	log := deps.log()
+	log.Debug("propose_update received",
+		"intent", string(req.Intent), "operations", len(req.Operations))
+	// Single terminal-outcome log covering every return path. Secret-safe
+	// by construction: it logs counts + the stable reason code, never the
+	// matched bytes (Finding carries no bytes; we never re-slice content).
+	defer func() {
+		if err != nil || resp == nil {
+			return // infra error: surfaced to the caller, not an outcome
+		}
+		switch resp.Status {
+		case StatusRejected:
+			lvl := slog.LevelInfo
+			if resp.Reason == ReasonSecretDetected || resp.Reason == ReasonPIIDetected {
+				lvl = slog.LevelWarn // credential/PII attempt is worth attention
+			}
+			log.Log(ctx, lvl, "propose_update rejected",
+				"reason", resp.Reason, "findings", len(resp.Findings))
+		case StatusApplied:
+			log.Info("propose_update applied",
+				"files", len(resp.Files), "affected_sections", len(resp.AffectedSections))
+		case StatusStaged:
+			log.Info("propose_update staged",
+				"staging_id", resp.StagingID, "intent", string(req.Intent))
+		}
+	}()
+
 	// (1) intent + non-empty ops
 	if !IsValidIntent(req.Intent) {
 		return reject(ReasonInvalidIntent, fmt.Sprintf("intent %q is not recognised", req.Intent)), nil

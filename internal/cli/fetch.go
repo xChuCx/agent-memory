@@ -130,6 +130,6 @@ func runFetch(ctx context.Context, opts fetchOptions) (*memory.FetchResponse, er
 		Manifest:  manifest,
 		MemoryDir: memDir,
 		Branch:    branch,
+		Logger:    cliLogger(),
 	})
 }
-

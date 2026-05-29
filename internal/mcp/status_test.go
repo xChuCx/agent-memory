@@ -41,7 +41,7 @@ func TestRunStatus_ReflectsStagedProposal(t *testing.T) {
 	dir := proposeFixture(t)
 
 	// Stage a decision via the propose tool.
-	resp, err := runProposeUpdate(context.Background(), dir, ProposeUpdateInput{
+	resp, err := runProposeUpdate(context.Background(), dir, nil, ProposeUpdateInput{
 		Intent:    "record_decision",
 		Rationale: "status mcp test",
 		Sources:   []memory.Source{{Type: "user", Ref: "test"}},
@@ -97,7 +97,7 @@ func TestRunStatus_DetectsDriftAfterBaseEdit(t *testing.T) {
 
 	// add_pitfall + replace_section_content routes to stage
 	// (pitfalls_replace) and produces a content-match target.
-	resp, err := runProposeUpdate(context.Background(), dir, ProposeUpdateInput{
+	resp, err := runProposeUpdate(context.Background(), dir, nil, ProposeUpdateInput{
 		Intent: "add_pitfall",
 		Operations: []memory.OperationInput{
 			{

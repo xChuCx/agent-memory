@@ -55,7 +55,7 @@ func mcpFixture(t *testing.T) string {
 
 func TestRunFetchContext_EmptyQueryBootstrap(t *testing.T) {
 	dir := mcpFixture(t)
-	out, err := runFetchContext(context.Background(), dir, FetchContextInput{})
+	out, err := runFetchContext(context.Background(), dir, nil, FetchContextInput{})
 	if err != nil {
 		t.Fatalf("runFetchContext: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRunFetchContext_EmptyQueryBootstrap(t *testing.T) {
 
 func TestRunFetchContext_QueryMatchesIndexedSection(t *testing.T) {
 	dir := mcpFixture(t)
-	out, err := runFetchContext(context.Background(), dir, FetchContextInput{
+	out, err := runFetchContext(context.Background(), dir, nil, FetchContextInput{
 		Query: "refresh token",
 	})
 	if err != nil {
@@ -82,7 +82,7 @@ func TestRunFetchContext_QueryMatchesIndexedSection(t *testing.T) {
 
 func TestRunFetchContext_ScopeBoost(t *testing.T) {
 	dir := mcpFixture(t)
-	out, err := runFetchContext(context.Background(), dir, FetchContextInput{
+	out, err := runFetchContext(context.Background(), dir, nil, FetchContextInput{
 		Query: "token",
 		Scope: []string{"modules"},
 	})
@@ -96,7 +96,7 @@ func TestRunFetchContext_ScopeBoost(t *testing.T) {
 
 func TestRunFetchContext_RejectsMissingAgentMemory(t *testing.T) {
 	dir := t.TempDir() // no init
-	_, err := runFetchContext(context.Background(), dir, FetchContextInput{})
+	_, err := runFetchContext(context.Background(), dir, nil, FetchContextInput{})
 	if err == nil {
 		t.Fatal("expected error for missing .agent-memory/")
 	}

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -44,13 +45,13 @@ type FetchContextOutput struct {
 // registerFetchContext wires memory.fetch_context onto the given server.
 // The root path is captured in the handler closure; every call re-resolves
 // manifest/schema/index/branch so live edits between calls are picked up.
-func registerFetchContext(server *mcpsdk.Server, root string) error {
+func registerFetchContext(server *mcpsdk.Server, root string, logger *slog.Logger) error {
 	handler := func(ctx context.Context, req *mcpsdk.CallToolRequest, input FetchContextInput) (
 		*mcpsdk.CallToolResult,
 		FetchContextOutput,
 		error,
 	) {
-		resp, err := runFetchContext(ctx, root, input)
+		resp, err := runFetchContext(ctx, root, logger, input)
 		if err != nil {
 			return nil, FetchContextOutput{}, err
 		}
@@ -69,8 +70,9 @@ func registerFetchContext(server *mcpsdk.Server, root string) error {
 }
 
 // runFetchContext is the request-level handler. Separated from the closure
-// in registerFetchContext so it can be unit-tested directly.
-func runFetchContext(ctx context.Context, root string, input FetchContextInput) (*FetchContextOutput, error) {
+// in registerFetchContext so it can be unit-tested directly. logger may be
+// nil (tests) — FetchDeps.log() falls back to a no-op logger.
+func runFetchContext(ctx context.Context, root string, logger *slog.Logger, input FetchContextInput) (*FetchContextOutput, error) {
 	memDir := filepath.Join(root, memoryDirName)
 
 	manifest, err := config.LoadManifest(filepath.Join(memDir, "meta", "manifest.yaml"))
@@ -113,6 +115,7 @@ func runFetchContext(ctx context.Context, root string, input FetchContextInput) 
 		Manifest:  manifest,
 		MemoryDir: memDir,
 		Branch:    branch,
+		Logger:    logger,
 	})
 	if err != nil {
 		return nil, err

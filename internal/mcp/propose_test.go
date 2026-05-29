@@ -37,7 +37,7 @@ func proposeFixture(t *testing.T) string {
 func TestRunProposeUpdate_AppliesUpdateCurrent(t *testing.T) {
 	dir := proposeFixture(t)
 
-	out, err := runProposeUpdate(context.Background(), dir, ProposeUpdateInput{
+	out, err := runProposeUpdate(context.Background(), dir, nil, ProposeUpdateInput{
 		Intent: "update_current",
 		Operations: []memory.OperationInput{
 			{
@@ -70,7 +70,7 @@ func TestRunProposeUpdate_StagesRecordDecision(t *testing.T) {
 	dir := proposeFixture(t)
 	memDir := filepath.Join(dir, ".agent-memory")
 
-	out, err := runProposeUpdate(context.Background(), dir, ProposeUpdateInput{
+	out, err := runProposeUpdate(context.Background(), dir, nil, ProposeUpdateInput{
 		Intent:    "record_decision",
 		Rationale: "mcp test decision",
 		Sources:   []memory.Source{{Type: "user", Ref: "test"}},
@@ -108,7 +108,7 @@ func TestRunProposeUpdate_StagesRecordDecision(t *testing.T) {
 // Status="rejected".
 func TestRunProposeUpdate_RejectsInvalidIntent(t *testing.T) {
 	dir := proposeFixture(t)
-	out, err := runProposeUpdate(context.Background(), dir, ProposeUpdateInput{
+	out, err := runProposeUpdate(context.Background(), dir, nil, ProposeUpdateInput{
 		Intent: "not_a_real_intent",
 		Operations: []memory.OperationInput{
 			{Op: "create_file", Path: "local/current.shared.md", Content: "# x\n", IfExists: "replace"},
@@ -131,7 +131,7 @@ func TestRunProposeUpdate_RejectsInvalidIntent(t *testing.T) {
 func TestRunProposeUpdate_RejectsSecretInBody(t *testing.T) {
 	dir := proposeFixture(t)
 
-	out, err := runProposeUpdate(context.Background(), dir, ProposeUpdateInput{
+	out, err := runProposeUpdate(context.Background(), dir, nil, ProposeUpdateInput{
 		Intent: "update_current",
 		Operations: []memory.OperationInput{
 			{
@@ -166,7 +166,7 @@ func TestRunProposeUpdate_RejectsSecretInBody(t *testing.T) {
 // can't even load the manifest. Symmetric with TestRunFetchContext.
 func TestRunProposeUpdate_RejectsMissingAgentMemory(t *testing.T) {
 	dir := t.TempDir() // no init
-	_, err := runProposeUpdate(context.Background(), dir, ProposeUpdateInput{
+	_, err := runProposeUpdate(context.Background(), dir, nil, ProposeUpdateInput{
 		Intent: "update_current",
 		Operations: []memory.OperationInput{
 			{Op: "create_file", Path: "local/current.shared.md", Content: "# x\n", IfExists: "replace"},
@@ -182,7 +182,7 @@ func TestRunProposeUpdate_RejectsMissingAgentMemory(t *testing.T) {
 // orchestrator rewrites it to today's session file.
 func TestRunProposeUpdate_SessionLogRewritesPathThroughMCP(t *testing.T) {
 	dir := proposeFixture(t)
-	out, err := runProposeUpdate(context.Background(), dir, ProposeUpdateInput{
+	out, err := runProposeUpdate(context.Background(), dir, nil, ProposeUpdateInput{
 		Intent: "session_log",
 		Operations: []memory.OperationInput{
 			{

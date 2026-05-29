@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,12 +86,22 @@ type FetchDeps struct {
 	Manifest  *config.Manifest
 	MemoryDir string // absolute path to .agent-memory/
 	Branch    git.BranchInfo
+
+	// Logger is optional; nil → discard. See UpdateDeps.log().
+	Logger *slog.Logger
+}
+
+func (d FetchDeps) log() *slog.Logger {
+	if d.Logger != nil {
+		return d.Logger
+	}
+	return nopLogger
 }
 
 // BuildContextPack is the entry point. It dispatches between the bootstrap
 // path (empty query) and the search path (non-empty query). All output goes
 // into FetchResponse.
-func BuildContextPack(ctx context.Context, req FetchRequest, deps FetchDeps) (*FetchResponse, error) {
+func BuildContextPack(ctx context.Context, req FetchRequest, deps FetchDeps) (resp *FetchResponse, err error) {
 	budget := req.Budget
 	if budget <= 0 {
 		budget = deps.Manifest.Budgets.FetchContextChars
@@ -99,7 +110,24 @@ func BuildContextPack(ctx context.Context, req FetchRequest, deps FetchDeps) (*F
 		budget = 24000 // hard fallback if manifest is missing the field
 	}
 
-	if strings.TrimSpace(req.Query) == "" {
+	mode := "bootstrap"
+	if strings.TrimSpace(req.Query) != "" {
+		mode = "search"
+	}
+	log := deps.log()
+	defer func() {
+		if err != nil || resp == nil {
+			return
+		}
+		log.Debug("fetch_context served",
+			"mode", mode,
+			"included_files", len(resp.IncludedFiles),
+			"omitted", len(resp.Omitted),
+			"budget_used", resp.ContextMetadata.BudgetUsed,
+			"budget", budget)
+	}()
+
+	if mode == "bootstrap" {
 		return buildBootstrapPack(ctx, deps, budget)
 	}
 	return buildSearchPack(ctx, req, deps, budget)

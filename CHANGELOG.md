@@ -17,6 +17,24 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   no-match/empty-queue errors with `no matching staged proposal`. The
   E2E smoke test now applies via `--latest`.
 
+- **Structured logging via `slog`.** A new `internal/logging` package
+  centralises logger construction. Both transports log to **stderr**
+  only — stdout stays reserved for the MCP JSON-RPC channel and CLI
+  command output — and logging is **quiet by default** (WARN), opt-in
+  via the CLI `--log-level debug|info|warn|error` flag or the
+  `AGENT_MEMORY_LOG` environment variable.
+  - The orchestrator emits a single deferred terminal-outcome line per
+    operation (`propose_update` / `apply` / `rebase`) plus a
+    served-summary line for `fetch_context`. Normal outcomes log at
+    INFO/DEBUG; a `secret_detected` / `pii_detected` rejection logs at
+    WARN.
+  - **Secret-safe by construction and by test:** logs record stable
+    reason codes and counts, never matched credential/PII bytes, and the
+    raw fetch query is deliberately never logged. `redaction_test.go`
+    captures emitted records and asserts the sensitive bytes are absent.
+  - `memory.status` stays read-only and unlogged. See
+    [docs/patterns/structured-logging.md](docs/patterns/structured-logging.md).
+
 ### Changed (contract)
 
 - **propose_update output shapes (§15.2).** Applied responses now carry
