@@ -81,6 +81,12 @@ post-state bytes — never disk).
 | `append_section` | Add a brand-new section under a parent or at EOF. |
 | `append_to_section` | Append text to an existing section without touching its heading. Best for bullets and incremental logs. |
 | `replace_section_content` | Rewrite the body only; heading + anchor preserved. |
+| `archive_section` | Copy a section to a new `archive/` file and leave a stub. Needs `archive_path` (must be new) + `replacement` (the stub). **Always stages.** |
+| `remove_section` | Archive-first removal: copy to `archive/` then splice the section out entirely. Needs `archive_path` + optional `reason`. **Always stages.** |
+| `rename_heading` | Change a heading's text (and level, ±1) while keeping the `@id` anchor. Needs `new_heading` + optional `new_heading_level`. |
+
+Archive paths must be inside `archive/` and must not already exist —
+archive files are write-once.
 
 ## Provenance (sources, confidence)
 

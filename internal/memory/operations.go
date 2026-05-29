@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 
 	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
 	"github.com/agent-memory/agent-memory/internal/schema"
@@ -119,6 +120,33 @@ type Operation interface {
 	Plan(src []byte) (agentmd.SpliceOp, error)
 }
 
+// ExtraFile is an additional file an operation produces beyond its
+// primary Path() target. archive_section / remove_section use this to
+// copy the archived section content into a brand-new archive/ file.
+type ExtraFile struct {
+	// Path is the forward-slash, memory-relative destination.
+	Path string
+	// Content is the full bytes to write. The orchestrator treats the
+	// file as new (RequireFileAbsent) and write-once.
+	Content []byte
+}
+
+// ExtraFileProducer is the optional interface an Operation implements
+// when it writes to files beyond its primary Path(). The orchestrator
+// type-asserts for it during the per-file planning loop and, if present,
+// collects the extra files for validation + staging/apply.
+//
+// Only archive_section and remove_section implement this today; the five
+// original operations don't, so they're untouched.
+type ExtraFileProducer interface {
+	// ExtraFiles computes the additional files this op creates, derived
+	// from src — the primary file's bytes at the moment the op runs,
+	// BEFORE its own splice is applied. (archive_section reads the
+	// section it's about to replace; remove_section reads the section it's
+	// about to delete.)
+	ExtraFiles(src []byte) ([]ExtraFile, error)
+}
+
 // OperationInput is the JSON shape every operation deserialises from.
 // Fields not relevant to a given op are omitted (omitempty); ParseOperation
 // validates required fields per op type.
@@ -133,6 +161,13 @@ type OperationInput struct {
 	Content         string `json:"content,omitempty"`
 	IfExists        string `json:"if_exists,omitempty"`
 	IfMissing       string `json:"if_missing,omitempty"`
+
+	// M4 archival/rename fields.
+	ArchivePath     string `json:"archive_path,omitempty"`     // archive_section, remove_section
+	Replacement     string `json:"replacement,omitempty"`      // archive_section: new source-section body
+	Reason          string `json:"reason,omitempty"`           // remove_section: why it's gone
+	NewHeading      string `json:"new_heading,omitempty"`      // rename_heading
+	NewHeadingLevel int    `json:"new_heading_level,omitempty"` // rename_heading; 0 = keep current
 }
 
 // ParseOperation dispatches on in.Op to construct a concrete Operation.
@@ -180,6 +215,36 @@ func ParseOperation(in OperationInput) (Operation, error) {
 			Level:      in.HeadingLevel,
 			Occurrence: in.Occurrence,
 			Content:    []byte(in.Content),
+		}, nil
+	case "archive_section":
+		return &ArchiveSection{
+			FilePath:    in.Path,
+			SectionID:   in.SectionID,
+			Heading:     in.Heading,
+			Level:       in.HeadingLevel,
+			Occurrence:  in.Occurrence,
+			ArchivePath: in.ArchivePath,
+			Replacement: []byte(in.Replacement),
+		}, nil
+	case "remove_section":
+		return &RemoveSection{
+			FilePath:    in.Path,
+			SectionID:   in.SectionID,
+			Heading:     in.Heading,
+			Level:       in.HeadingLevel,
+			Occurrence:  in.Occurrence,
+			ArchivePath: in.ArchivePath,
+			Reason:      in.Reason,
+		}, nil
+	case "rename_heading":
+		return &RenameHeading{
+			FilePath:        in.Path,
+			SectionID:       in.SectionID,
+			Heading:         in.Heading,
+			Level:           in.HeadingLevel,
+			Occurrence:      in.Occurrence,
+			NewHeading:      in.NewHeading,
+			NewHeadingLevel: in.NewHeadingLevel,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown operation kind: %q", in.Op)
@@ -640,4 +705,252 @@ func directBody(src []byte, sections []agentmd.Section, idx int) []byte {
 		return nil
 	}
 	return src[bodyStart:bodyEnd]
+}
+
+// headingLineEnd returns the byte offset just before the newline that
+// terminates the heading line starting at sectionStart, or len(src) if
+// the heading is the last line with no trailing newline. The newline
+// itself is NOT included in [sectionStart, result).
+func headingLineEnd(src []byte, sectionStart int) int {
+	i := sectionStart
+	for i < len(src) && src[i] != '\n' {
+		i++
+	}
+	return i
+}
+
+// isArchivePath reports whether rel (forward-slash) is inside archive/.
+func isArchivePath(rel string) bool {
+	return strings.HasPrefix(rel, "archive/")
+}
+
+// ============================================================================
+// ArchiveSection (M4)
+// ============================================================================
+
+// ArchiveSection copies a section's current content to a new archive
+// file and replaces the source section (heading included) with a
+// pointer/stub Replacement. The archive file is write-once: it must not
+// already exist. Per design §15.8, archiving never destroys content and
+// always stages.
+//
+// This is a MULTI-FILE operation: Plan() handles the source-file splice,
+// and ExtraFiles() produces the new archive file. The orchestrator wires
+// both together.
+type ArchiveSection struct {
+	FilePath    string
+	SectionID   string
+	Heading     string
+	Level       int
+	Occurrence  int
+	ArchivePath string
+	Replacement []byte // new content for the source section (heading + anchor + stub)
+}
+
+func (op *ArchiveSection) Kind() string { return "archive_section" }
+func (op *ArchiveSection) Path() string { return op.FilePath }
+
+func (op *ArchiveSection) Validate(sch *schema.Schema) error {
+	if op.FilePath == "" {
+		return errors.New("archive_section: path is required")
+	}
+	if op.SectionID == "" && op.Heading == "" {
+		return errors.New("archive_section: section_id or heading is required")
+	}
+	if op.ArchivePath == "" {
+		return errors.New("archive_section: archive_path is required")
+	}
+	if !isArchivePath(op.ArchivePath) {
+		return fmt.Errorf("archive_section: archive_path %q must be inside archive/", op.ArchivePath)
+	}
+	if len(op.Replacement) == 0 {
+		return errors.New("archive_section: replacement is required (the stub left in place of the archived section)")
+	}
+	if err := agentmd.ValidateMarkdown(op.Replacement); err != nil {
+		return fmt.Errorf("archive_section: replacement does not parse as Markdown: %w", err)
+	}
+	return nil
+}
+
+func (op *ArchiveSection) Targets() []OperationTarget {
+	return []OperationTarget{
+		{Path: op.FilePath, SectionID: op.SectionID, Policy: RequireSectionContentMatch},
+		{Path: op.ArchivePath, Policy: RequireFileAbsent},
+	}
+}
+
+func (op *ArchiveSection) Plan(src []byte) (agentmd.SpliceOp, error) {
+	sec, err := resolveSection(src, op.SectionID, op.Heading, op.Level, op.Occurrence)
+	if err != nil {
+		return agentmd.SpliceOp{}, fmt.Errorf("archive_section: %w", err)
+	}
+	return agentmd.SpliceOp{
+		ByteStart:   sec.ByteStart,
+		ByteEnd:     sec.ByteEnd,
+		Replacement: op.Replacement,
+	}, nil
+}
+
+// ExtraFiles copies the section's current bytes (heading included) into
+// the archive file. src is the source file's bytes BEFORE this op's
+// splice, so the section is still present.
+func (op *ArchiveSection) ExtraFiles(src []byte) ([]ExtraFile, error) {
+	sec, err := resolveSection(src, op.SectionID, op.Heading, op.Level, op.Occurrence)
+	if err != nil {
+		return nil, fmt.Errorf("archive_section: %w", err)
+	}
+	content := make([]byte, sec.ByteEnd-sec.ByteStart)
+	copy(content, src[sec.ByteStart:sec.ByteEnd])
+	return []ExtraFile{{Path: op.ArchivePath, Content: content}}, nil
+}
+
+// ============================================================================
+// RemoveSection (M4)
+// ============================================================================
+
+// RemoveSection archives a section to a new write-once archive file,
+// then splices the section out of the source entirely (heading
+// included). Per design §15.9, removal is archive-first — content is
+// preserved in archive/ before the source loses it — and always stages.
+type RemoveSection struct {
+	FilePath    string
+	SectionID   string
+	Heading     string
+	Level       int
+	Occurrence  int
+	ArchivePath string
+	Reason      string // why it's being removed; recorded as a comment in the archive
+}
+
+func (op *RemoveSection) Kind() string { return "remove_section" }
+func (op *RemoveSection) Path() string { return op.FilePath }
+
+func (op *RemoveSection) Validate(sch *schema.Schema) error {
+	if op.FilePath == "" {
+		return errors.New("remove_section: path is required")
+	}
+	if op.SectionID == "" && op.Heading == "" {
+		return errors.New("remove_section: section_id or heading is required")
+	}
+	if op.ArchivePath == "" {
+		return errors.New("remove_section: archive_path is required (removal is archive-first)")
+	}
+	if !isArchivePath(op.ArchivePath) {
+		return fmt.Errorf("remove_section: archive_path %q must be inside archive/", op.ArchivePath)
+	}
+	return nil
+}
+
+func (op *RemoveSection) Targets() []OperationTarget {
+	return []OperationTarget{
+		{Path: op.FilePath, SectionID: op.SectionID, Policy: RequireSectionContentMatch},
+		{Path: op.ArchivePath, Policy: RequireFileAbsent},
+	}
+}
+
+func (op *RemoveSection) Plan(src []byte) (agentmd.SpliceOp, error) {
+	sec, err := resolveSection(src, op.SectionID, op.Heading, op.Level, op.Occurrence)
+	if err != nil {
+		return agentmd.SpliceOp{}, fmt.Errorf("remove_section: %w", err)
+	}
+	// Splice the whole section (heading through just-before-next-heading)
+	// out entirely. The empty replacement deletes it.
+	return agentmd.SpliceOp{
+		ByteStart:   sec.ByteStart,
+		ByteEnd:     sec.ByteEnd,
+		Replacement: nil,
+	}, nil
+}
+
+// ExtraFiles archives the section content. When Reason is set, it's
+// prepended as an HTML comment so the archive file records WHY the
+// section was removed without affecting rendered output.
+func (op *RemoveSection) ExtraFiles(src []byte) ([]ExtraFile, error) {
+	sec, err := resolveSection(src, op.SectionID, op.Heading, op.Level, op.Occurrence)
+	if err != nil {
+		return nil, fmt.Errorf("remove_section: %w", err)
+	}
+	body := src[sec.ByteStart:sec.ByteEnd]
+	var content []byte
+	if op.Reason != "" {
+		header := fmt.Sprintf("<!-- removed from %s: %s -->\n\n", op.FilePath, op.Reason)
+		content = make([]byte, 0, len(header)+len(body))
+		content = append(content, header...)
+		content = append(content, body...)
+	} else {
+		content = make([]byte, len(body))
+		copy(content, body)
+	}
+	return []ExtraFile{{Path: op.ArchivePath, Content: content}}, nil
+}
+
+// ============================================================================
+// RenameHeading (M4)
+// ============================================================================
+
+// RenameHeading changes a section's heading text (and optionally its
+// level, constrained to ±1) while preserving the @id anchor and all
+// bytes outside the heading line. Per design §15.10.
+type RenameHeading struct {
+	FilePath        string
+	SectionID       string
+	Heading         string
+	Level           int
+	Occurrence      int
+	NewHeading      string
+	NewHeadingLevel int // 0 = keep current level
+}
+
+func (op *RenameHeading) Kind() string { return "rename_heading" }
+func (op *RenameHeading) Path() string { return op.FilePath }
+
+func (op *RenameHeading) Validate(sch *schema.Schema) error {
+	if op.FilePath == "" {
+		return errors.New("rename_heading: path is required")
+	}
+	if op.SectionID == "" && op.Heading == "" {
+		return errors.New("rename_heading: section_id or heading is required")
+	}
+	if op.NewHeading == "" {
+		return errors.New("rename_heading: new_heading is required")
+	}
+	if op.NewHeadingLevel != 0 && (op.NewHeadingLevel < 1 || op.NewHeadingLevel > 6) {
+		return fmt.Errorf("rename_heading: new_heading_level must be 1-6 (or 0 to keep current), got %d", op.NewHeadingLevel)
+	}
+	return nil
+}
+
+func (op *RenameHeading) Targets() []OperationTarget {
+	return []OperationTarget{{
+		Path:      op.FilePath,
+		SectionID: op.SectionID,
+		// Resolvable (not content-match): rename only touches the heading
+		// line, found by ID; the body can have grown since staging.
+		Policy: RequireSectionResolvable,
+	}}
+}
+
+func (op *RenameHeading) Plan(src []byte) (agentmd.SpliceOp, error) {
+	sec, err := resolveSection(src, op.SectionID, op.Heading, op.Level, op.Occurrence)
+	if err != nil {
+		return agentmd.SpliceOp{}, fmt.Errorf("rename_heading: %w", err)
+	}
+	level := op.NewHeadingLevel
+	if level == 0 {
+		level = sec.HeadingLevel
+	}
+	// Constrain level change to ±1 of the current to avoid restructuring.
+	delta := level - sec.HeadingLevel
+	if delta < -1 || delta > 1 {
+		return agentmd.SpliceOp{}, fmt.Errorf(
+			"rename_heading: level change %d→%d exceeds ±1 (would restructure the document)",
+			sec.HeadingLevel, level)
+	}
+	lineEnd := headingLineEnd(src, sec.ByteStart)
+	newLine := strings.Repeat("#", level) + " " + op.NewHeading
+	return agentmd.SpliceOp{
+		ByteStart:   sec.ByteStart,
+		ByteEnd:     lineEnd,
+		Replacement: []byte(newLine),
+	}, nil
 }

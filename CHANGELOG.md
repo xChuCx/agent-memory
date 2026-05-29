@@ -9,6 +9,36 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **M4 — Archival operations: `archive_section`, `remove_section`,
+  `rename_heading`.** Completes the eight-operation set from design
+  §15 (was five) and closes the Release 0.2 acceptance gate.
+  - `archive_section` (§15.8) copies a section to a new `archive/`
+    file and replaces the source section with a stub. `remove_section`
+    (§15.9) is archive-first removal: copy to `archive/`, then splice
+    the section out of the source entirely. `rename_heading` (§15.10)
+    changes a heading's text (and level, constrained to ±1) while
+    preserving the `@id` anchor and the body.
+  - **Multi-file operations.** archive_section / remove_section are
+    the first ops that write to two files (source + new archive). A
+    new optional `ExtraFileProducer` interface
+    (`ExtraFiles(src) ([]ExtraFile, error)`) lets them produce the
+    archive file without changing the five existing single-file ops.
+    The orchestrator validates each extra (path, category, markdown,
+    secret/PII scan, not-already-exists) and merges it into the
+    staging/apply file set.
+  - **Write-once enforcement.** Archive files cannot be modified once
+    they exist: a mutating op on an existing `archive/` file →
+    `write_once_violation`; an archive destination that already exists
+    → `archive_exists`. The `require_file_absent` drift target
+    re-checks at apply time.
+  - **Always-stage.** archive_section and remove_section are forced to
+    stage regardless of the intent's routing (durable + destructive →
+    human review). The `routing.reason` records the override.
+    rename_heading follows normal intent routing.
+  - Adapter docs (SKILL.md, AGENTS.md, GEMINI.md, cursor MDC) gain the
+    three operations with the write-once note. E2E smoke test does a
+    full archive_section stage→apply round-trip through MCP.
+  - Documented in [docs/patterns/archival-operations.md](docs/patterns/archival-operations.md).
 - **`memory.status` — the third MCP tool.** Completes the design §15
   three-tool surface (`fetch_context` + `propose_update` +
   `status`). Returns the full §15.11 shape: per-kind file counts

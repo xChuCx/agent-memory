@@ -65,6 +65,12 @@ action required from you.
 | `append_section` | Add a brand-new section under a parent or at EOF. |
 | `append_to_section` | Append text to an existing section without touching its heading. |
 | `replace_section_content` | Rewrite the body only; heading + anchor preserved. |
+| `archive_section` | Copy a section to a new `archive/` file, leave a stub. Needs `archive_path` + `replacement`. Always stages. |
+| `remove_section` | Archive-first removal: copy to `archive/`, then splice out. Needs `archive_path` + optional `reason`. Always stages. |
+| `rename_heading` | Rename a heading (level ±1) keeping the `@id`. Needs `new_heading` + optional `new_heading_level`. |
+
+Archive paths must be inside `archive/` and must not already exist
+(archive files are write-once).
 
 Multi-op proposals run **sequentially in memory** — op #2 sees op #1's
 post-state bytes, never disk.

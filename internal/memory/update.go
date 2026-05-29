@@ -58,6 +58,8 @@ const (
 	ReasonStagingNotFound       = "staging_not_found"
 	ReasonAllowlistLimitExceeded = "allowlist_limit_exceeded"
 	ReasonPIIDetected           = "pii_detected"
+	ReasonWriteOnceViolation    = "write_once_violation"
+	ReasonArchiveExists         = "archive_exists"
 )
 
 // ============================================================================
@@ -198,6 +200,19 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 			return reject(ReasonServerManagedCategory,
 				fmt.Sprintf("op[%d]: category %q is server_managed (path %q)", i, cat.Name, rel)), nil
 		}
+		// Write-once enforcement: a category like archive/ may not be
+		// modified once a file exists. New files in the category are fine
+		// (archive_section/remove_section create them as ExtraFiles, which
+		// get their own RequireFileAbsent check below). A mutating op whose
+		// primary target is an existing write-once file is rejected.
+		if cat.WriteOnce {
+			abs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
+			if agentfs.PathExists(abs) {
+				return reject(ReasonWriteOnceViolation,
+					fmt.Sprintf("op[%d]: %q is in write-once category %q and already exists; it cannot be modified",
+						i, rel, cat.Name)), nil
+			}
+		}
 		resolved = append(resolved, opCat{op: op, rel: rel, category: cat})
 	}
 
@@ -237,6 +252,13 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 		fileOps[oc.rel] = append(fileOps[oc.rel], oc)
 	}
 
+	// Extra files produced by multi-file ops (archive_section /
+	// remove_section copy the archived section into a new archive file).
+	// Collected during the per-file loop from the in-memory bytes BEFORE
+	// each op's splice, then validated + merged into postState/fileOrder.
+	extras := map[string][]byte{}
+	var extrasOrder []string
+
 	for _, rel := range fileOrder {
 		src, err := readPreState(deps.MemoryDir, rel)
 		if err != nil {
@@ -247,6 +269,27 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 		// Apply ops sequentially on this file's in-memory bytes.
 		cur := append([]byte(nil), src...)
 		for i, oc := range fileOps[rel] {
+			// Multi-file ops compute their extra files from the bytes as
+			// they are NOW — before this op's splice removes/replaces the
+			// section being archived.
+			if producer, ok := oc.op.(ExtraFileProducer); ok {
+				efs, eerr := producer.ExtraFiles(cur)
+				if eerr != nil {
+					return reject(ReasonPlanFailed,
+						fmt.Sprintf("%s op[%d] (%s): extra files: %v", rel, i, oc.op.Kind(), eerr)), nil
+				}
+				for _, ef := range efs {
+					ep := filepath.ToSlash(ef.Path)
+					if _, dup := extras[ep]; dup {
+						return reject(ReasonArchiveExists,
+							fmt.Sprintf("%s op[%d] (%s): archive path %q produced more than once in this proposal",
+								rel, i, oc.op.Kind(), ep)), nil
+					}
+					extras[ep] = ef.Content
+					extrasOrder = append(extrasOrder, ep)
+				}
+			}
+
 			splice, err := oc.op.Plan(cur)
 			if err != nil {
 				return reject(ReasonPlanFailed,
@@ -362,6 +405,58 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 		}
 	}
 
+	// (6.5) Process extra files from multi-file ops. Each is a brand-new
+	// archive file: validate its path + category, confirm it doesn't
+	// already exist (write-once), Markdown-validate, secret/PII-scan, then
+	// merge into postState + fileOrder so it gets staged/applied alongside
+	// the source-file edits.
+	for _, ep := range extrasOrder {
+		if _, err := agentfs.ValidateMemoryPath(deps.MemoryDir, ep); err != nil {
+			return reject(ReasonInvalidPath, fmt.Sprintf("archive %s: %v", ep, err)), nil
+		}
+		cat, ok := deps.Schema.CategoryForPath(ep)
+		if !ok {
+			return reject(ReasonUnknownCategory,
+				fmt.Sprintf("archive %s: no category matches", ep)), nil
+		}
+		if cat.ServerManaged {
+			return reject(ReasonServerManagedCategory,
+				fmt.Sprintf("archive %s: category %q is server_managed", ep, cat.Name)), nil
+		}
+		// Write-once / RequireFileAbsent: the archive destination must not
+		// already exist on disk.
+		abs := filepath.Join(deps.MemoryDir, filepath.FromSlash(ep))
+		if agentfs.PathExists(abs) {
+			return reject(ReasonArchiveExists,
+				fmt.Sprintf("archive %s: destination already exists; archive files are write-once", ep)), nil
+		}
+		content := extras[ep]
+		if err := agentmd.ValidateMarkdown(content); err != nil {
+			return reject(ReasonInvalidMarkdown, fmt.Sprintf("archive %s: %v", ep, err)), nil
+		}
+		if deps.Manifest.Security.SecretScan {
+			regions, allowErr := ExtractAllowlistRegions(content)
+			if allowErr != nil {
+				return reject(ReasonAllowlistParseError, fmt.Sprintf("archive %s: %v", ep, allowErr)), nil
+			}
+			scanOpts := DefaultScanOpts()
+			scanOpts.Allowlist = regions
+			scanOpts.PIIScanSSNAndCC = deps.Manifest.Security.PIIScan
+			scanOpts.PIIScanEmail = deps.Manifest.Security.PIIScanEmail
+			if findings := Scan(content, scanOpts); len(findings) > 0 {
+				return rejectWithFindings(ClassifyFindings(findings),
+					fmt.Sprintf("archive %s: %d finding(s)", ep, len(findings)), findings), nil
+			}
+		}
+		// New file: pre-state is empty, post-state is the archive content.
+		preState[ep] = nil
+		postState[ep] = content
+		fileOrder = append(fileOrder, ep)
+		// Record a synthetic opCat so applyImmediately/reindex can resolve
+		// the category without a fileOps entry.
+		fileOps[ep] = append(fileOps[ep], opCat{rel: ep, category: cat})
+	}
+
 	// (7) Provenance — checked against the dominant category. When ops touch
 	// multiple categories, the strictest policy wins; for M3 we use the first
 	// op's category as the policy source (almost all proposals are single-
@@ -388,6 +483,15 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 		routings = append(routings, r)
 	}
 	final := CombineRoutings(routings)
+
+	// Force-stage archival ops. Per design §15.8/§15.9, archive_section
+	// and remove_section are ALWAYS staged regardless of the intent's
+	// manifest routing — archiving is durable and removal destroys
+	// source content, so both warrant human review.
+	if final.Mode == schema.ApprovalApply && containsArchivalOp(ops) {
+		final.Mode = schema.ApprovalStage
+		final.Reason += "; forced to stage: archive_section/remove_section are always staged (design §15.8/§15.9)"
+	}
 
 	switch final.Mode {
 	case schema.ApprovalServerOnly:
@@ -437,7 +541,7 @@ func applyImmediately(
 	// slog through deps.
 	if deps.Idx != nil {
 		for _, rel := range fileOrder {
-			cat := fileOps[rel][0].category
+			cat := categoryForFile(deps, fileOps, rel)
 			_ = reindexFile(ctx, deps.Idx, deps.MemoryDir, rel, cat)
 		}
 	}
@@ -677,6 +781,34 @@ func containsNewSectionOp(ops []Operation) bool {
 		}
 	}
 	return false
+}
+
+// containsArchivalOp reports whether any op is archive_section or
+// remove_section — both of which must always be staged (design
+// §15.8/§15.9).
+func containsArchivalOp(ops []Operation) bool {
+	for _, op := range ops {
+		switch op.Kind() {
+		case "archive_section", "remove_section":
+			return true
+		}
+	}
+	return false
+}
+
+// categoryForFile resolves a file's schema category. Prefers the
+// category captured in fileOps (set during op resolution); falls back
+// to a fresh schema lookup for files that entered fileOrder as extras
+// (archive destinations) without a primary op. Returns a zero Category
+// if nothing matches — reindexFile tolerates an empty Name.
+func categoryForFile(deps UpdateDeps, fileOps map[string][]opCat, rel string) schema.Category {
+	if ocs, ok := fileOps[rel]; ok && len(ocs) > 0 {
+		return ocs[0].category
+	}
+	if cat, ok := deps.Schema.CategoryForPath(rel); ok {
+		return cat
+	}
+	return schema.Category{}
 }
 
 // sessionsPathForToday returns "sessions/YYYY-MM-DD.md" in the UTC timezone.

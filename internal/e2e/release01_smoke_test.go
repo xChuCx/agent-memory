@@ -523,6 +523,80 @@ func TestRelease01_EndToEnd(t *testing.T) {
 			t.Errorf("staging dir still exists after reject")
 		}
 	})
+
+	// -------------------------------------------------------------------------
+	// 11. archive_section (M4): stage → apply → both files on disk
+	// -------------------------------------------------------------------------
+	t.Run("mcp_archive_section_roundtrip", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		serverCmd := exec.CommandContext(ctx, binPath, "mcp", "--root", root)
+		client := mcp.NewClient(&mcp.Implementation{Name: "e2e-client", Version: "0.1.0"}, nil)
+		session, err := client.Connect(ctx, &mcp.CommandTransport{Command: serverCmd}, nil)
+		if err != nil {
+			t.Fatalf("mcp connect: %v", err)
+		}
+		defer session.Close()
+
+		// Archive the decision we applied back in step 6 (e2e-smoke).
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name: "memory.propose_update",
+			Arguments: map[string]any{
+				"intent":  "archive_stale",
+				"sources": []map[string]string{{"type": "user", "ref": "e2e-cleanup"}},
+				"operations": []map[string]any{
+					{
+						"operation":    "archive_section",
+						"path":         "decisions.md",
+						"section_id":   "e2e-smoke",
+						"archive_path": "archive/2026-05-e2e-smoke.md",
+						"replacement":  "## E2E Smoke Decision\n<!-- @id: e2e-smoke -->\n\n**Date:** 2026-05-27\n**Status:** superseded\n**Confidence:** confirmed\n\nArchived: see `archive/2026-05-e2e-smoke.md`.\n",
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool archive_section: %v", err)
+		}
+		b, _ := json.Marshal(result.StructuredContent)
+		var resp struct {
+			Status    string `json:"status"`
+			Reason    string `json:"reason"`
+			StagingID string `json:"staging_id"`
+		}
+		if err := json.Unmarshal(b, &resp); err != nil {
+			t.Fatalf("decode: %v\n%s", err, b)
+		}
+		// archive_section always stages.
+		if resp.Status != "staged" {
+			t.Fatalf("Status = %q (reason=%s), want staged", resp.Status, resp.Reason)
+		}
+		if resp.StagingID == "" {
+			t.Fatal("no staging_id for archive_section")
+		}
+
+		// Apply through the CLI.
+		var applyRes struct {
+			Status string `json:"status"`
+		}
+		runJSON(t, &applyRes, root, "apply", resp.StagingID)
+		if applyRes.Status != "applied" {
+			t.Fatalf("apply Status = %q", applyRes.Status)
+		}
+
+		// Source decision now a stub; archive file holds the original.
+		dec, _ := os.ReadFile(filepath.Join(memDir, "decisions.md"))
+		if !strings.Contains(string(dec), "Archived: see `archive/2026-05-e2e-smoke.md`") {
+			t.Errorf("decision not archived in source:\n%s", dec)
+		}
+		arch, err := os.ReadFile(filepath.Join(memDir, "archive", "2026-05-e2e-smoke.md"))
+		if err != nil {
+			t.Fatalf("archive file not on disk: %v", err)
+		}
+		if !strings.Contains(string(arch), "This decision was made by the e2e smoke test.") {
+			t.Errorf("archive missing original decision body:\n%s", arch)
+		}
+	})
 }
 
 // =============================================================================
