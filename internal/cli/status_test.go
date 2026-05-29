@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -16,15 +17,15 @@ func TestStatus_AfterInit_AllCountsZero(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := runStatus(dir)
+	r, err := runStatus(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("runStatus: %v", err)
 	}
 	if r.Repo != "fresh" {
 		t.Errorf("Repo = %q, want fresh", r.Repo)
 	}
-	if r.Version == "" {
-		t.Error("Version is empty")
+	if r.MemoryVersion == "" {
+		t.Error("MemoryVersion is empty")
 	}
 	// Right after init: index.md, conventions.md, decisions.md, pitfalls.md
 	// each map to a single category. Other categories are at 0.
@@ -58,7 +59,7 @@ func TestStatus_CountsModuleFiles(t *testing.T) {
 		}
 	}
 
-	r, err := runStatus(dir)
+	r, err := runStatus(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestStatus_CountsModuleFiles(t *testing.T) {
 
 func TestStatus_RejectsMissingAgentMemory(t *testing.T) {
 	dir := t.TempDir()
-	_, err := runStatus(dir)
+	_, err := runStatus(context.Background(), dir)
 	if err == nil {
 		t.Fatal("expected error for missing .agent-memory/")
 	}
@@ -109,6 +110,14 @@ func TestStatus_JSONOutputIsValid(t *testing.T) {
 	if r.SchemaPath == "" {
 		t.Error("SchemaPath is empty")
 	}
+	// The embedded §15.11 block flattens into the same JSON object.
+	if r.MemoryStatus == nil {
+		t.Fatal("MemoryStatus block is nil in JSON output")
+	}
+	// security/git/lock sub-blocks must serialize even at zero values.
+	if r.Security.LastSecretScan == "" {
+		t.Error("security.last_secret_scan missing from JSON")
+	}
 }
 
 func TestStatus_HumanOutputMentionsCategories(t *testing.T) {
@@ -133,16 +142,38 @@ func TestStatus_HumanOutputMentionsCategories(t *testing.T) {
 	}
 }
 
-func TestStatus_NoLockMetadataAfterInit(t *testing.T) {
+func TestStatus_HumanOutputShows15_11Blocks(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "p"}); err != nil {
 		t.Fatal(err)
 	}
-	r, err := runStatus(dir)
+	out := &bytes.Buffer{}
+	root := NewRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"status", "--root", dir})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	output := out.String()
+	// The §15.11 blocks should render in human mode too.
+	for _, want := range []string{"Files:", "Sizes:", "Security:", "Git:", "Lock:", "Staged updates"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("human output missing %q\noutput:\n%s", want, output)
+		}
+	}
+}
+
+func TestStatus_LockNotHeldAfterInit(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := runStatus(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Lock.OwnerID != "" {
-		t.Errorf("expected empty lock metadata after init, got OwnerID=%q", r.Lock.OwnerID)
+	if r.Lock.Held {
+		t.Errorf("expected lock not held after init, got Held=true")
 	}
 }

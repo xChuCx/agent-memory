@@ -103,6 +103,31 @@ func runGit(root string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// ListLocalBranches returns every local branch name in the repo at
+// root. Used by `memory.status` to detect orphan local files —
+// `local/current.<slug>.md` whose slug doesn't correspond to any
+// currently-existing branch.
+//
+// Outside a git work tree returns (nil, nil) — symmetric with
+// ActiveBranch's "not a repo is not an error" semantic.
+func ListLocalBranches(root string) ([]string, error) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return nil, ErrGitNotInstalled
+	}
+	out, err := runGit(root, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return nil, fmt.Errorf("ListLocalBranches: %w", err)
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
 // SlugBranch converts a branch name to the path-safe slug used in
 // local/current.<slug>.md filenames per design doc v0.4.1 §13.1.
 //

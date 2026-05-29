@@ -147,6 +147,7 @@ Exposed by `agent-memory mcp` over stdio JSON-RPC:
 |------|---------|
 | `memory.fetch_context` | Read a budgeted Markdown context pack. |
 | `memory.propose_update` | Submit structured edits (apply or stage). |
+| `memory.status` | Report memory health: file counts, staged proposals (with drift), security/git/lock posture. |
 
 ## Agent-runtime adapters
 

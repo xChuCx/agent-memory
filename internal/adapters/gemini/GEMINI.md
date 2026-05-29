@@ -7,13 +7,15 @@ every session in this repository.
 
 This project uses [`agent-memory`](https://github.com/xChuCx/agent-memory),
 a local context middleware that maintains a structured, byte-preserving
-Markdown memory layer. Two MCP tools are wired into your runtime:
+Markdown memory layer. Three MCP tools are wired into your runtime:
 
 - **`memory.fetch_context`** — read; budgeted Markdown pack assembled
   from current task state, conventions, decisions, modules.
 - **`memory.propose_update`** — write; structured operations that
   the server validates, secret-scans, and either applies immediately
   or stages for human review.
+- **`memory.status`** — health; file counts, pending staged proposals
+  (with drift status), and security/git/lock posture. Read-only.
 
 ## At session start: empty-query fetch_context
 

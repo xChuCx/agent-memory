@@ -9,6 +9,32 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **`memory.status` — the third MCP tool.** Completes the design §15
+  three-tool surface (`fetch_context` + `propose_update` +
+  `status`). Returns the full §15.11 shape: per-kind file counts
+  (durable / archive / sessions / local-current), index + current-state
+  sizes, orphan branch-local files, pending staged proposals each with
+  age / TTL-remaining / **drift status** (same `CheckDrift` machinery
+  `apply` uses), plus security / git / lock posture blocks.
+  - New shared `internal/memory.BuildStatus` + `MemoryStatus` type;
+    both the CLI `status` subcommand and the MCP tool render from it,
+    so the two transports return identical structured data.
+  - `agent-memory status` output expanded: the §15.11 blocks now show
+    in both `--json` (flattened into the report object) and the human
+    renderer (Files / Sizes / Staged updates / Security / Git / Lock
+    sections), on top of the existing per-category counts.
+  - `internal/git.ListLocalBranches` added to detect orphan
+    `local/current.<slug>.md` files whose branch no longer exists.
+  - Conservative approximations documented inline for fields awaiting
+    future mechanisms: `stale_notes` (freshness tracking), `security.
+    last_secret_scan` ("n/a" until a scan log is persisted),
+    `lock.stale_recoveries_last_24h` (kernel-managed locks need no
+    recovery counter yet).
+  - Adapter docs (SKILL.md, AGENTS.md, GEMINI.md, cursor MDC) updated:
+    the intro now lists three tools; Claude's quick-reference table
+    gains a `memory.status` row.
+  - E2E smoke test asserts all three tools appear in `tools/list` and
+    drives `memory.status` through the MCP transport.
 - **Section schema maturity.** Real `SectionSchema` lands for the
   `decisions` category in `DefaultSchema()`: three required fields
   per section — Date (ISO 8601), Status (enum: active / superseded /

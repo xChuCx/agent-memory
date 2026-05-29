@@ -7,7 +7,7 @@ description: Use this skill whenever working on a project that has a .agent-memo
 
 `agent-memory` is a local context middleware that maintains a structured,
 byte-preserving Markdown memory layer for this repository. Your runtime
-exposes two MCP tools backed by it:
+exposes three MCP tools backed by it:
 
 - **`memory.fetch_context`** — read; returns a budgeted Markdown pack
   drawn from current task state, conventions, decisions, modules, and
@@ -15,6 +15,10 @@ exposes two MCP tools backed by it:
 - **`memory.propose_update`** — write; submits structured operations
   that the server validates, secret-scans, and either applies
   immediately or stages for human review.
+- **`memory.status`** — health; reports file counts, pending staged
+  proposals (with drift status), and security/git/lock posture. Call
+  it when you want to know whether memory needs maintenance before
+  proposing more updates.
 
 ## At session start: always fetch_context with empty query
 
@@ -212,3 +216,4 @@ message and fix the root cause first.
 |------|---------------|---------------|
 | `memory.fetch_context` | — | `query`, `scope[]`, `budget`, `include[]`, `exclude_archive` |
 | `memory.propose_update` | `intent`, `operations[]` | `sources[]`, `confidence`, `rationale`, `owner` |
+| `memory.status` | — | — |

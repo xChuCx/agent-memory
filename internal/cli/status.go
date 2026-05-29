@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,22 +13,27 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/agent-memory/agent-memory/internal/config"
-	"github.com/agent-memory/agent-memory/internal/lock"
+	agentgit "github.com/agent-memory/agent-memory/internal/git"
+	"github.com/agent-memory/agent-memory/internal/memory"
 	"github.com/agent-memory/agent-memory/internal/schema"
 )
 
 // StatusReport is the structured shape returned by `agent-memory status`.
-// It is the JSON output schema when --json is used; the human renderer
-// reads the same struct.
+// Wire format = design doc §15.11 (the same shape memory.status MCP tool
+// returns) plus a few CLI-specific helpers (Root, MemoryDir, paths to
+// manifest/schema, per-category counts). The shared §15.11 block is
+// embedded so JSON output flattens to one object.
 type StatusReport struct {
-	Repo         string         `json:"repo"`
-	Version      string         `json:"memory_version"`
+	// §15.11 — every field the design spec lists, in the same shape.
+	*memory.MemoryStatus
+
+	// CLI-only extras: useful for human/script readers but not part of
+	// the design's memory.status contract.
 	Root         string         `json:"root"`
 	MemoryDir    string         `json:"memory_dir"`
 	ManifestPath string         `json:"manifest_path"`
 	SchemaPath   string         `json:"schema_path"`
 	Categories   map[string]int `json:"categories"`
-	Lock         lock.Metadata  `json:"lock,omitempty"`
 }
 
 // NewStatusCmd returns the `agent-memory status` subcommand.
@@ -40,10 +46,14 @@ func NewStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Print agent-memory state for the current repo",
 		Long: `Reads .agent-memory/meta/manifest.yaml and meta/schema.yaml,
-counts Markdown files per category, and reports the last-known lock
-metadata. Returns an error if .agent-memory/ does not exist.`,
+walks the tree to count files per category, summarises staged proposals
+(with drift detection per target), and reports lock + security + git
+metadata. Output shape matches design §15.11 for the memory.status MCP
+tool, plus CLI-specific path fields.
+
+Returns an error if .agent-memory/ does not exist.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := runStatus(rootFlag)
+			r, err := runStatus(cmd.Context(), rootFlag)
 			if err != nil {
 				return err
 			}
@@ -59,7 +69,7 @@ metadata. Returns an error if .agent-memory/ does not exist.`,
 }
 
 // runStatus assembles the StatusReport. Exposed for direct test calls.
-func runStatus(rootFlag string) (*StatusReport, error) {
+func runStatus(ctx context.Context, rootFlag string) (*StatusReport, error) {
 	root, err := resolveRoot(rootFlag)
 	if err != nil {
 		return nil, err
@@ -81,25 +91,33 @@ func runStatus(rootFlag string) (*StatusReport, error) {
 		return nil, fmt.Errorf("status: load schema: %w", err)
 	}
 
+	// Best-effort branch resolution: non-git repo or missing git binary
+	// → zero BranchInfo. BuildStatus tolerates that.
+	branch, _ := agentgit.ActiveBranch(root)
+
+	mem, err := memory.BuildStatus(ctx, memory.StatusDeps{
+		MemoryDir:     memDir,
+		Manifest:      m,
+		Schema:        sch,
+		Branch:        branch,
+		MemoryVersion: ProgramVersion,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("status: %w", err)
+	}
+
 	categories, err := countCategoriesUnder(memDir, sch)
 	if err != nil {
 		return nil, fmt.Errorf("status: count files: %w", err)
 	}
 
-	// Lock metadata is best-effort. ReadMetadata returns an empty Metadata
-	// (no error) if the sidecar is missing/empty/malformed — which is the
-	// normal state right after init.
-	meta, _ := lock.ReadMetadata(filepath.Join(memDir, "meta", "lock"))
-
 	return &StatusReport{
-		Repo:         m.Project.Name,
-		Version:      m.Version,
+		MemoryStatus: mem,
 		Root:         root,
 		MemoryDir:    memDir,
 		ManifestPath: manifestPath,
 		SchemaPath:   schemaPath,
 		Categories:   categories,
-		Lock:         meta,
 	}, nil
 }
 
@@ -142,13 +160,34 @@ func writeStatusJSON(w io.Writer, r *StatusReport) error {
 }
 
 func writeStatusHuman(w io.Writer, r *StatusReport) error {
-	fmt.Fprintf(w, "agent-memory %s\n", r.Version)
+	// Top banner.
+	fmt.Fprintf(w, "agent-memory %s\n", r.MemoryVersion)
 	fmt.Fprintf(w, "repo: %s\n", r.Repo)
 	fmt.Fprintf(w, "root: %s\n", r.Root)
+	if r.ActiveBranch != "" {
+		fmt.Fprintf(w, "branch: %s\n", r.ActiveBranch)
+	}
 	fmt.Fprintln(w)
 
+	// File counts.
+	fmt.Fprintf(w, "Files:\n")
+	fmt.Fprintf(w, "  durable:        %d\n", r.DurableFiles)
+	fmt.Fprintf(w, "  archive:        %d\n", r.ArchiveFiles)
+	fmt.Fprintf(w, "  sessions:       %d\n", r.LocalSessions)
+	fmt.Fprintf(w, "  local current:  %d\n", r.LocalCurrentFiles)
+	if len(r.OrphanLocalFiles) > 0 {
+		fmt.Fprintf(w, "  orphans:        %d (%s)\n", len(r.OrphanLocalFiles), strings.Join(r.OrphanLocalFiles, ", "))
+	}
+	fmt.Fprintln(w)
+
+	// Sizes.
+	fmt.Fprintf(w, "Sizes:\n")
+	fmt.Fprintf(w, "  index:          %d bytes\n", r.IndexSizeBytes)
+	fmt.Fprintf(w, "  current state:  %d bytes\n", r.CurrentSizeBytes)
+	fmt.Fprintln(w)
+
+	// Per-category breakdown (CLI extra).
 	fmt.Fprintln(w, "Categories:")
-	// Stable display order: alphabetical.
 	names := make([]string, 0, len(r.Categories))
 	for name := range r.Categories {
 		names = append(names, name)
@@ -159,15 +198,33 @@ func writeStatusHuman(w io.Writer, r *StatusReport) error {
 	}
 	fmt.Fprintln(w)
 
-	if r.Lock.OwnerID != "" {
-		ts := r.Lock.AcquiredAt.UTC().Format("2006-01-02T15:04:05Z")
-		fmt.Fprintf(w, "Last known lock owner: %s (%s, pid %d) at %s\n",
-			r.Lock.OwnerID, r.Lock.OwnerKind, r.Lock.OwnerPID, ts)
-		if r.Lock.OpID != "" {
-			fmt.Fprintf(w, "  op_id: %s\n", r.Lock.OpID)
+	// Staged updates.
+	if len(r.StagedUpdates) > 0 {
+		fmt.Fprintf(w, "Staged updates (%d):\n", len(r.StagedUpdates))
+		for _, s := range r.StagedUpdates {
+			marker := ""
+			if s.DriftDetected {
+				marker = " [DRIFT]"
+			}
+			fmt.Fprintf(w, "  %s%s\n", s.ID, marker)
+			fmt.Fprintf(w, "    intent: %s, age: %ds, ttl remaining: %ds\n",
+				s.Intent, s.AgeSeconds, s.TTLRemainingSeconds)
+			if len(s.TargetFiles) > 0 {
+				fmt.Fprintf(w, "    files:  %s\n", strings.Join(s.TargetFiles, ", "))
+			}
 		}
+		fmt.Fprintln(w)
 	} else {
-		fmt.Fprintln(w, "No prior lock metadata.")
+		fmt.Fprintln(w, "Staged updates: none")
+		fmt.Fprintln(w)
 	}
+
+	// Security / git / lock.
+	fmt.Fprintf(w, "Security:  last_scan=%s, allowlisted_regions=%d, untrusted_sources=%d\n",
+		r.Security.LastSecretScan, r.Security.AllowlistedRegions, r.Security.UntrustedSources)
+	fmt.Fprintf(w, "Git:       track_local=%t, track_sessions=%t, ignored_local=%t, merge_driver=%t\n",
+		r.Git.TrackLocal, r.Git.TrackSessions, r.Git.IgnoredLocalState, r.Git.MergeDriverInstalled)
+	fmt.Fprintf(w, "Lock:      held=%t, stale_recoveries_24h=%d\n",
+		r.Lock.Held, r.Lock.StaleRecoveriesLast24h)
 	return nil
 }

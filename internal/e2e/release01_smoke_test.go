@@ -193,7 +193,7 @@ func TestRelease01_EndToEnd(t *testing.T) {
 		for _, tl := range tools.Tools {
 			names[tl.Name] = true
 		}
-		for _, want := range []string{"memory.fetch_context", "memory.propose_update"} {
+		for _, want := range []string{"memory.fetch_context", "memory.propose_update", "memory.status"} {
 			if !names[want] {
 				t.Errorf("tools/list missing %q (got %v)", want, names)
 			}
@@ -314,16 +314,79 @@ func TestRelease01_EndToEnd(t *testing.T) {
 	})
 
 	// -------------------------------------------------------------------------
-	// 7. status: category counts include the decision file
+	// 7. status (CLI): category counts include the decision file + §15.11 blocks
 	// -------------------------------------------------------------------------
 	t.Run("status_reports_decisions", func(t *testing.T) {
 		var r struct {
-			Categories map[string]int `json:"categories"`
+			Categories   map[string]int `json:"categories"`
+			DurableFiles int            `json:"durable_files"`
+			Security     struct {
+				LastSecretScan string `json:"last_secret_scan"`
+			} `json:"security"`
 		}
 		runJSON(t, &r, root, "status")
 		if r.Categories["decisions"] < 1 {
 			t.Errorf("status categories.decisions = %d, want >= 1: %+v",
 				r.Categories["decisions"], r.Categories)
+		}
+		// §15.11 block flattened into the CLI status JSON.
+		if r.DurableFiles < 1 {
+			t.Errorf("status durable_files = %d, want >= 1", r.DurableFiles)
+		}
+		if r.Security.LastSecretScan == "" {
+			t.Error("status JSON missing security.last_secret_scan (§15.11 block)")
+		}
+	})
+
+	// -------------------------------------------------------------------------
+	// 7b. status (MCP): the third tool returns the §15.11 shape
+	// -------------------------------------------------------------------------
+	t.Run("mcp_status_tool", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		serverCmd := exec.CommandContext(ctx, binPath, "mcp", "--root", root)
+		client := mcp.NewClient(&mcp.Implementation{Name: "e2e-client", Version: "0.1.0"}, nil)
+		session, err := client.Connect(ctx, &mcp.CommandTransport{Command: serverCmd}, nil)
+		if err != nil {
+			t.Fatalf("mcp connect: %v", err)
+		}
+		defer session.Close()
+
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "memory.status",
+			Arguments: map[string]any{},
+		})
+		if err != nil {
+			t.Fatalf("CallTool memory.status: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("memory.status returned IsError: %+v", result.Content)
+		}
+		b, _ := json.Marshal(result.StructuredContent)
+		var resp struct {
+			Repo         string `json:"repo"`
+			DurableFiles int    `json:"durable_files"`
+			Security     struct {
+				LastSecretScan string `json:"last_secret_scan"`
+			} `json:"security"`
+			Git struct {
+				IgnoredLocalState bool `json:"ignored_local_state"`
+			} `json:"git"`
+			Lock struct {
+				Held bool `json:"held"`
+			} `json:"lock"`
+		}
+		if err := json.Unmarshal(b, &resp); err != nil {
+			t.Fatalf("decode status: %v\n%s", err, b)
+		}
+		if resp.Repo == "" {
+			t.Error("memory.status repo is empty")
+		}
+		if resp.DurableFiles < 1 {
+			t.Errorf("memory.status durable_files = %d, want >= 1", resp.DurableFiles)
+		}
+		if resp.Security.LastSecretScan == "" {
+			t.Error("memory.status missing security.last_secret_scan")
 		}
 	})
 
