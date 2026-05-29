@@ -595,11 +595,12 @@ func TestRelease01_EndToEnd(t *testing.T) {
 			t.Fatal("no staging_id for archive_section")
 		}
 
-		// Apply through the CLI.
+		// Apply through the CLI using --latest (exercises staging-id
+		// resolution; the archive proposal is the only staged one here).
 		var applyRes struct {
 			Status string `json:"status"`
 		}
-		runJSON(t, &applyRes, root, "apply", resp.StagingID)
+		runJSON(t, &applyRes, root, "apply", "--latest")
 		if applyRes.Status != "applied" {
 			t.Fatalf("apply Status = %q", applyRes.Status)
 		}

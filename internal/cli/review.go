@@ -32,6 +32,7 @@ func NewReviewCmd() *cobra.Command {
 		rootFlag    string
 		asJSON      bool
 		showContent bool
+		latest      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "review [STAGING_ID]",
@@ -40,13 +41,15 @@ func NewReviewCmd() *cobra.Command {
 .agent-memory/staging/ in chronological order with intent, rationale,
 file count, and stage timestamp.
 
-With a STAGING_ID: prints that proposal's full metadata, drift targets,
-and (with --show) the post-state bytes of every file the proposal would
-write. The on-disk current state is NOT shown — pipe the staged content
-into your usual diff tool against the live file.`,
+With a STAGING_ID (full id or unique prefix, Git-style) or --latest:
+prints that proposal's full metadata, drift targets, and (with --show)
+the post-state bytes of every file the proposal would write. The on-disk
+current state is NOT shown — pipe the staged content into your usual
+diff tool against the live file.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
+			// No arg and no --latest → list mode.
+			if len(args) == 0 && !latest {
 				summary, err := runReviewList(rootFlag)
 				if err != nil {
 					return err
@@ -56,7 +59,11 @@ into your usual diff tool against the live file.`,
 				}
 				return writeReviewListHuman(cmd.OutOrStdout(), summary)
 			}
-			detail, err := runReviewDetail(rootFlag, args[0], showContent)
+			id, err := resolveStaging(rootFlag, args, latest)
+			if err != nil {
+				return err
+			}
+			detail, err := runReviewDetail(rootFlag, id, showContent)
 			if err != nil {
 				return err
 			}
@@ -69,6 +76,7 @@ into your usual diff tool against the live file.`,
 	cmd.Flags().StringVar(&rootFlag, "root", "", "repo root (default: current working directory)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON instead of human-readable text")
 	cmd.Flags().BoolVar(&showContent, "show", false, "include the staged post-state of every file (detail mode only)")
+	cmd.Flags().BoolVar(&latest, "latest", false, "show the most recently staged proposal in detail")
 	return cmd
 }
 
@@ -135,6 +143,28 @@ func reviewMemDir(rootFlag string) (string, error) {
 		return "", fmt.Errorf(".agent-memory/ not found at %s (run `agent-memory init` first)", memDir)
 	}
 	return memDir, nil
+}
+
+// resolveStaging turns CLI args + the --latest flag into a full staging
+// ID via memory.ResolveStagingID. Shared by apply / reject / rebase /
+// review so they all accept Git-style prefixes and --latest uniformly.
+//
+//   - latest=true       → newest staged proposal (positional arg ignored).
+//   - exactly one arg   → exact id or unique prefix.
+//   - neither           → error prompting for one.
+func resolveStaging(rootFlag string, args []string, latest bool) (string, error) {
+	memDir, err := reviewMemDir(rootFlag)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case latest:
+		return memory.ResolveStagingID(memDir, memory.LatestRef)
+	case len(args) == 1:
+		return memory.ResolveStagingID(memDir, args[0])
+	default:
+		return "", fmt.Errorf("provide a STAGING_ID (full or unique prefix) or pass --latest")
+	}
 }
 
 // writeJSON encodes v as pretty-printed JSON. Shared by review/apply/reject.

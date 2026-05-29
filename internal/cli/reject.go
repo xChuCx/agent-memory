@@ -14,17 +14,25 @@ func NewRejectCmd() *cobra.Command {
 	var (
 		rootFlag string
 		asJSON   bool
+		latest   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "reject STAGING_ID",
+		Use:   "reject [STAGING_ID]",
 		Short: "Discard a staged proposal without applying",
 		Long: `Removes .agent-memory/staging/<STAGING_ID>/ from disk. No drift
 checks, no lock — the proposal hasn't touched any other files. The
 agent receives no notification; if it cares, it can detect the staged
-dir disappearing by re-issuing fetch_context.`,
-		Args: cobra.ExactArgs(1),
+dir disappearing by re-issuing fetch_context.
+
+STAGING_ID may be a full id or any unique prefix (Git-style). Pass
+--latest instead to discard the most recently staged proposal.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := runReject(rootFlag, args[0])
+			id, err := resolveStaging(rootFlag, args, latest)
+			if err != nil {
+				return err
+			}
+			res, err := runReject(rootFlag, id)
 			if err != nil {
 				return err
 			}
@@ -42,6 +50,7 @@ dir disappearing by re-issuing fetch_context.`,
 	}
 	cmd.Flags().StringVar(&rootFlag, "root", "", "repo root (default: current working directory)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON instead of human-readable text")
+	cmd.Flags().BoolVar(&latest, "latest", false, "discard the most recently staged proposal")
 	return cmd
 }
 

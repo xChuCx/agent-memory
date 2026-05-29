@@ -201,20 +201,92 @@ func TestRunReject_UnknownIDIsNonError(t *testing.T) {
 // Cobra integration: end-to-end through NewRootCmd
 // =============================================================================
 
-func TestCobra_ApplyExitsNonZeroOnReject(t *testing.T) {
+func TestCobra_ApplyUnknownIDExitsNonZero(t *testing.T) {
+	// An unknown id is now caught at staging-id RESOLUTION (a prefix that
+	// matches nothing → ErrNoStaged) before the apply runs, so the command
+	// exits non-zero with a resolution error rather than a drift banner.
 	root, _ := stagingFixture(t)
 
 	cmd := NewRootCmd()
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"apply", "--root", root, "non-existent-id"})
+	cmd.SetArgs([]string{"apply", "--root", root, "no-such-id-prefix-zzz"})
 
-	if err := cmd.Execute(); err == nil {
-		t.Errorf("expected non-zero exit (rejection), got nil. stdout=%q", stdout.String())
+	err := cmd.Execute()
+	if err == nil {
+		t.Errorf("expected non-zero exit for unknown id, got nil. stdout=%q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "REJECTED") {
-		t.Errorf("stdout missing REJECTED banner: %q", stdout.String())
+	if err != nil && !strings.Contains(err.Error(), "no matching staged proposal") {
+		t.Errorf("err = %v, want mention of 'no matching staged proposal'", err)
+	}
+}
+
+func TestCobra_ApplyByPrefix(t *testing.T) {
+	root, id := stagingFixture(t)
+	// Use a 12-char prefix of the staging id (timestamp portion).
+	prefix := id[:12]
+
+	cmd := NewRootCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"apply", "--root", root, prefix})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("apply by prefix %q: %v\n%s", prefix, err, stdout.String())
+	}
+	// Staging dir gone → applied.
+	if _, err := os.Stat(filepath.Join(root, ".agent-memory", "staging", id)); err == nil {
+		t.Errorf("staging dir still present after apply-by-prefix")
+	}
+}
+
+func TestCobra_ApplyLatest(t *testing.T) {
+	root, id := stagingFixture(t)
+	cmd := NewRootCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"apply", "--root", root, "--latest"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("apply --latest: %v\n%s", err, stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agent-memory", "staging", id)); err == nil {
+		t.Errorf("staging dir still present after apply --latest")
+	}
+}
+
+func TestCobra_RejectByPrefix(t *testing.T) {
+	root, id := stagingFixture(t)
+	cmd := NewRootCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"reject", "--root", root, id[:12]})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("reject by prefix: %v\n%s", err, stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agent-memory", "staging", id)); err == nil {
+		t.Errorf("staging dir still present after reject-by-prefix")
+	}
+}
+
+func TestCobra_ReviewLatest(t *testing.T) {
+	root, id := stagingFixture(t)
+	cmd := NewRootCmd()
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stdout)
+	cmd.SetArgs([]string{"review", "--root", root, "--latest", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("review --latest: %v\n%s", err, stdout.String())
+	}
+	var d ReviewDetail
+	if err := json.Unmarshal(stdout.Bytes(), &d); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, stdout.String())
+	}
+	if d.Proposal == nil || d.Proposal.StagingID != id {
+		t.Errorf("review --latest didn't resolve to %q: %+v", id, d.Proposal)
 	}
 }
 

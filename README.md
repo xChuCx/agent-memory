@@ -123,6 +123,11 @@ agent-memory rebase STAGING_ID [--force] [--json] [--root DIR]
         # after target_drift. --force is required for soft drifts
         # (acknowledges accepting the new base as planning input).
 
+# review / apply / reject / rebase accept a full STAGING_ID, any unique
+# prefix (Git-style), or --latest for the most recently staged proposal:
+#   agent-memory apply 20260527       # unique prefix
+#   agent-memory apply --latest       # newest staged proposal
+
 agent-memory install <adapter> [--user-global] [--force] [--json]
         # Materialise agent-runtime adapter assets.
         # Supported: claude, cursor, agents, gemini.

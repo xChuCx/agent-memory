@@ -9,6 +9,27 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **Staging-ID prefix matching + `--latest`.** `review`, `apply`,
+  `reject`, and `rebase` no longer require the full 30-character
+  staging id. `memory.ResolveStagingID` accepts a full id, any unique
+  prefix (Git-style), or the `--latest` flag (newest staged proposal).
+  Ambiguous prefixes error with the list of candidates;
+  no-match/empty-queue errors with `no matching staged proposal`. The
+  E2E smoke test now applies via `--latest`.
+
+### Changed (contract)
+
+- **propose_update output shapes (§15.2).** Applied responses now carry
+  `applied_at`, `affected_sections`, `index_updated`, `warnings`;
+  staged responses carry `staging_ttl_seconds`, `human_approval_required`,
+  `review_command`. Surfaced through both the Go API and the MCP tool.
+- **`confidence` defaults to `inferred`** when omitted (§15.2), recorded
+  in provenance checks and staged proposals.
+- **`create_file if_exists=replace` forces staging** on durable
+  (git-tracked) categories (§15.3), even when the category is set to
+  auto-apply. Ephemeral local categories (current/sessions) keep
+  auto-apply — wholesale replace is their normal mode.
+
 - **Server-maintained `index.md` regeneration.** The schema reserved
   `index.md` as `server_managed` since v0.1, but the server never
   rewrote it after `init` wrote a one-time stub. Now the server

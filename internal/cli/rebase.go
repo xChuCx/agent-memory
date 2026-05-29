@@ -20,9 +20,10 @@ func NewRebaseCmd() *cobra.Command {
 		rootFlag string
 		force    bool
 		asJSON   bool
+		latest   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "rebase STAGING_ID",
+		Use:   "rebase [STAGING_ID]",
 		Short: "Re-plan a staged proposal against the current disk state",
 		Long: `When a staged proposal's target sections drift (someone edited the
 target .md file between stage and apply), apply <id> rejects with
@@ -46,10 +47,17 @@ the new base; subsequent apply succeeds.
 Rebase NEVER:
   - applies to disk (only stage-area changes; user still runs apply).
   - resets the staged_at timestamp (TTL clock keeps ticking).
-  - touches the rejection audit log (rebase is recovery, not discard).`,
-		Args: cobra.ExactArgs(1),
+  - touches the rejection audit log (rebase is recovery, not discard).
+
+STAGING_ID may be a full id or any unique prefix (Git-style). Pass
+--latest instead to rebase the most recently staged proposal.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := runRebase(cmd.Context(), rootFlag, args[0], force)
+			id, err := resolveStaging(rootFlag, args, latest)
+			if err != nil {
+				return err
+			}
+			res, err := runRebase(cmd.Context(), rootFlag, id, force)
 			if err != nil {
 				return err
 			}
@@ -69,6 +77,7 @@ Rebase NEVER:
 	cmd.Flags().StringVar(&rootFlag, "root", "", "repo root (default: current working directory)")
 	cmd.Flags().BoolVar(&force, "force", false, "accept the new base content as planning input for soft drifts")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON instead of human-readable text")
+	cmd.Flags().BoolVar(&latest, "latest", false, "rebase the most recently staged proposal")
 	return cmd
 }
 

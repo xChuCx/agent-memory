@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	agentfs "github.com/agent-memory/agent-memory/internal/fs"
@@ -134,6 +135,81 @@ func LoadStagedTargets(memDir, stagingID string) ([]OperationTarget, error) {
 func StagingExists(memDir, stagingID string) bool {
 	st, err := os.Stat(filepath.Join(memDir, "staging", stagingID))
 	return err == nil && st.IsDir()
+}
+
+// LatestRef is the sentinel ResolveStagingID accepts to mean "the most
+// recently staged proposal". Staging IDs start with a UTC timestamp, so
+// the lexically-largest id is the newest.
+const LatestRef = "--latest"
+
+// ErrNoStaged is returned by ResolveStagingID when no staged proposal
+// matches the reference (empty queue, or no prefix match).
+var ErrNoStaged = errors.New("no matching staged proposal")
+
+// ErrAmbiguousPrefix is returned when a prefix matches more than one
+// staged proposal. Its message lists the candidates so the caller can
+// disambiguate.
+type ErrAmbiguousPrefix struct {
+	Prefix     string
+	Candidates []string
+}
+
+func (e *ErrAmbiguousPrefix) Error() string {
+	return fmt.Sprintf("staging id prefix %q is ambiguous; matches: %s",
+		e.Prefix, strings.Join(e.Candidates, ", "))
+}
+
+// ResolveStagingID turns a user-supplied reference into a full staging
+// ID. Accepts:
+//
+//   - LatestRef ("--latest") or "latest" → the newest staged proposal.
+//   - an exact staging ID → returned as-is (even if it's also a prefix
+//     of others).
+//   - a unique prefix (Git-style) → the single matching ID.
+//
+// Errors: ErrNoStaged (no match / empty queue), *ErrAmbiguousPrefix
+// (more than one prefix match).
+func ResolveStagingID(memDir, ref string) (string, error) {
+	proposals, err := ListStaged(memDir)
+	if err != nil {
+		return "", fmt.Errorf("ResolveStagingID: %w", err)
+	}
+	ids := make([]string, 0, len(proposals))
+	for _, p := range proposals {
+		ids = append(ids, p.StagingID)
+	}
+	sort.Strings(ids) // chronological (timestamp-prefixed)
+
+	if len(ids) == 0 {
+		return "", ErrNoStaged
+	}
+
+	if ref == LatestRef || ref == "latest" {
+		return ids[len(ids)-1], nil
+	}
+
+	// Exact match wins outright.
+	for _, id := range ids {
+		if id == ref {
+			return id, nil
+		}
+	}
+
+	// Prefix match.
+	var matches []string
+	for _, id := range ids {
+		if strings.HasPrefix(id, ref) {
+			matches = append(matches, id)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", ErrNoStaged
+	case 1:
+		return matches[0], nil
+	default:
+		return "", &ErrAmbiguousPrefix{Prefix: ref, Candidates: matches}
+	}
 }
 
 // CheckDrift re-validates one OperationTarget against the current disk state

@@ -19,21 +19,29 @@ func NewApplyCmd() *cobra.Command {
 	var (
 		rootFlag string
 		asJSON   bool
+		latest   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "apply STAGING_ID",
+		Use:   "apply [STAGING_ID]",
 		Short: "Apply a staged proposal to .agent-memory/ after drift re-check",
 		Long: `Re-validates every drift target recorded at stage time against the
 current disk state. If any target drifted (section content changed, file
 appeared/disappeared, section disappeared), the apply is rejected and
 the staging directory is left intact so the agent can re-stage.
 
+STAGING_ID may be a full id or any unique prefix (Git-style). Pass
+--latest instead to act on the most recently staged proposal.
+
 On success: every staged file is WriteAtomic'd to its destination, the
 index is updated for the touched sections, and the staging directory is
 removed.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := runApply(cmd.Context(), rootFlag, args[0])
+			id, err := resolveStaging(rootFlag, args, latest)
+			if err != nil {
+				return err
+			}
+			res, err := runApply(cmd.Context(), rootFlag, id)
 			if err != nil {
 				return err
 			}
@@ -53,6 +61,7 @@ removed.`,
 	}
 	cmd.Flags().StringVar(&rootFlag, "root", "", "repo root (default: current working directory)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON instead of human-readable text")
+	cmd.Flags().BoolVar(&latest, "latest", false, "act on the most recently staged proposal")
 	return cmd
 }
 
