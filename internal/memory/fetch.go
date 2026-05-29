@@ -257,6 +257,13 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 	cache := map[string]fileCache{}
 	sectionCount := map[string]int{}
 
+	// Token sets of sections already written into the pack, in rank order.
+	// Used to drop near-duplicates (design §20.5 step 6): because results
+	// arrive best-first, the first member of a duplicate cluster we accept
+	// is the higher-ranked one, so a later match against it is the lower
+	// rank → drop it.
+	var acceptedTokens []map[string]struct{}
+
 	for _, r := range results {
 		fc, ok := cache[r.File]
 		if !ok {
@@ -282,6 +289,18 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 			continue
 		}
 		body := fc.src[sec.ByteStart:sec.ByteEnd]
+
+		// Semantic dedup BEFORE budget (design §20.5 step 6): a section that
+		// merely repeats a higher-ranked one is dropped so it can't crowd
+		// out distinct content. Tokenize the section body only — not the
+		// synthetic @file header, whose per-section score would pollute the
+		// token set.
+		tokens := tokenize(string(body))
+		if isNearDuplicate(tokens, acceptedTokens) {
+			omitted = append(omitted, OmittedFile{Path: r.File, Reason: "near-duplicate of higher-ranked section"})
+			continue
+		}
+
 		header := fmt.Sprintf("\n<!-- @file: %s @id: %s score: %.4f -->\n", r.File, r.SectionID, r.Score)
 		chunk := header + string(body)
 		if used+len(chunk) > budget {
@@ -290,6 +309,7 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 		}
 		pack.WriteString(chunk)
 		used += len(chunk)
+		acceptedTokens = append(acceptedTokens, tokens)
 		sectionCount[r.File]++
 	}
 

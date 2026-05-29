@@ -35,6 +35,17 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - `memory.status` stays read-only and unlogged. See
     [docs/patterns/structured-logging.md](docs/patterns/structured-logging.md).
 
+- **Near-duplicate suppression in `fetch_context` (§15.1 / §20.5).** The
+  search-based context pack now collapses semantically overlapping
+  sections: after ranking and before budget enforcement, a candidate
+  whose token-set Jaccard similarity to an already-accepted (higher-
+  ranked) section exceeds `0.85` is dropped and reported `omitted` with a
+  `near-duplicate of higher-ranked section` reason. Keeps the pack from
+  paying budget twice for one idea. Dependency-free set Jaccard over
+  lowercased word tokens; threshold is a constant, matching the ranking
+  multipliers. See
+  [docs/patterns/context-pack-dedup.md](docs/patterns/context-pack-dedup.md).
+
 ### Changed (contract)
 
 - **propose_update output shapes (§15.2).** Applied responses now carry
