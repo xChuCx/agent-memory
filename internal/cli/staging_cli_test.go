@@ -93,7 +93,7 @@ func TestRunReviewList_NoStaged(t *testing.T) {
 
 func TestRunReviewDetail_ReturnsTargetsAndContent(t *testing.T) {
 	root, id := stagingFixture(t)
-	d, err := runReviewDetail(root, id, true)
+	d, err := runReviewDetail(root, id, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestRunReviewDetail_ReturnsTargetsAndContent(t *testing.T) {
 
 func TestRunReviewDetail_UnknownID(t *testing.T) {
 	root, _ := stagingFixture(t)
-	_, err := runReviewDetail(root, "no-such-id", false)
+	_, err := runReviewDetail(root, "no-such-id", false, false)
 	if err == nil {
 		t.Error("expected error for unknown staging id")
 	}

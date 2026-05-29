@@ -62,6 +62,13 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `FetchDeps`. Multipliers are package constants. See
   [docs/patterns/ranking-signals.md](docs/patterns/ranking-signals.md).
 
+- **`review <id> --diff`.** Shows a unified diff of each staged file
+  against the current on-disk version — exactly what `apply` would change
+  — so a proposal can be inspected before approval without dumping the
+  whole file (`--show` still does that). Dependency-free line-level LCS
+  unified diff (`internal/cli/diff.go`); a missing target (create_file)
+  diffs against empty. Surfaced in both human and `--json` output.
+
 ### Changed (contract)
 
 - **propose_update output shapes (§15.2).** Applied responses now carry
@@ -240,6 +247,16 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   relative path. `runInstall` now resolves `--root` to an absolute path
   for every project-local adapter before dispatch. Regression test
   added (`TestRunInstall_RelativeRootResolvedToAbsolute`).
+
+- **`fetch` crashed on queries with FTS5 metacharacters.** A query
+  containing a hyphen (`auto-apply`), a reserved word (`AND`/`OR`/`NEAR`),
+  a column filter (`x:y`), or an unbalanced quote was passed verbatim to
+  the FTS5 `MATCH` parser and failed with `SQL logic error` /
+  `no such column`. The query is now treated as natural language:
+  `Search` tokenizes it and quotes each term (`sanitizeFTSMatch`), so
+  metacharacters match literally; terms are implicitly AND-ed. A query
+  with no alphanumeric content is treated like an empty query. Found by
+  dogfooding.
 
 ## [0.2.0] — 2026-05-27
 

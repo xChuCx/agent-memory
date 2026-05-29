@@ -19,11 +19,14 @@ type ReviewList struct {
 
 // ReviewDetail is the structured output for `agent-memory review <id>`. Files
 // is populated only when --show is set (otherwise the staged file contents
-// are not echoed to keep output focused on metadata).
+// are not echoed to keep output focused on metadata). Diffs is populated only
+// when --diff is set: per-file unified diff of the staged post-state against
+// the current on-disk file (what `apply` would change).
 type ReviewDetail struct {
 	Proposal *memory.StagedProposal   `json:"proposal"`
 	Targets  []memory.OperationTarget `json:"targets"`
 	Files    map[string]string        `json:"files,omitempty"`
+	Diffs    map[string]string        `json:"diffs,omitempty"`
 }
 
 // NewReviewCmd returns the `agent-memory review` subcommand.
@@ -32,6 +35,7 @@ func NewReviewCmd() *cobra.Command {
 		rootFlag    string
 		asJSON      bool
 		showContent bool
+		showDiff    bool
 		latest      bool
 	)
 	cmd := &cobra.Command{
@@ -42,10 +46,10 @@ func NewReviewCmd() *cobra.Command {
 file count, and stage timestamp.
 
 With a STAGING_ID (full id or unique prefix, Git-style) or --latest:
-prints that proposal's full metadata, drift targets, and (with --show)
-the post-state bytes of every file the proposal would write. The on-disk
-current state is NOT shown — pipe the staged content into your usual
-diff tool against the live file.`,
+prints that proposal's full metadata, drift targets, and optionally the
+file contents. Use --diff to see a unified diff of each staged file
+against the current on-disk version (exactly what apply would change);
+use --show to dump the full staged post-state instead.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// No arg and no --latest → list mode.
@@ -63,7 +67,7 @@ diff tool against the live file.`,
 			if err != nil {
 				return err
 			}
-			detail, err := runReviewDetail(rootFlag, id, showContent)
+			detail, err := runReviewDetail(rootFlag, id, showContent, showDiff)
 			if err != nil {
 				return err
 			}
@@ -76,6 +80,7 @@ diff tool against the live file.`,
 	cmd.Flags().StringVar(&rootFlag, "root", "", "repo root (default: current working directory)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON instead of human-readable text")
 	cmd.Flags().BoolVar(&showContent, "show", false, "include the staged post-state of every file (detail mode only)")
+	cmd.Flags().BoolVar(&showDiff, "diff", false, "show a unified diff of each staged file vs the current on-disk version (detail mode only)")
 	cmd.Flags().BoolVar(&latest, "latest", false, "show the most recently staged proposal in detail")
 	return cmd
 }
@@ -94,8 +99,8 @@ func runReviewList(rootFlag string) (*ReviewList, error) {
 }
 
 // runReviewDetail loads one proposal + its targets + (optionally) staged
-// file contents.
-func runReviewDetail(rootFlag, stagingID string, showContent bool) (*ReviewDetail, error) {
+// file contents and/or a unified diff against the current on-disk state.
+func runReviewDetail(rootFlag, stagingID string, showContent, showDiff bool) (*ReviewDetail, error) {
 	memDir, err := reviewMemDir(rootFlag)
 	if err != nil {
 		return nil, err
@@ -116,17 +121,35 @@ func runReviewDetail(rootFlag, stagingID string, showContent bool) (*ReviewDetai
 	}
 
 	out := &ReviewDetail{Proposal: p, Targets: targets}
-	if showContent {
+	if showContent || showDiff {
 		files := make(map[string]string, len(p.Files))
+		diffs := make(map[string]string, len(p.Files))
 		for _, rel := range p.Files {
-			abs := filepath.Join(memDir, "staging", stagingID, "files", filepath.FromSlash(rel))
-			b, err := os.ReadFile(abs)
+			staged, err := os.ReadFile(filepath.Join(memDir, "staging", stagingID, "files", filepath.FromSlash(rel)))
 			if err != nil {
 				return nil, fmt.Errorf("review: read staged %s: %w", rel, err)
 			}
-			files[rel] = string(b)
+			files[rel] = string(staged)
+			if showDiff {
+				// Current on-disk version; missing file (create_file) diffs
+				// against empty → all-additions.
+				curBytes, err := os.ReadFile(filepath.Join(memDir, filepath.FromSlash(rel)))
+				if err != nil && !os.IsNotExist(err) {
+					return nil, fmt.Errorf("review: read current %s: %w", rel, err)
+				}
+				d := unifiedDiff(string(curBytes), string(staged), "a/"+rel, "b/"+rel)
+				if d == "" {
+					d = "(no change)\n"
+				}
+				diffs[rel] = d
+			}
 		}
-		out.Files = files
+		if showContent {
+			out.Files = files
+		}
+		if showDiff {
+			out.Diffs = diffs
+		}
 	}
 	return out, nil
 }
@@ -235,6 +258,20 @@ func writeReviewDetailHuman(w io.Writer, d *ReviewDetail, showContent bool) erro
 			fmt.Fprintln(w, line)
 			if t.Hash != "" {
 				fmt.Fprintf(w, "      expected hash: %s\n", t.Hash)
+			}
+		}
+	}
+
+	if len(d.Diffs) > 0 {
+		fmt.Fprintln(w)
+		for _, rel := range d.Proposal.Files {
+			diff, ok := d.Diffs[rel]
+			if !ok {
+				continue
+			}
+			fmt.Fprint(w, diff)
+			if len(diff) > 0 && diff[len(diff)-1] != '\n' {
+				fmt.Fprintln(w)
 			}
 		}
 	}

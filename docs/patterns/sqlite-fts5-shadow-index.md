@@ -90,6 +90,15 @@ LIMIT ?;
 - `bm25()` returns a score where **lower is better** (FTS5 convention). Sort ASC.
 - `snippet()` returns a preview centred on the match. Arguments: column index, start marker, end marker, ellipsis, tokens.
 - Custom ranking multipliers (scope boost, freshness, archive penalty per design doc §20.4) are applied in Go code after the SQL query — multiply / add against `bm25()` score there.
+- **The MATCH argument is a sanitized query, never the raw user/agent
+  string.** Fetch queries are natural language; passing them verbatim lets
+  FTS5 metacharacters (`-`, `:`, `"`, `*`, `AND`/`OR`/`NEAR`) reach the
+  query parser and crash with `SQL logic error` / `no such column`.
+  `sanitizeFTSMatch` (query.go) extracts `[\p{L}\p{N}]+` runs and
+  double-quotes each as a literal term (implicit AND between them); a query
+  with no alphanumeric content becomes empty (no rows). The full section
+  body (`content` column) is also selected so content-level ranking signals
+  can inspect it.
 
 ## Driver
 

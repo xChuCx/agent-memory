@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"unicode"
 )
 
 // SearchResult is one hit from a Search query, ranked by BM25.
@@ -38,12 +40,16 @@ var ErrNotFound = errors.New("index: row not found")
 // BM25 score (FTS5 convention: lower = better). limit ≤ 0 falls back to
 // 50.
 //
-// The query string is passed through to FTS5 verbatim; callers are
-// responsible for escaping any FTS5 syntax that should be literal.
-// Empty queries return no results without error — callers (the fetch
-// pipeline) handle the empty case by returning the bootstrap pack.
+// The raw query is treated as natural language, NOT as FTS5 query syntax:
+// sanitizeFTSMatch tokenizes it and quotes each term, so punctuation,
+// hyphens (`auto-apply`), and reserved words (AND/OR/NEAR) are matched
+// literally instead of crashing the parser with a syntax/"no such column"
+// error. Terms are implicitly AND-ed (FTS5 default). A query with no
+// alphanumeric tokens returns no results without error — callers (the
+// fetch pipeline) handle the empty case by returning the bootstrap pack.
 func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
-	if query == "" {
+	match := sanitizeFTSMatch(query)
+	if match == "" {
 		return nil, nil
 	}
 	if limit <= 0 {
@@ -62,7 +68,7 @@ func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchRe
 		 WHERE memory_search MATCH ?
 		 ORDER BY score
 		 LIMIT ?`,
-		query, limit,
+		match, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("Search: %w", err)
@@ -78,6 +84,46 @@ func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchRe
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// sanitizeFTSMatch turns an arbitrary natural-language query into a safe
+// FTS5 MATCH expression. It extracts maximal letter/digit runs as terms and
+// wraps each in double quotes, so every term is a literal phrase: FTS5
+// operators (AND/OR/NOT/NEAR), column filters (`x:y`), prefixes (`*`),
+// hyphens, and quotes can't reach the parser. Terms are space-joined, which
+// FTS5 reads as implicit AND. Returns "" when the query has no alphanumeric
+// content (caller treats this like an empty query).
+//
+// Terms contain only [\p{L}\p{N}] by construction, so there are no embedded
+// double quotes to escape.
+func sanitizeFTSMatch(query string) string {
+	var (
+		b     strings.Builder
+		term  strings.Builder
+		first = true
+	)
+	flush := func() {
+		if term.Len() == 0 {
+			return
+		}
+		if !first {
+			b.WriteByte(' ')
+		}
+		b.WriteByte('"')
+		b.WriteString(term.String())
+		b.WriteByte('"')
+		term.Reset()
+		first = false
+	}
+	for _, r := range query {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			term.WriteRune(r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return b.String()
 }
 
 // GetSection returns the memory_sections row for a (file, section_id) pair.
