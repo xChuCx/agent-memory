@@ -5,24 +5,28 @@ memory updates out. Branch-aware. Secret-safe. Byte-preserving. Two tools.
 
 ## Status
 
-**Release 0.2** — quality-of-life kit on top of v0.1.0's Core Contract.
-Six closed milestones beyond 0.1:
+**Release 0.3** — the completeness-and-polish release on top of v0.2.0.
+Closes the remaining design-doc gaps and hardens the everyday workflow,
+much of it surfaced by dogfooding agent-memory on its own repo:
 
-- **M4** Git auto-stage / auto-commit on apply (opt-in via manifest)
-- **M5 b2** Staging TTL sweeper + rejection audit log
-- **M6 b2** Three new agent-runtime adapters: Cursor (`.cursor/rules/`),
-  AGENTS.md (industry-broad convention), GEMINI.md
-- **M7** `rebuild-index` (FTS shadow regen) and `rebase` (re-plan
-  staged proposals against a new base after external edits)
-- **M8** Benchmark harness with deterministic fixtures + per-package
-  hot-path benches
+- **Full MCP surface** — `memory.status` joins `fetch_context` and
+  `propose_update` as the third tool.
+- **M4 archival ops** — `archive_section` / `remove_section` /
+  `rename_heading`, plus a server-maintained `index.md`.
+- **Security layer** — secret + PII scanning with allowlist size limits;
+  real per-section schema validation.
+- **Observability** — structured `slog` logging (stderr-only, secret-safe).
+- **Smarter retrieval** — Jaccard dedup, the §20.4 ranking signals,
+  OR-match recall, crash-safe FTS queries.
+- **Fuller CLI** — `propose` (write without an MCP server), `review --diff`,
+  staging-id prefixes + `--latest`.
 
 The Core Contract from v0.1.0 (Design Doc v0.4.1: MCP server, structured
 operations, drift-checked staging, secret scanning, Claude Code adapter)
-is unchanged — all 0.2 work is additive.
+is unchanged — all 0.3 work is additive. The git merge driver and a
+behavioural eval harness remain deferred.
 
-See [CHANGELOG.md](CHANGELOG.md) for the full 0.2 changelist and what's
-deferred to 0.3 (git merge driver).
+See [CHANGELOG.md](CHANGELOG.md) for the full 0.3 changelist.
 
 | Document | Purpose |
 |---|---|
@@ -51,7 +55,7 @@ go build -o agent-memory ./cmd/agent-memory
 
 # Verify
 ./agent-memory version
-# → 0.2.0
+# → 0.3.0
 
 # Read context
 ./agent-memory fetch                # bootstrap pack

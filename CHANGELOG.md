@@ -7,6 +7,22 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-29
+
+The completeness-and-polish release. It closes the remaining design-doc
+gaps from the v0.2.0 audit and hardens the everyday workflow — much of the
+polish surfaced by dogfooding agent-memory on its own repository.
+
+Highlights: the third MCP tool `memory.status`; M4 archival operations
+(`archive_section` / `remove_section` / `rename_heading`) with a
+server-maintained `index.md`; the secret + PII hardening layer with
+allowlist limits; real per-section schema validation; structured `slog`
+logging (stderr-only, secret-safe); smarter retrieval (Jaccard dedup, the
+§20.4 ranking signals, OR-match recall, crash-safe FTS queries); and a
+fuller CLI — `propose` (create proposals without an MCP server),
+`review --diff`, and staging-id prefixes + `--latest`. Tag-driven
+goreleaser publishes the cross-platform binary matrix.
+
 ### Added
 
 - **`agent-memory propose` — CLI write path.** Create proposals without an
