@@ -228,6 +228,44 @@ func TestRunInstall_GeminiProjectLocal(t *testing.T) {
 	}
 }
 
+// TestRunInstall_RelativeRootResolvedToAbsolute is a regression test for a
+// bug found while dogfooding on another agent:
+//
+//	install gemini: gemini install: write GEMINI.md:
+//	WriteAtomic: path must be absolute: "GEMINI.md"
+//
+// A relative --root (e.g. ".") was passed straight through to the adapter,
+// which joined it with the adapter filename and handed WriteAtomic a
+// relative path. runInstall must resolve --root to an absolute path for
+// every project-local adapter before dispatch.
+func TestRunInstall_RelativeRootResolvedToAbsolute(t *testing.T) {
+	tmp := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Restore cwd BEFORE t.TempDir's own cleanup removes the dir (LIFO:
+	// this runs first), so Windows can delete a dir that isn't the cwd.
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := runInstall(installOptions{Adapter: "gemini", Root: "."})
+	if err != nil {
+		t.Fatalf("runInstall with relative root: %v", err)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("Files = %v, want exactly one", res.Files)
+	}
+	if !filepath.IsAbs(res.Files[0]) {
+		t.Errorf("installed path is not absolute: %q", res.Files[0])
+	}
+	if _, err := os.Stat(res.Files[0]); err != nil {
+		t.Errorf("GEMINI.md not written at %q: %v", res.Files[0], err)
+	}
+}
+
 func TestRunInstall_AgentsRejectsUserGlobal(t *testing.T) {
 	_, err := runInstall(installOptions{Adapter: "agents", UserGlobal: true})
 	if err == nil {

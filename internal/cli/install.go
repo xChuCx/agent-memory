@@ -98,8 +98,8 @@ func runInstall(opts installOptions) (*InstallResult, error) {
 	// Centralise the "default Root to cwd" rule so each adapter case
 	// stays tiny.
 	root := opts.Root
-	if !opts.UserGlobal && root == "" {
-		r, err := resolveRoot("")
+	if !opts.UserGlobal {
+		r, err := resolveRoot(opts.Root)
 		if err != nil {
 			return nil, err
 		}

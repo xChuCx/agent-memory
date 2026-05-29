@@ -215,6 +215,16 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   Pre-built v0.2.0 binaries still report `0.2.0` because the
   ldflags stamp is applied per build; nothing changes for users.
 
+### Fixed
+
+- **`install <adapter> --root <relative>` failed** with
+  `WriteAtomic: path must be absolute` (seen as
+  `install gemini: ... write GEMINI.md: ... "GEMINI.md"`). A relative
+  `--root` was passed straight to the adapter, which handed WriteAtomic a
+  relative path. `runInstall` now resolves `--root` to an absolute path
+  for every project-local adapter before dispatch. Regression test
+  added (`TestRunInstall_RelativeRootResolvedToAbsolute`).
+
 ## [0.2.0] — 2026-05-27
 
 Quality-of-life release on top of v0.1.0's Core Contract: git
