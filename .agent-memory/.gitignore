@@ -1,0 +1,14 @@
+# Local state — per-developer, never committed.
+local/
+sessions/
+staging/
+
+# Derived indexes and caches — rebuildable from the Markdown source.
+meta/*.sqlite
+meta/*.sqlite-*
+meta/*.db
+meta/*.db-*
+
+# Advisory lock files — kernel state, not portable.
+meta/lock
+meta/lock.info

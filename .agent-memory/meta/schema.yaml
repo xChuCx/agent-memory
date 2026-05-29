@@ -1,0 +1,81 @@
+version: 0.4.1
+categories:
+    archive:
+        file_glob: archive/*.md
+        approval: stage
+        agent_writable: true
+        write_once: true
+        git_tracked: true
+    conventions:
+        file: conventions.md
+        section_id_required: true
+        approval: stage
+        agent_writable: true
+        git_tracked: true
+        provenance:
+            required_for_new_sections: true
+            allowed_source_types:
+                - file
+                - test
+                - user
+    current:
+        file_glob: local/current.*.md
+        approval: apply
+        agent_writable: true
+        git_tracked: false
+    decisions:
+        file: decisions.md
+        section_id_required: true
+        section_schema:
+            per_section_required_fields:
+                - name: Date
+                  pattern: ^\d{4}-\d{2}-\d{2}$
+                - name: Status
+                  enum:
+                    - active
+                    - superseded
+                    - deprecated
+                    - proposed
+                - name: Confidence
+                  enum:
+                    - confirmed
+                    - inferred
+                    - user-provided
+        approval: stage
+        agent_writable: true
+        git_tracked: true
+        provenance:
+            required: true
+            allowed_source_types:
+                - file
+                - test
+                - user
+            forbidden_source_types:
+                - external
+                - inference
+    index:
+        file: index.md
+        approval: server_only
+        server_managed: true
+        git_tracked: true
+    modules:
+        file_glob: modules/*.md
+        section_id_required: true
+        approval: stage
+        agent_writable: true
+        git_tracked: true
+        provenance:
+            required: true
+    pitfalls:
+        file: pitfalls.md
+        section_id_required: true
+        approval: apply
+        agent_writable: true
+        git_tracked: true
+        provenance:
+            required_for_new_sections: true
+    sessions:
+        file_glob: sessions/*.md
+        approval: apply
+        agent_writable: true
+        git_tracked: false

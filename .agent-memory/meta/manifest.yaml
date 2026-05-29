@@ -1,0 +1,48 @@
+version: 0.4.1
+project:
+    name: agent-memory
+    root: .
+budgets:
+    bootstrap_chars: 12000
+    fetch_context_chars: 24000
+    max_file_chars: 20000
+updates:
+    approval:
+        decisions: stage
+        conventions: stage
+        modules: stage
+        pitfalls_replace: stage
+        pitfalls_append: apply
+        archive: stage
+        current: apply
+        current_shared: apply
+        sessions: apply
+        index: server_only
+staging:
+    ttl_seconds: 604800
+security:
+    secret_scan: true
+    reject_untrusted_durable_updates: true
+    pii_scan: true
+    allowlist_limits:
+        max_bytes_per_file: 1024
+        max_regions_per_file: 10
+        max_bytes_per_region: 512
+git:
+    track_local: false
+    track_sessions: false
+    auto_stage_changes: false
+    auto_commit: false
+    commit_message_prefix: 'chore(memory):'
+    merge_driver_installed: false
+archive:
+    enabled: true
+    stale_threshold_days: 60
+concurrency:
+    wait_timeout_seconds: 10
+local_state:
+    per_branch: true
+    shared_file_enabled: true
+    cleanup_orphans_warning_days: 90
+sessions:
+    per_branch: false
