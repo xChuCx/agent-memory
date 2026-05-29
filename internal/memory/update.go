@@ -85,8 +85,16 @@ type OwnerInfo struct {
 	OpID string `json:"op_id,omitempty"`
 }
 
+// AffectedSection identifies one (file, section) touched by an applied
+// proposal. Part of the design §15.2 Applied output.
+type AffectedSection struct {
+	File      string `json:"file"`
+	SectionID string `json:"section_id,omitempty"`
+}
+
 // ProposeResponse is what the orchestrator returns to the caller. The MCP
-// tool serialises this verbatim.
+// tool serialises this verbatim. Field set tracks design §15.2's three
+// output shapes (Applied / Staged / Rejected).
 type ProposeResponse struct {
 	Status               string                    `json:"status"`
 	Reason               string                    `json:"reason,omitempty"`
@@ -97,6 +105,29 @@ type ProposeResponse struct {
 	Findings             []Finding                 `json:"findings,omitempty"`
 	Violations           []schema.SectionViolation `json:"violations,omitempty"`
 	ProvenanceViolations []string                  `json:"provenance_violations,omitempty"`
+
+	// --- Applied output (design §15.2) ---
+	// AppliedAt is the RFC3339 UTC timestamp of the write. Set on apply.
+	AppliedAt string `json:"applied_at,omitempty"`
+	// AffectedSections lists the (file, section_id) pairs the proposal's
+	// operations touched. Set on apply.
+	AffectedSections []AffectedSection `json:"affected_sections,omitempty"`
+	// IndexUpdated reports whether the FTS shadow was refreshed. Set on
+	// apply (true when deps.Idx was present).
+	IndexUpdated bool `json:"index_updated,omitempty"`
+	// Warnings carries non-fatal advisories. Always present on apply
+	// (possibly empty) so consumers can rely on the field.
+	Warnings []string `json:"warnings,omitempty"`
+
+	// --- Staged output (design §15.2) ---
+	// StagingTTLSeconds is the manifest's staging.ttl_seconds. Set on stage.
+	StagingTTLSeconds int `json:"staging_ttl_seconds,omitempty"`
+	// HumanApprovalRequired is always true on the staged path (staging
+	// means a human must review). Set on stage.
+	HumanApprovalRequired bool `json:"human_approval_required,omitempty"`
+	// ReviewCommand is the exact CLI invocation to inspect the staged
+	// proposal. Set on stage.
+	ReviewCommand string `json:"review_command,omitempty"`
 
 	// AutoStage reports git auto-stage / auto-commit outcomes when the
 	// applied path produced a write AND manifest.git.auto_stage_changes
@@ -154,6 +185,13 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 	}
 	if deps.Manifest == nil || deps.Schema == nil || deps.MemoryDir == "" {
 		return nil, errors.New("ProposeUpdate: deps.Manifest, deps.Schema, deps.MemoryDir are required")
+	}
+
+	// Confidence defaults to "inferred" when the agent omits it (design
+	// §15.2). Setting it here means provenance validation and the staged
+	// proposal.json both record the resolved value, not an empty string.
+	if req.Confidence == "" {
+		req.Confidence = "inferred"
 	}
 
 	// (2) session_log path rewrite — done on the raw OperationInput before
@@ -484,13 +522,20 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (*P
 	}
 	final := CombineRoutings(routings)
 
-	// Force-stage archival ops. Per design §15.8/§15.9, archive_section
-	// and remove_section are ALWAYS staged regardless of the intent's
-	// manifest routing — archiving is durable and removal destroys
-	// source content, so both warrant human review.
-	if final.Mode == schema.ApprovalApply && containsArchivalOp(ops) {
-		final.Mode = schema.ApprovalStage
-		final.Reason += "; forced to stage: archive_section/remove_section are always staged (design §15.8/§15.9)"
+	// Force-stage operations that must never auto-apply regardless of the
+	// intent's manifest routing:
+	//   - archive_section / remove_section (§15.8/§15.9): durable +
+	//     destructive.
+	//   - create_file with if_exists=replace on a DURABLE (git-tracked)
+	//     category (§15.3): overwriting durable content wholesale is
+	//     high-risk. Ephemeral local categories (current/sessions,
+	//     git_tracked=false) keep their auto-apply behaviour — replace is
+	//     their normal mode and the intent table marks them auto-apply.
+	if final.Mode == schema.ApprovalApply {
+		if reason := forcedStageReason(resolved); reason != "" {
+			final.Mode = schema.ApprovalStage
+			final.Reason += "; forced to stage: " + reason
+		}
 	}
 
 	switch final.Mode {
@@ -568,11 +613,42 @@ func applyImmediately(
 	autoStage := maybeAutoStage(deps, repoRoot, stageList, intent, rationale)
 
 	return &ProposeResponse{
-		Status:    StatusApplied,
-		Files:     append([]string(nil), fileOrder...),
-		Routing:   routing,
-		AutoStage: &autoStage,
+		Status:           StatusApplied,
+		Files:            append([]string(nil), fileOrder...),
+		Routing:          routing,
+		AppliedAt:        time.Now().UTC().Format(time.RFC3339),
+		AffectedSections: affectedSections(fileOrder, fileOps),
+		IndexUpdated:     deps.Idx != nil,
+		Warnings:         []string{},
+		AutoStage:        &autoStage,
 	}, nil
+}
+
+// affectedSections derives the (file, section_id) pairs the proposal's
+// operations touched, from the section-bearing targets of each op.
+// Iterates fileOrder for deterministic output; deduped.
+func affectedSections(fileOrder []string, fileOps map[string][]opCat) []AffectedSection {
+	var out []AffectedSection
+	seen := map[string]bool{}
+	for _, rel := range fileOrder {
+		for _, oc := range fileOps[rel] {
+			if oc.op == nil {
+				continue // synthetic extra-file entry (archive destination)
+			}
+			for _, t := range oc.op.Targets() {
+				if t.SectionID == "" {
+					continue
+				}
+				key := t.Path + "\x00" + t.SectionID
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				out = append(out, AffectedSection{File: t.Path, SectionID: t.SectionID})
+			}
+		}
+	}
+	return out
 }
 
 // reindexFile re-parses one applied file and upserts its sections + FileDoc.
@@ -703,11 +779,16 @@ func stageProposal(
 		return nil, fmt.Errorf("stageProposal: write proposal.json: %w", err)
 	}
 
+	ttl := deps.Manifest.Staging.TTLSeconds
 	return &ProposeResponse{
-		Status:    StatusStaged,
-		Files:     append([]string(nil), fileOrder...),
-		Routing:   routing,
-		StagingID: stagingID,
+		Status:                StatusStaged,
+		Files:                 append([]string(nil), fileOrder...),
+		Routing:               routing,
+		StagingID:             stagingID,
+		StagingTTLSeconds:     ttl,
+		HumanApprovalRequired: true,
+		ReviewCommand:         "agent-memory review " + stagingID,
+		Message:               "Memory update staged; human approval required by policy. Review with: agent-memory review " + stagingID,
 	}, nil
 }
 
@@ -798,17 +879,28 @@ func containsNewSectionOp(ops []Operation) bool {
 	return false
 }
 
-// containsArchivalOp reports whether any op is archive_section or
-// remove_section — both of which must always be staged (design
-// §15.8/§15.9).
-func containsArchivalOp(ops []Operation) bool {
-	for _, op := range ops {
-		switch op.Kind() {
+// forcedStageReason returns a human-readable reason when any op in the
+// proposal must be staged regardless of routing, or "" if none do.
+//   - archive_section / remove_section always stage (§15.8/§15.9).
+//   - create_file with if_exists=replace stages when its target category
+//     is durable (git-tracked); ephemeral local categories keep
+//     auto-apply (see the call site for the §15.3-vs-intent-table
+//     reconciliation).
+func forcedStageReason(resolved []opCat) string {
+	for _, oc := range resolved {
+		if oc.op == nil {
+			continue
+		}
+		switch oc.op.Kind() {
 		case "archive_section", "remove_section":
-			return true
+			return "archive_section/remove_section are always staged (design §15.8/§15.9)"
+		case "create_file":
+			if cf, ok := oc.op.(*CreateFile); ok && cf.IfExists == "replace" && oc.category.GitTracked {
+				return fmt.Sprintf("create_file if_exists=replace on durable category %q always stages (design §15.3)", oc.category.Name)
+			}
 		}
 	}
-	return false
+	return ""
 }
 
 // categoryForFile resolves a file's schema category. Prefers the

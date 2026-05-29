@@ -37,6 +37,17 @@ type ProposeUpdateOutput struct {
 	Findings             []memory.Finding          `json:"findings,omitempty" jsonschema:"on secret_detected: per-finding type + line"`
 	Violations           []schema.SectionViolation `json:"violations,omitempty" jsonschema:"on validation_failed: per-section schema violations"`
 	ProvenanceViolations []string                  `json:"provenance_violations,omitempty" jsonschema:"on provenance_violation: list of violation strings"`
+
+	// Applied output (design §15.2).
+	AppliedAt        string                   `json:"applied_at,omitempty" jsonschema:"on applied: RFC3339 UTC write time"`
+	AffectedSections []memory.AffectedSection `json:"affected_sections,omitempty" jsonschema:"on applied: (file, section_id) pairs touched"`
+	IndexUpdated     bool                     `json:"index_updated,omitempty" jsonschema:"on applied: whether the FTS index was refreshed"`
+	Warnings         []string                 `json:"warnings,omitempty" jsonschema:"on applied: non-fatal advisories"`
+
+	// Staged output (design §15.2).
+	StagingTTLSeconds     int    `json:"staging_ttl_seconds,omitempty" jsonschema:"on staged: seconds until the proposal expires"`
+	HumanApprovalRequired bool   `json:"human_approval_required,omitempty" jsonschema:"on staged: always true — a human must review"`
+	ReviewCommand         string `json:"review_command,omitempty" jsonschema:"on staged: CLI command to inspect the proposal"`
 }
 
 // registerProposeUpdate wires memory.propose_update onto server. The closure
@@ -124,5 +135,14 @@ func runProposeUpdate(ctx context.Context, root string, input ProposeUpdateInput
 		Findings:             resp.Findings,
 		Violations:           resp.Violations,
 		ProvenanceViolations: resp.ProvenanceViolations,
+
+		AppliedAt:        resp.AppliedAt,
+		AffectedSections: resp.AffectedSections,
+		IndexUpdated:     resp.IndexUpdated,
+		Warnings:         resp.Warnings,
+
+		StagingTTLSeconds:     resp.StagingTTLSeconds,
+		HumanApprovalRequired: resp.HumanApprovalRequired,
+		ReviewCommand:         resp.ReviewCommand,
 	}, nil
 }
