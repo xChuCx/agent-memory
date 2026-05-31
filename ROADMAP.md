@@ -55,14 +55,16 @@ Goal of 1.0: a **stable memory format + MCP contract** and a **proven**
 single-repo / git-team workflow. Mostly polish + evidence, not new
 surface.
 
-- **Team sharing via git, done right.** `git` merge driver for
-  `.agent-memory/` so concurrent memory edits merge cleanly instead of
-  conflicting (the one gap git leaves for shared memory). *(was M7)*
-- **Prove it — behavioural eval harness.** Measure whether memory actually
-  helps: a "groundhog-day" A/B (agent with vs without memory) on
-  repeated-mistake-avoidance and redundant-rediscovery, plus an offline
-  retrieval-quality eval (precision/recall/MRR) that guards ranking/dedup
-  regressions. This is the number the launch leads with. *(was M8)*
+- ✅ **Team sharing via git, done right** *(shipped, M7).* The section-aware
+  `git` merge driver unions concurrent edits to `.agent-memory/` instead of
+  conflicting — the one gap git left for shared memory. See
+  [docs/patterns/merge-driver.md](docs/patterns/merge-driver.md).
+- **Prove it — behavioural eval.** The offline **retrieval-quality eval**
+  (recall/MRR/nDCG, CI-guarded) is ✅ shipped
+  ([docs/eval/retrieval.md](docs/eval/retrieval.md)). Still to do: the
+  **behavioural A/B** — a "groundhog-day" measurement of whether memory
+  cuts an agent's repeated mistakes / redundant rediscovery. That's the
+  task-success number a launch leads with. *(was M8)*
 - **Hygiene & ergonomics.** `clean-local` (GC orphaned branch-local
   files), write-time semantic-duplication check, a setup smoothing pass
   (one-line install, MCP config snippet), `review`/`propose` UX from

@@ -55,8 +55,12 @@ much of it surfaced by dogfooding agent-memory on its own repo:
 
 The Core Contract from v0.1.0 (Design Doc v0.4.1: MCP server, structured
 operations, drift-checked staging, secret scanning, Claude Code adapter)
-is unchanged — all 0.3 work is additive. The git merge driver and a
-behavioural eval harness remain deferred.
+is unchanged — all 0.3 work is additive.
+
+Since 0.3 (on `main`, pending the next release): the section-aware git
+**merge driver** for team-shared memory, an offline **retrieval-quality
+eval**, and open-source packaging. The behavioural eval harness remains
+the main deferred item — see [ROADMAP.md](ROADMAP.md).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full 0.3 changelist.
 
