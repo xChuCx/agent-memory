@@ -7,6 +7,17 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-31
+
+The team-and-launch release: agent-memory is open-source-ready and safe to
+share across a team. Highlights — a section-aware **git merge driver**
+(M7) so concurrent edits to `.agent-memory/` union by section instead of
+conflicting; an offline **retrieval-quality eval** (recall@5 0.98,
+CI-guarded) so the search has a defensible number; Apache-2.0 licensing
+and open-source packaging (SECURITY/CONTRIBUTING/CoC, ROADMAP, badges,
+reproducible demo); and the Go module path corrected to
+`github.com/xChuCx/agent-memory` so `go install …@latest` resolves.
+
 ### Added
 
 - **Section-aware git merge driver (M7) — team sharing.** `.agent-memory/`

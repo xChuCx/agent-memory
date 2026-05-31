@@ -37,9 +37,11 @@ git-native, reviewable, secret-safe. The clip is reproducible:
 
 ## Status
 
-**Release 0.3** — the completeness-and-polish release on top of v0.2.0.
-Closes the remaining design-doc gaps and hardens the everyday workflow,
-much of it surfaced by dogfooding agent-memory on its own repo:
+**Release 0.4** — the team-and-launch release: open-source-ready, safe to
+share across a team (section-aware git merge driver), with a measured
+retrieval-quality number. It builds on 0.3, the completeness-and-polish
+release that closed the remaining design-doc gaps — much of it surfaced by
+dogfooding agent-memory on its own repo:
 
 - **Full MCP surface** — `memory.status` joins `fetch_context` and
   `propose_update` as the third tool.
@@ -55,14 +57,16 @@ much of it surfaced by dogfooding agent-memory on its own repo:
 
 The Core Contract from v0.1.0 (Design Doc v0.4.1: MCP server, structured
 operations, drift-checked staging, secret scanning, Claude Code adapter)
-is unchanged — all 0.3 work is additive.
+is unchanged — every release since has been additive.
 
-Since 0.3 (on `main`, pending the next release): the section-aware git
-**merge driver** for team-shared memory, an offline **retrieval-quality
-eval**, and open-source packaging. The behavioural eval harness remains
-the main deferred item — see [ROADMAP.md](ROADMAP.md).
+**0.4 adds:** the section-aware git **merge driver** (team-shared memory
+unions instead of conflicting), an offline **retrieval-quality eval**
+(recall@5 0.98, CI-guarded), Apache-2.0 licensing + open-source packaging,
+and a corrected Go module path so `go install …@latest` works. The
+behavioural eval harness remains the main deferred item — see
+[ROADMAP.md](ROADMAP.md).
 
-See [CHANGELOG.md](CHANGELOG.md) for the full 0.3 changelist.
+See [CHANGELOG.md](CHANGELOG.md) for the full changelist.
 
 | Document | Purpose |
 |---|---|
