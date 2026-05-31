@@ -4,8 +4,9 @@ The [retrieval](../../docs/eval/retrieval.md) and
 [continuity](../../docs/eval/continuity.md) evals are deterministic and run
 in CI: they show memory **surfaces** the right knowledge across sessions.
 This harness measures the next question — does an agent **act** on it?
-i.e. does memory cut *repeated mistakes*? That needs a real LLM in the
-loop, so you run it with your model; it is intentionally **not** in CI.
+Concretely: does it use a project-specific convention it could *only* learn
+from memory? That needs a real LLM in the loop, so you run it with your
+model; it is intentionally **not** in CI.
 
 > Status: scaffold. Scenarios + protocol + a pluggable runner are here;
 > wire in your agent (`$AGENT_CMD`) and fill the results table.
@@ -24,37 +25,44 @@ output is non-deterministic):
 Then give the agent the **session-2 task** and score its output by literal
 (case-insensitive) substring match:
 
-- `correct_signal` present — it **applied** the project rule.
-- `mistake_signal` present — it made the **default mistake** the lesson warns of.
+- `correct_signal` present — the answer used the **project-specific API** the
+  rule prescribes (e.g. `httpx.NewClient`): an in-house token the model can't
+  produce unless it learned it from memory.
 
-**Headline metric: followed-rule rate** = fraction of trials where the
-answer applied the rule *and* avoided the mistake (`correct ∧ ¬mistake`),
-with vs without memory, and the **lift** between them. Secondary:
-redundant-rediscovery (did the agent re-derive what memory already had —
-proxy via tool calls / tokens / wall-clock; see `--output-format stream-json`).
+**Headline metric: applied-rule rate** = fraction of trials whose answer
+contains `correct_signal`, with vs without memory, and the **lift** between
+them. Because the token is unguessable, `without` ≈ 0 and any `with` hits
+*prove* memory was fetched and used.
+
+We score on the **positive** signal only — not on "avoided the mistake."
+When the rule is "use Y, not X", the model's prose routinely names X ("I used
+Y instead of X"), so an X-detector false-fires even on a *correct* answer (we
+saw exactly this with `time.Now()`). `mistake_signal` is therefore
+informational — shown in the `DEBUG` line, not scored. Secondary:
+redundant-rediscovery (tool calls / tokens; `--output-format stream-json`).
 
 ## What makes a scenario show lift
 
-Memory can only change behaviour the model wouldn't already get right. A
-scenario shows lift **only if its rule is something the model can't guess** —
-project-specific, counter to the common default, or otherwise non-obvious:
+Memory can only change behaviour the model wouldn't already produce. A
+scenario shows lift **only if its `correct_signal` is a token the model can't
+guess** — an in-house API or convention, not a general best practice:
 
-- ✅ *"In this repo inject `billing.Clock`; never call `time.Now()` directly."*
-  The model's default is `time.Now()`, so memoryless it makes the mistake;
-  with memory it follows the rule. Clear lift.
-- ❌ *"Use `TIMESTAMPTZ`, not naive `TIMESTAMP`."* A strong model already
-  knows this best practice → **both** arms score ~100% and lift ≈ 0. That's
-  not memory failing, just a scenario with no knowledge gap to fill.
+- ✅ *"All outbound HTTP goes through `httpx.NewClient()`."* The model's
+  default is `http.Client{}`; it can't know your `httpx` wrapper exists, so
+  `without` never emits `httpx.NewClient` and `with` (via memory) does.
+  Clear, self-validating lift.
+- ❌ *"Inject a `Clock` instead of calling `time.Now()`."* A strong model
+  already injects a clock for testability → **both** arms emit `Clock` and
+  lift ≈ 0. Not memory failing — the convention was guessable.
 
-So `lift = 0` with **both arms high** means the rule was too obvious — swap
-in a more idiosyncratic one. `lift = 0` with **both arms low** means
-something upstream broke — run `DEBUG=1` (it prints `len=` per trial): if
-`len` is ~0 the agent emitted nothing, so test `$AGENT_CMD` in isolation,
-e.g. `claude -p --model sonnet "reply with one word: Clock"; echo $?` — a
+So `lift = 0` with **both arms high** means `correct_signal` was guessable —
+make it a more idiosyncratic in-house name. `lift = 0` with **both arms low**
+means something upstream broke — run `DEBUG=1` (it prints `len=` per trial):
+if `len` ≈ 0 the agent emitted nothing, so test `$AGENT_CMD` in isolation,
+e.g. `claude -p --model sonnet "reply with one word: ok"; echo $?` — a
 retired model name or a rejected flag makes `claude -p` exit non-zero with
-empty output. The shipped
-[`scenarios.jsonl`](scenarios.jsonl) deliberately uses counter-default rules
-(injected clock, in-house feature-flag API, ULID IDs, integer-cents money).
+empty output. The shipped [`scenarios.jsonl`](scenarios.jsonl) uses in-house
+APIs (`flags.Enabled`, `ids.New`, `httpx.NewClient`, `errs.Wrap`).
 
 ## Run it
 
@@ -146,8 +154,8 @@ issue if you'd use one.
 
 ## Scoring rigor
 
-Substring matching is a **coarse** proxy — fine for a crisp signal like
-`time.Now()`, weak for nuanced behaviour. Inspect what actually happened
+Substring matching is a **coarse** proxy — fine for a crisp in-house token
+like `httpx.NewClient`, weak for nuanced behaviour. Inspect what actually happened
 with `DEBUG=1 bash eval/behavioural/run.sh` (saves every transcript to a
 temp dir — confirm the agent ran and, in *with*, actually fetched memory).
 For a number you'd publish, also have a **judge** (an LLM or a human, blind
@@ -164,24 +172,24 @@ is illustrative, not definitive.
 | `id` | scenario id (used in `DEBUG` transcript filenames) |
 | `lesson` | the rule recorded into memory in the `with` arm (session 1) |
 | `task` | the session-2 prompt handed to the agent |
-| `mistake_signal` | literal case-insensitive substring; present ⇒ made the default mistake |
-| `correct_signal` | literal case-insensitive substring; present ⇒ applied the rule |
+| `mistake_signal` | the default token the rule forbids; **informational** (shown in `DEBUG`, not scored) |
+| `correct_signal` | the in-house token the rule prescribes; present ⇒ **applied** (this is the scored signal) |
 
 Signals match as **literal substrings** (bash `[[ == ]]`, no regex/grep), so
-values like `time.Now()` and `uuid.NewV4` need no escaping. Keep
-`correct_signal` from being a substring of `mistake_signal` (e.g. avoid
-`TIMESTAMP` vs `TIMESTAMPTZ`), or a mistaken answer would score as correct.
+values like `httpx.NewClient` and `uuid.NewV4` need no escaping. Make
+`correct_signal` a distinctive in-house name the model can't emit without
+memory — that's what produces real lift and makes a `with` hit self-validating.
 
 ## Results (fill after running)
 
 ```
 model: <...>   trials: <N>   date: <...>
-scenario         | followed-rule (with) | (without) | lift
------------------|----------------------|-----------|------
-clock-injection  |        ? / N         |   ? / N   |  +?
-feature-flag     |        ? / N         |   ? / N   |  +?
-id-format        |        ? / N         |   ? / N   |  +?
-money-type       |        ? / N         |   ? / N   |  +?
------------------|----------------------|-----------|------
-overall          |        ?%            |    ?%     |  +?
+scenario         | applied-rule (with) | (without) | lift
+-----------------|---------------------|-----------|------
+feature-flag     |        ? / N        |   ? / N   |  +?
+id-format        |        ? / N        |   ? / N   |  +?
+http-client      |        ? / N        |   ? / N   |  +?
+error-wrap       |        ? / N        |   ? / N   |  +?
+-----------------|---------------------|-----------|------
+overall          |        ?%           |    ?%     |  +?
 ```

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
 # Behavioural A/B runner (scaffold). Per scenario it measures whether an
-# agent FOLLOWS A PROJECT RULE that contradicts its default — with
-# agent-memory available vs without. See README.md for the protocol and the
-# (important) caveats on signal-grep scoring and scenario design.
+# agent uses a PROJECT-SPECIFIC API/convention it can only know from memory —
+# with agent-memory available vs without. See README.md for the protocol and
+# the (important) caveats on signal matching and scenario design.
 #
-# A scenario only shows lift if its rule is something the model can't already
-# guess (project-specific / counter-default). Generic best-practices the
-# model knows cold will read 100% in BOTH arms — that's expected, not a bug.
+# A scenario only shows lift if its "correct" token is something the model
+# can't already produce (an in-house API like httpx.NewClient). A generic
+# best-practice the model knows cold will read high in BOTH arms — expected,
+# not a bug.
 #
 # Requires: agent-memory on PATH, jq, git, and $AGENT_CMD — a command that
 # runs YOUR agent on the task passed as a trailing arg and writes its answer
@@ -18,6 +19,8 @@
 #
 # Claude Code (headless) — see README.md "Run it on Claude":
 #   export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model sonnet'
+# Any other CLI agent that takes the task as a trailing arg:
+#   export AGENT_CMD='my-agent --task'
 #
 # Usage: export AGENT_CMD='...'; TRIALS=5 MODEL=... [DEBUG=1] bash eval/behavioural/run.sh
 set -euo pipefail
@@ -49,12 +52,12 @@ if [ -n "$DEBUG" ]; then
 fi
 
 echo "model: $MODEL   trials: $TRIALS"
-printf '%-16s | %-19s | %-13s | %s\n' "scenario" "followed-rule(with)" "(without)" "lift"
-printf -- '-----------------|---------------------|---------------|------\n'
+printf '%-16s | %-18s | %-13s | %s\n' "scenario" "applied-rule(with)" "(without)" "lift"
+printf -- '-----------------|--------------------|---------------|------\n'
 
-# run the agent on $task in a freshly-prepared repo; echo "followed" iff the
-# answer applies the rule (correct_signal present) AND avoids the default
-# mistake (mistake_signal absent). Args: cond lesson task mistake correct id trial
+# run the agent on $task in a freshly-prepared repo; echo "applied" iff the
+# answer uses the project-specific API (correct_signal present).
+# Args: cond lesson task mistake correct id trial
 run_trial() {
   local cond="$1" lesson="$2" task="$3" mistake="$4" correct="$5" id="$6" trial="$7"
   local work mcp root; work="$(mktemp -d)"
@@ -81,15 +84,18 @@ JSON
   [ -n "$DEBUG" ] && printf '%s\n' "$out" > "$DEBUG_DIR/$id.$cond.$trial.txt"
   rm -rf "$work" 2>/dev/null || true   # MCP child may briefly hold the dir; ignore
   # bash substring match (nocasematch) — no external grep (some MSYS greps
-  # crash on piped -F) and signals like time.Now()/uuid.NewV4 stay literal.
+  # crash on piped -F) and signals like uuid.NewV4/http.Client stay literal.
   local m=0 c=0
-  [[ "$out" == *"$mistake"* ]] && m=1
   [[ "$out" == *"$correct"* ]] && c=1
+  [[ "$out" == *"$mistake"* ]] && m=1
+  # "applied" = uses the project-specific API (correct signal). We deliberately
+  # do NOT also require the mistake absent: for a "use Y, not X" rule the model
+  # routinely names X in its prose ("used Y instead of X"), which would
+  # false-trip an X detector. The correct signal is an in-house token the model
+  # can't produce without memory, so its presence is the reliable signal; the
+  # mistake count is shown in DEBUG for context only.
   local verdict=missed
-  [ "$c" = 1 ] && [ "$m" = 0 ] && verdict=followed
-  # live diagnostic to stderr (won't pollute the verdict captured on stdout).
-  # len=0 => the agent emitted nothing: a plumbing problem (bad $AGENT_CMD /
-  # rejected flag / claude not on PATH), NOT a behaviour result.
+  [ "$c" = 1 ] && verdict=applied
   [ -n "$DEBUG" ] && printf '  [%-14s %-7s #%s] len=%-5s mistake=%s correct=%s -> %s\n' \
     "$id" "$cond" "$trial" "${#out}" "$m" "$c" "$verdict" >&2
   echo "$verdict"
@@ -106,18 +112,18 @@ while IFS= read -r line; do
   declare -A f=( [with]=0 [without]=0 )
   for cond in with without; do
     for t in $(seq 1 "$TRIALS"); do
-      [ "$(run_trial "$cond" "$lesson" "$task" "$mistake" "$correct" "$id" "$t")" = followed ] \
+      [ "$(run_trial "$cond" "$lesson" "$task" "$mistake" "$correct" "$id" "$t")" = applied ] \
         && f[$cond]=$(( f[$cond] + 1 ))
     done
   done
   lift=$(( f[with] - f[without] ))
-  printf '%-16s | %-19s | %-13s | %+d\n' \
+  printf '%-16s | %-18s | %-13s | %+d\n' \
     "$id" "${f[with]} / $TRIALS" "${f[without]} / $TRIALS" "$lift"
 done < "$SCENARIOS"
 
 echo
-echo "followed-rule = applied the project rule (correct signal) AND avoided the"
-echo "default mistake. lift>0 means memory changed behaviour. lift=0 with both"
-echo "arms high => the model already knew it (pick a more project-specific rule);"
-echo "both arms low => check transcripts with DEBUG=1 (agent ran? memory fetched?)."
-echo "Substring matching is coarse — for a publishable number add a blind judge. See README.md."
+echo "applied-rule = the answer uses the project-specific API (correct signal) —"
+echo "a token the model can't produce without memory, so lift>0 proves memory"
+echo "changed behaviour. lift=0 both-low => check DEBUG=1 transcripts (did the agent"
+echo "run and fetch memory?); both-high => the correct signal is guessable, make it"
+echo "more idiosyncratic. Substring matching is coarse — add a blind judge to publish."
