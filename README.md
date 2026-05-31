@@ -263,6 +263,12 @@ agent-memory install <adapter> [--user-global] [--force] [--json]
         # Materialise agent-runtime adapter assets.
         # Supported: claude, cursor, agents, gemini.
 
+agent-memory merge-driver --install [--root DIR]
+        # Register the section-aware git merge driver so a team's concurrent
+        # edits to .agent-memory/ files union by @id instead of conflicting.
+        # Run once per clone. (git invokes the bare `merge-driver %O %A %B %P`
+        # form itself during a merge.)
+
 agent-memory rebuild-index [--root DIR] [--clobber] [--no-assign-ids] [--json]
         # Recreate the FTS5 shadow index from canonical Markdown files.
         # Use for SQLite corruption, schema changes, or after manual .md edits.

@@ -127,7 +127,8 @@ func BuildStatus(ctx context.Context, deps StatusDeps) (*MemoryStatus, error) {
 		Git: MemoryStatusGit{
 			TrackLocal:           deps.Manifest.Git.TrackLocal,
 			TrackSessions:        deps.Manifest.Git.TrackSessions,
-			MergeDriverInstalled: deps.Manifest.Git.MergeDriverInstalled,
+			MergeDriverInstalled: deps.Manifest.Git.MergeDriverInstalled ||
+				agentgit.MergeDriverInstalled(filepath.Dir(deps.MemoryDir)),
 		},
 	}
 

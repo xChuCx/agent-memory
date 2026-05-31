@@ -79,6 +79,7 @@ agent-memory-implementation-plan.md in the repository root.`,
 	root.AddCommand(NewRebaseCmd())
 	root.AddCommand(NewRebuildIndexCmd())
 	root.AddCommand(NewInstallCmd())
+	root.AddCommand(NewMergeDriverCmd())
 
 	return root
 }

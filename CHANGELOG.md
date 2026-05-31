@@ -9,6 +9,18 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **Section-aware git merge driver (M7) — team sharing.** `.agent-memory/`
+  is shared through git, but two branches appending to the same memory file
+  (a decision, a pitfall) used to collide on line-based merge. The new
+  `agent-memory merge-driver` merges by section (`@id`): both-append →
+  clean **union**; one-sided edit → taken; both edit the same section →
+  a scoped `@merge-conflict` block for review; delete-vs-edit keeps the
+  surviving section. Byte-preserving. `agent-memory merge-driver --install`
+  registers it (committed `.agent-memory/.gitattributes` + per-clone git
+  config); `memory.status` reports `merge_driver_installed`. Verified
+  against real `git merge`. See
+  [docs/patterns/merge-driver.md](docs/patterns/merge-driver.md).
+
 - **Offline retrieval-quality eval** (`internal/eval`). A deterministic,
   no-LLM benchmark: 28 natural-language queries over a 28-section labeled
   corpus, reporting recall@5 / hit@1 / MRR / nDCG@5. The shipped match-any
