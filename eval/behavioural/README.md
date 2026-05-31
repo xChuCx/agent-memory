@@ -21,16 +21,37 @@ output is non-deterministic):
 - **without memory** — the same task in a repo with no `.agent-memory/`
   and no memory tools (today's default agent).
 
-Then give the agent the **session-2 task** and score its output:
+Then give the agent the **session-2 task** and score its output by literal
+(case-insensitive) substring match:
 
-- **repeated the mistake** — the output exhibits `mistake_signal` (it made
-  the exact error the recorded lesson warns about).
-- **applied the lesson** — the output exhibits `correct_signal`.
+- `correct_signal` present — it **applied** the project rule.
+- `mistake_signal` present — it made the **default mistake** the lesson warns of.
 
-**Headline metric:** mistake-avoidance rate = `1 − repeated/​trials`, with
-vs without memory, and the lift. Secondary: redundant-rediscovery (did the
-agent re-derive what memory already had — proxy via tool calls / tokens /
-wall-clock).
+**Headline metric: followed-rule rate** = fraction of trials where the
+answer applied the rule *and* avoided the mistake (`correct ∧ ¬mistake`),
+with vs without memory, and the **lift** between them. Secondary:
+redundant-rediscovery (did the agent re-derive what memory already had —
+proxy via tool calls / tokens / wall-clock; see `--output-format stream-json`).
+
+## What makes a scenario show lift
+
+Memory can only change behaviour the model wouldn't already get right. A
+scenario shows lift **only if its rule is something the model can't guess** —
+project-specific, counter to the common default, or otherwise non-obvious:
+
+- ✅ *"In this repo inject `billing.Clock`; never call `time.Now()` directly."*
+  The model's default is `time.Now()`, so memoryless it makes the mistake;
+  with memory it follows the rule. Clear lift.
+- ❌ *"Use `TIMESTAMPTZ`, not naive `TIMESTAMP`."* A strong model already
+  knows this best practice → **both** arms score ~100% and lift ≈ 0. That's
+  not memory failing, just a scenario with no knowledge gap to fill.
+
+So `lift = 0` with **both arms high** means the rule was too obvious — swap
+in a more idiosyncratic one. `lift = 0` with **both arms low** means
+something upstream broke (agent didn't run, or memory wasn't fetched) — open
+the transcripts with `DEBUG=1`. The shipped
+[`scenarios.jsonl`](scenarios.jsonl) deliberately uses counter-default rules
+(injected clock, in-house feature-flag API, ULID IDs, integer-cents money).
 
 ## Run it
 
@@ -50,6 +71,7 @@ bash eval/behavioural/run.sh           # prints a per-scenario tally
 In `with`, the runner seeds the lesson with `agent-memory propose --apply`
 and writes a project `.mcp.json`; in `without` it writes an empty MCP
 config. It then invokes `$AGENT_CMD` `TRIALS`× per arm and scores stdout.
+Add `DEBUG=1` to save every transcript to a temp dir for inspection.
 
 ### Run it on Claude (headless)
 
@@ -117,11 +139,14 @@ issue if you'd use one.
 
 ## Scoring rigor
 
-Signal-grep is a **coarse** proxy — fine for an obvious mistake string,
-weak for nuanced behaviour. For a number you'd publish, also have a
-**judge** (an LLM or a human, blind to condition) grade each transcript
-*applied the lesson? yes/no*. Report both. Keep the model, temperature, and
-prompt fixed and disclosed; small N is illustrative, not definitive.
+Substring matching is a **coarse** proxy — fine for a crisp signal like
+`time.Now()`, weak for nuanced behaviour. Inspect what actually happened
+with `DEBUG=1 bash eval/behavioural/run.sh` (saves every transcript to a
+temp dir — confirm the agent ran and, in *with*, actually fetched memory).
+For a number you'd publish, also have a **judge** (an LLM or a human, blind
+to condition) grade each transcript *applied the lesson? yes/no*. Report
+both. Keep the model, temperature, and prompt fixed and disclosed; small N
+is illustrative, not definitive.
 
 ## Scenarios
 
@@ -129,26 +154,27 @@ prompt fixed and disclosed; small N is illustrative, not definitive.
 
 | field | meaning |
 |---|---|
-| `id` | scenario id |
-| `lesson` | the `agent-memory propose` args recorded in the `with` condition (session 1) |
+| `id` | scenario id (used in `DEBUG` transcript filenames) |
+| `lesson` | the rule recorded into memory in the `with` arm (session 1) |
 | `task` | the session-2 prompt handed to the agent |
-| `mistake_signal` | substring/regex whose presence = repeated the mistake |
-| `correct_signal` | substring/regex whose presence = applied the lesson |
+| `mistake_signal` | literal case-insensitive substring; present ⇒ made the default mistake |
+| `correct_signal` | literal case-insensitive substring; present ⇒ applied the rule |
 
-The scenarios mirror the continuity eval's lessons, so the deterministic
-"is it available?" floor and the behavioural "did it act on it?" ceiling
-line up.
+Signals match as **literal substrings** (bash `[[ == ]]`, no regex/grep), so
+values like `time.Now()` and `uuid.NewV4` need no escaping. Keep
+`correct_signal` from being a substring of `mistake_signal` (e.g. avoid
+`TIMESTAMP` vs `TIMESTAMPTZ`), or a mistaken answer would score as correct.
 
 ## Results (fill after running)
 
 ```
 model: <...>   trials: <N>   date: <...>
-scenario              | mistake-avoided (with) | (without) | lift
-----------------------|------------------------|-----------|------
-cookie-samesite       |        ? / N           |   ? / N   |  +?
-kafka-offset          |        ? / N           |   ? / N   |  +?
-postgres-pool         |        ? / N           |   ? / N   |  +?
-timestamps-utc        |        ? / N           |   ? / N   |  +?
-----------------------|------------------------|-----------|------
-overall               |        ?%              |    ?%     |  +?
+scenario         | followed-rule (with) | (without) | lift
+-----------------|----------------------|-----------|------
+clock-injection  |        ? / N         |   ? / N   |  +?
+feature-flag     |        ? / N         |   ? / N   |  +?
+id-format        |        ? / N         |   ? / N   |  +?
+money-type       |        ? / N         |   ? / N   |  +?
+-----------------|----------------------|-----------|------
+overall          |        ?%            |    ?%     |  +?
 ```
