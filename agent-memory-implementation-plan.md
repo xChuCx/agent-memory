@@ -1,8 +1,14 @@
 # Agent Memory — MVP Implementation Plan
 
+> **Status: historical (build log).** Milestones M0–M8 are complete and
+> shipped through **v0.3.0**. This document is the original MVP build
+> order, kept for traceability — the per-subsystem notes under
+> `docs/patterns/` cite its task IDs. **Forward-looking direction now
+> lives in [ROADMAP.md](ROADMAP.md).**
+
 **Tracks design doc:** `agent-memory-design-doc-v0.4.1.md`
 **Plan version:** 0.2 (restructured around risk-based release cuts)
-**Status:** Ready for execution after Spikes pass
+**Status:** Executed — M0–M8 delivered (v0.1.0 → v0.3.0).
 
 This plan turns v0.4.1 into a concrete build order. Milestones map to the design doc's M1–M8, with three pre-work spikes added because they de-risk the whole project. Each task has acceptance criteria; each milestone has an exit gate.
 
@@ -1396,20 +1402,31 @@ Tracked here so they don't pollute MVP planning. From design doc §35 and §29.6
 
 ---
 
-## 18. Open Decisions Needed Before/During Execution
+## 18. Open Decisions (resolved during execution)
 
-Issues the plan surfaces that need a yes/no during the build:
+Status of the yes/no calls the plan surfaced. Genuinely open items now
+live in [ROADMAP.md](ROADMAP.md).
 
-1. **Module path.** `github.com/<who>/agent-memory`? Decide before M0.
-2. **License.** MIT? Apache 2.0? Both work; decide before public CI / release.
-3. **Release distribution.** GoReleaser → GitHub Releases? Homebrew tap? Scoop?
-4. **Eval corpus storage.** Inline in repo? Separate fixtures repo?
-5. **Manual eval cadence.** Weekly? Per release candidate?
-6. **Branch-slug collision handling.** Warn or refuse? (Low likelihood but undefined.)
-7. **Schema versioning.** What happens when `schema.yaml` is bumped on an existing repo? Migration in v0.5.
-8. **Logging verbosity defaults.** WARN for CLI is opinionated; could be INFO if user feedback suggests.
-9. **MCP SDK pinning.** If the SDK is in alpha, pin to a specific commit; document upgrade plan.
-10. **`pkg/protocol`.** Is anything actually exported? If not, drop the package.
+1. **Module path.** ✅ `github.com/agent-memory/agent-memory` (go.mod).
+   ⚠️ Note: the current GitHub repo is `github.com/xChuCx/agent-memory`,
+   so `go install` won't resolve until the module path and repo path
+   match — either rename the module or host under a matching org before
+   relying on `go install` (release binaries are unaffected).
+2. **License.** ✅ Apache-2.0 (`LICENSE`).
+3. **Release distribution.** ✅ GoReleaser → GitHub Releases (cross-platform
+   archives + checksums). Homebrew/Scoop deferred (see ROADMAP).
+4. **Eval corpus storage.** ⏳ Open — decided when the eval harness lands
+   (ROADMAP "Prove it").
+5. **Manual eval cadence.** ⏳ Open — per release candidate, tightened once
+   the harness exists.
+6. **Branch-slug collision handling.** ⏳ Open (low likelihood).
+7. **Schema versioning / migration.** ⏳ Open — targeted for 1.0 (ROADMAP
+   "Format & contract stability"). `SchemaVersion` is stamped in the index
+   today; the migrator is not yet written.
+8. **Logging verbosity defaults.** ✅ WARN default, overridable via
+   `--log-level` / `AGENT_MEMORY_LOG`.
+9. **MCP SDK pinning.** ✅ Pinned to `go-sdk v1.6.1` in go.mod.
+10. **`pkg/protocol`.** ✅ Dropped — nothing needed exporting.
 
 ---
 

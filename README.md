@@ -30,9 +30,10 @@ See [CHANGELOG.md](CHANGELOG.md) for the full 0.3 changelist.
 
 | Document | Purpose |
 |---|---|
+| [ROADMAP.md](ROADMAP.md) | Where the project is going, principles, and non-goals. |
 | [CHANGELOG.md](CHANGELOG.md) | Per-release feature list and known limitations. |
 | [Design Doc v0.4.1](agent-memory-design-doc-v0.4.1.md) | Canonical design this binary implements. |
-| [Implementation Plan](agent-memory-implementation-plan.md) | Release cuts and milestone breakdown. |
+| [Implementation Plan](agent-memory-implementation-plan.md) | Historical MVP build log (M0–M8); see ROADMAP for what's next. |
 | [Patterns](docs/patterns/) | Reusable design patterns documented per subsystem. |
 | [Spikes](docs/spikes/) | Pre-M1 spike outcomes (byte-preserving engine, MCP SDK, flock, FTS5). |
 
