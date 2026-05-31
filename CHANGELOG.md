@@ -7,6 +7,15 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Fixed
+
+- **`version` / `memory.status` report the real version for `go install` and
+  source builds.** Only goreleaser archives carry a `-ldflags` version, so
+  `go install …@v0.4.0` and `go build` used to report `dev` — useless in a
+  bug report. `Version()` now falls back to the module version from
+  `runtime/debug.BuildInfo` (`go install` → `v0.4.0`) and, for local builds,
+  to the VCS-derived version (e.g. `v0.4.0+dirty`).
+
 ## [0.4.0] — 2026-05-31
 
 The team-and-launch release: agent-memory is open-source-ready and safe to

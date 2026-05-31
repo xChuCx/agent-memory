@@ -21,8 +21,8 @@ func TestVersionCommand(t *testing.T) {
 	}
 
 	got := strings.TrimRight(stdout.String(), "\r\n")
-	if got != ProgramVersion {
-		t.Errorf("version stdout = %q, want %q", got, ProgramVersion)
+	if got != Version() {
+		t.Errorf("version stdout = %q, want %q", got, Version())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("version stderr non-empty: %q", stderr.String())

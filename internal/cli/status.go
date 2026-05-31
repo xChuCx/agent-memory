@@ -100,7 +100,7 @@ func runStatus(ctx context.Context, rootFlag string) (*StatusReport, error) {
 		Manifest:      m,
 		Schema:        sch,
 		Branch:        branch,
-		MemoryVersion: ProgramVersion,
+		MemoryVersion: Version(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("status: %w", err)

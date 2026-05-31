@@ -30,7 +30,7 @@ the client closes the stdin channel.`,
 			if err != nil {
 				return err
 			}
-			srv := agentmcp.New(root, ProgramVersion)
+			srv := agentmcp.New(root, Version())
 			if err := srv.RegisterTools(); err != nil {
 				return err
 			}
