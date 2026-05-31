@@ -92,6 +92,18 @@ notes and pitfall appends APPLY. Pass --apply to immediately apply a result
 that would otherwise stage — you are the reviewer when you run this command.
 
 Exit status is non-zero when the proposal is rejected.`,
+		Example: `  # add a pitfall (applies immediately)
+  agent-memory propose --intent add_pitfall --op append_to_section \
+    --path pitfalls.md --section-id pitfalls \
+    --content "- SameSite=Lax breaks the OAuth redirect in Safari; use None+Secure."
+
+  # record a decision (stages for human review); body from a file (- for stdin)
+  agent-memory propose --intent record_decision --op append_section \
+    --path decisions.md --heading "Use Postgres" --heading-level 2 \
+    --content-file decision.md --source user:design-review --confidence confirmed
+
+  # full / multi-op request as JSON; --apply lands a staged result immediately
+  agent-memory propose --from-json proposal.json --apply`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			report, err := runPropose(cmd.Context(), &f, cmd.InOrStdin())

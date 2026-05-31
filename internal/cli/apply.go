@@ -35,6 +35,9 @@ STAGING_ID may be a full id or any unique prefix (Git-style). Pass
 On success: every staged file is WriteAtomic'd to its destination, the
 index is updated for the touched sections, and the staging directory is
 removed.`,
+		Example: `  agent-memory apply --latest      # newest staged proposal
+  agent-memory apply 20260531      # by unique id prefix (Git-style)
+  agent-memory apply <id> --json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := resolveStaging(rootFlag, args, latest)

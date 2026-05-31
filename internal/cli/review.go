@@ -50,6 +50,9 @@ prints that proposal's full metadata, drift targets, and optionally the
 file contents. Use --diff to see a unified diff of each staged file
 against the current on-disk version (exactly what apply would change);
 use --show to dump the full staged post-state instead.`,
+		Example: `  agent-memory review                    # list staged proposals
+  agent-memory review --latest --diff    # newest, as a unified diff vs current
+  agent-memory review <id> --show        # full staged file contents`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// No arg and no --latest → list mode.

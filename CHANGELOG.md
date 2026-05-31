@@ -7,6 +7,16 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+
+- **Worked `--help` examples.** The root help now opens with the end-to-end
+  workflow (init → install → the agent's fetch/propose loop → review/apply)
+  and a runnable `Examples:` block; `fetch`, `propose`, `review`, and `apply`
+  each carry copy-pasteable examples — so an agent or human reading `--help`
+  learns how to use the tool, not just its flag list. (Cobra already
+  provided `--help`/`help`/`<cmd> --help`; this fills in the examples and a
+  task-oriented root description.)
+
 ### Fixed
 
 - **`version` / `memory.status` report the real version for `go install` and

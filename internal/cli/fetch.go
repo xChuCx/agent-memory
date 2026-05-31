@@ -44,6 +44,9 @@ shared current state, conventions.md, and a compact index.md summary.
 
 With --json, emits the full FetchResponse (context + included files +
 omitted files + metadata) for programmatic consumers.`,
+		Example: `  agent-memory fetch                            # bootstrap pack (current state + conventions)
+  agent-memory fetch "refresh token rotation"   # ranked, budgeted search
+  agent-memory fetch "auth" --scope internal/auth --json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {

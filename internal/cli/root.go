@@ -49,13 +49,37 @@ const DesignDocVersion = "v0.4.1"
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "agent-memory",
-		Short: "Local context middleware for AI coding agents",
-		Long: `agent-memory is a local context router and memory safety layer for AI
-coding agents. It maintains a structured, branch-aware, byte-preserving
-Markdown memory layer for a repository and exposes it via three MCP tools.
+		Short: "Local, git-native memory for AI coding agents",
+		Long: `agent-memory gives AI coding agents a durable, reviewable memory for a
+repository: current task state, decisions, conventions, pitfalls, and
+per-module facts kept as plain Markdown under .agent-memory/ — committed to
+your repo, not shipped to a cloud. Agents read and write it over three MCP
+tools (memory.fetch_context, memory.propose_update, memory.status); durable
+changes stage for your review before they land.
 
-Design and roadmap: see agent-memory-design-doc-v0.4.1.md and
-agent-memory-implementation-plan.md in the repository root.`,
+Typical flow:
+  1. agent-memory init              scaffold .agent-memory/ in the repo
+  2. agent-memory install claude    teach your agent the tools (or cursor|agents|gemini)
+  3. your agent spawns 'agent-memory mcp' and calls fetch_context / propose_update
+  4. agent-memory review --diff && agent-memory apply   inspect and land staged changes
+
+No MCP server handy? 'agent-memory propose' is the CLI front door to the same
+write pipeline. Run 'agent-memory <command> --help' for any command; see the
+README and ROADMAP.md for the bigger picture.`,
+		Example: `  # one-time setup in a repo
+  agent-memory init --name my-project
+  agent-memory install claude
+
+  # read the current context pack (empty query returns the bootstrap pack)
+  agent-memory fetch
+  agent-memory fetch "auth token rotation" --scope internal/auth
+
+  # check memory health (file counts, staged proposals, drift, lock)
+  agent-memory status
+
+  # land any staged proposals after reviewing the exact diff
+  agent-memory review --latest --diff
+  agent-memory apply --latest`,
 		// Suppress cobra's default behavior of printing usage on every error;
 		// we surface errors ourselves from main.
 		SilenceUsage:  true,
