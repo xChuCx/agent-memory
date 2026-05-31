@@ -44,7 +44,11 @@ printf -- '-------------------|------------------------|---------------|------\n
 # (the mistake's signal is absent from the output) or "repeated".
 run_trial() { # $1=cond(with|without) $2=lesson $3=task $4=mistake_signal
   local cond="$1" lesson="$2" task="$3" mistake="$4"
-  local work mcp; work="$(mktemp -d)"
+  local work mcp root; work="$(mktemp -d)"
+  # On Git Bash, $work is an MSYS path (/tmp/...); the native agent-memory
+  # that Claude spawns needs a Windows path. cygpath -m -> C:/... (no-op
+  # elsewhere). Forward slashes are JSON-safe and accepted by Windows apps.
+  root="$work"; command -v cygpath >/dev/null 2>&1 && root="$(cygpath -m "$work")"
   ( cd "$work" && git init -q . )
   if [ "$cond" = "with" ]; then
     ( cd "$work"
@@ -52,7 +56,7 @@ run_trial() { # $1=cond(with|without) $2=lesson $3=task $4=mistake_signal
       agent-memory propose --intent add_pitfall --op append_to_section \
         --path pitfalls.md --section-id pitfalls --content "$lesson" --apply >/dev/null 2>&1
       cat > .mcp.json <<JSON
-{ "mcpServers": { "agent-memory": { "type": "stdio", "command": "agent-memory", "args": ["mcp", "--root", "$work"] } } }
+{ "mcpServers": { "agent-memory": { "type": "stdio", "command": "agent-memory", "args": ["mcp", "--root", "$root"] } } }
 JSON
     )
     mcp="--mcp-config .mcp.json --strict-mcp-config"        # with: our server only

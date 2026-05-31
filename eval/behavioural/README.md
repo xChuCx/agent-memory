@@ -91,6 +91,30 @@ SCENARIOS=/tmp/one.jsonl TRIALS=1 \
   bash eval/behavioural/run.sh
 ```
 
+### On Windows
+
+`run.sh` is a bash script — run it from **Git Bash** (ships with Git for
+Windows), not PowerShell/cmd. The commands above are identical. Prereqs:
+
+- `agent-memory` and `claude` on `PATH` as the normal **Windows** builds
+  (no special Linux build needed).
+- `jq` — `winget install jqlang.jq` (or `scoop install jq`).
+- The script already converts its temp-dir path to a Windows path
+  (`cygpath -m`, bundled with Git Bash) before writing it into `.mcp.json`,
+  so the MCP server Claude spawns gets a path it understands.
+
+```bash
+# in a Git Bash shell, from the repo root:
+export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model claude-sonnet-4-5 --max-turns 8'
+export TRIALS=5 MODEL=claude-sonnet-4-5
+bash eval/behavioural/run.sh
+```
+
+Alternatively, **WSL** runs it as plain Linux — but then install the Linux
+builds of `agent-memory` and `claude` *inside* WSL (the Windows `.exe`s
+aren't on the WSL `PATH`). A native PowerShell port isn't shipped; open an
+issue if you'd use one.
+
 ## Scoring rigor
 
 Signal-grep is a **coarse** proxy — fine for an obvious mistake string,
