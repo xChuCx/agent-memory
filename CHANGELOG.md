@@ -20,6 +20,10 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue/PR templates, and a
   forward-looking [`ROADMAP.md`](ROADMAP.md). The implementation plan is
   relabeled a historical build log.
+- **README badges + reproducible demo.** Shield badges (license, CI, MCP,
+  retrieval recall@5, runtime compatibility) and a `docs/demo/` showcase: a
+  tested `demo.sh` flow and a `vhs` tape that renders the README gif
+  (propose → stage → `review --diff` → apply → fetch).
 
 ### Changed
 

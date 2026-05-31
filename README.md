@@ -1,5 +1,15 @@
 # agent-memory
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/xChuCx/agent-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/xChuCx/agent-memory/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![MCP](https://img.shields.io/badge/MCP-server-1f6feb)](#mcp-tools)
+[![retrieval recall@5](https://img.shields.io/badge/retrieval_recall%405-0.98-2ea44f)](docs/eval/retrieval.md)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-compatible-8b5cf6)](#agent-runtime-adapters)
+[![Cursor](https://img.shields.io/badge/Cursor-compatible-0ea5e9)](#agent-runtime-adapters)
+[![AGENTS.md / Codex](https://img.shields.io/badge/AGENTS.md_·_Codex-compatible-111827)](#agent-runtime-adapters)
+[![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-compatible-4285F4)](#agent-runtime-adapters)
+
 Local, **git-native** project memory for AI coding agents. One MCP call in,
 structured memory updates out — current task state, decisions, conventions,
 pitfalls, per-module facts. Branch-aware. Secret-safe. Byte-preserving.
@@ -11,6 +21,19 @@ you can read and `git diff` it; durable changes **stage for human review**
 (`review --diff` → `apply`) instead of landing silently; and secrets/PII are
 **scanned out** before anything is written. See [ROADMAP.md](ROADMAP.md) for
 where this is headed (system-level / multi-repo memory).
+
+## Demo
+
+<p align="center">
+  <img src="docs/demo/demo.gif" alt="agent-memory: an agent proposes a decision, it stages, you review the diff and apply, a later fetch surfaces it" width="820">
+</p>
+
+An agent records a durable decision; it **stages** for review; you see the
+exact **diff**, **apply** it, and a later **`fetch`** surfaces it — local,
+git-native, reviewable, secret-safe. The clip is reproducible:
+[`docs/demo/demo.sh`](docs/demo/demo.sh) is the runnable flow and
+[`docs/demo/demo.tape`](docs/demo/demo.tape) renders the gif with
+[`vhs`](https://github.com/charmbracelet/vhs) — see [docs/demo/](docs/demo/).
 
 ## Status
 
