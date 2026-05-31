@@ -1,7 +1,16 @@
 # agent-memory
 
-Local context middleware for AI coding agents. One MCP call in, structured
-memory updates out. Branch-aware. Secret-safe. Byte-preserving. Two tools.
+Local, **git-native** project memory for AI coding agents. One MCP call in,
+structured memory updates out — current task state, decisions, conventions,
+pitfalls, per-module facts. Branch-aware. Secret-safe. Byte-preserving.
+**No cloud, no vector DB** — Markdown is the source of truth and git is the
+sync. Three MCP tools + a full CLI.
+
+Why it's different: memory is **plain Markdown committed to your repo**, so
+you can read and `git diff` it; durable changes **stage for human review**
+(`review --diff` → `apply`) instead of landing silently; and secrets/PII are
+**scanned out** before anything is written. See [ROADMAP.md](ROADMAP.md) for
+where this is headed (system-level / multi-repo memory).
 
 ## Status
 
@@ -39,40 +48,129 @@ See [CHANGELOG.md](CHANGELOG.md) for the full 0.3 changelist.
 
 ## Quick start
 
+Install — pick one:
+
 ```bash
-# Build
+# A) Go toolchain (Go 1.25+)
+go install github.com/xChuCx/agent-memory/cmd/agent-memory@latest
+
+# B) Prebuilt binary — download from GitHub Releases for your OS/arch,
+#    extract, and put `agent-memory` on your PATH.
+
+# C) From source
 go build -o agent-memory ./cmd/agent-memory
-
-# Scaffold .agent-memory/ in a repo
-./agent-memory init --name my-project
-
-# Install the Claude Code skill (writes .claude/skills/agent-memory/SKILL.md)
-./agent-memory install claude
-
-# Verify
-./agent-memory version
-# → 0.3.0
-
-# Read context
-./agent-memory fetch                # bootstrap pack
-./agent-memory fetch "auth"         # FTS query
-
-# Start MCP server (Claude Code spawns this automatically once configured)
-./agent-memory mcp
 ```
 
-Configure Claude Code to spawn the MCP server — add to
-`~/.claude/mcp_servers.json` (or the project-local equivalent):
+Then, inside the repo you want to give a memory:
+
+```bash
+# Scaffold .agent-memory/ in a repo
+agent-memory init --name my-project
+
+# Install the Claude Code skill (writes .claude/skills/agent-memory/SKILL.md)
+agent-memory install claude
+
+# Verify (release binaries print the tag; go install / source builds print "dev")
+agent-memory version
+
+# Read context
+agent-memory fetch                # bootstrap pack
+agent-memory fetch "auth"         # FTS query
+
+# Start MCP server (your agent spawns this automatically once configured)
+agent-memory mcp
+```
+
+Register the MCP server with your agent. For Claude Code, either run
+`claude mcp add agent-memory -- agent-memory mcp --root /abs/path/to/repo`,
+or commit a project-scoped `.mcp.json` at the repo root:
 
 ```json
 {
   "mcpServers": {
     "agent-memory": {
-      "command": "/abs/path/to/agent-memory",
-      "args": ["mcp"]
+      "command": "agent-memory",
+      "args": ["mcp", "--root", "/abs/path/to/repo"]
     }
   }
 }
+```
+
+Pinning `--root` makes the server independent of the launch directory. Other
+runtimes (Cursor, Gemini CLI, anything reading `AGENTS.md`) use the same
+server — install their adapter (see below) and point them at `agent-memory mcp`.
+
+## Adopt on an existing project
+
+`init` scaffolds empty memory. To seed it from a real codebase, let your
+coding agent do the analysis — that's the whole point. After `init` +
+`install <adapter>` + registering the MCP server (above), **restart the
+agent** so the `memory.*` tools load, then paste the prompt below.
+
+What happens: the agent reads the repo and calls `memory.propose_update`.
+Working notes and pitfalls apply immediately; durable categories
+(conventions, decisions, modules) **stage for your review** — inspect each
+with `agent-memory review --diff` and land it with `agent-memory apply`
+(or `reject`). Nothing durable is written without your approval.
+
+````text
+You now have agent-memory MCP tools (memory.fetch_context,
+memory.propose_update, memory.status) backed by this repository's
+.agent-memory/ store. Bootstrap the project's memory from the codebase.
+
+1. Call memory.fetch_context with an empty query to see the current
+   (mostly empty) state and the conventions/decisions/pitfalls/modules
+   layout.
+
+2. Analyze THIS repository — read the build files, CI config, entry
+   points, and the main packages/modules. Identify:
+   - build / test / run / lint commands and the toolchain;
+   - conventions: code style, branching, commit rules, review practices;
+   - architecture: the major modules/components and what each is for;
+   - durable decisions: notable choices and WHY (only ones that are real
+     and stable — not speculation);
+   - pitfalls: footguns, sharp edges, "don't do X because Y" you can infer
+     from the code, tests, or docs.
+
+3. Persist what you found via memory.propose_update, choosing the intent
+   per kind:
+   - update_conventions  → conventions.md (build/test/style/workflow)
+   - refresh_module      → modules/<name>.md (one per major component)
+   - record_decision     → decisions.md (Date / Status / Confidence +
+                           sources; type ∈ file|test|user, NOT external)
+   - add_pitfall         → pitfalls.md
+   - update_shared       → local/current.shared.md (a short "current
+                           state / where things stand" summary)
+
+Rules:
+- Cite provenance: pass sources as file references you actually read
+  (e.g. {"type":"file","ref":"internal/auth/session.go"}). Use
+  confidence=confirmed for facts from code, inferred for deductions.
+- Every section needs a unique "<!-- @id: ... -->" anchor; keep entries
+  concise — this is working knowledge, not a wiki. Decisions need
+  **Date**, **Status** (active|superseded|deprecated|proposed), and
+  **Confidence** fields.
+- NEVER put secrets, tokens, or credentials in memory (the server will
+  reject them anyway).
+- Work in a few focused passes (conventions + architecture first, then
+  modules, then decisions/pitfalls). Report what you proposed and what
+  staged for review.
+````
+
+No MCP server handy? The agent (or you) can use the CLI instead — same
+validation/secret-scan/routing pipeline:
+
+```bash
+agent-memory propose --intent update_conventions --op append_section \
+  --path conventions.md --heading "Build & test" --heading-level 2 \
+  --source file:Makefile --confidence confirmed \
+  --content-file - <<'MD'
+## Build & test
+<!-- @id: build-test -->
+Run `go build ./...` and `go test ./...`. ...
+MD
+# add --apply to land it immediately (you are the reviewer);
+# or omit it and review the staged proposal with `review --diff` + `apply`.
 ```
 
 ## Build
