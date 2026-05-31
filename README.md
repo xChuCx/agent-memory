@@ -43,6 +43,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full 0.3 changelist.
 | [CHANGELOG.md](CHANGELOG.md) | Per-release feature list and known limitations. |
 | [Design Doc v0.4.1](agent-memory-design-doc-v0.4.1.md) | Canonical design this binary implements. |
 | [Implementation Plan](agent-memory-implementation-plan.md) | Historical MVP build log (M0–M8); see ROADMAP for what's next. |
+| [Retrieval eval](docs/eval/retrieval.md) | Offline recall/MRR/nDCG benchmark of `fetch` (method + numbers). |
 | [Patterns](docs/patterns/) | Reusable design patterns documented per subsystem. |
 | [Spikes](docs/spikes/) | Pre-M1 spike outcomes (byte-preserving engine, MCP SDK, flock, FTS5). |
 
@@ -260,6 +261,25 @@ Exposed by `agent-memory mcp` over stdio JSON-RPC:
 | `memory.fetch_context` | Read a budgeted Markdown context pack. |
 | `memory.propose_update` | Submit structured edits (apply or stage). |
 | `memory.status` | Report memory health: file counts, staged proposals (with drift), security/git/lock posture. |
+
+## Retrieval quality (measured)
+
+`fetch` is only useful if it returns the *right* sections. On a labeled
+28-query / 28-section benchmark, the shipped match-any retrieval puts a
+relevant section in the top 5 for **98%** of queries (recall@5 0.98,
+hit@1 0.96, MRR 0.97) — a **+0.91 recall lift** over the prior match-all
+behaviour.
+
+| Config | recall@5 | hit@1 | MRR |
+|---|---|---|---|
+| match-all (AND) — prior | 0.07 | 0.07 | 0.07 |
+| **match-any (OR) — shipped** | **0.98** | **0.96** | **0.97** |
+
+Offline, deterministic, no LLM, and run in CI with regression floors. The
+corpus, gold labels, and method are auditable — and the scope (retrieval
+recall, not agent task-success) is stated honestly — in
+[docs/eval/retrieval.md](docs/eval/retrieval.md). Reproduce:
+`go test -run TestRetrievalEval -v ./internal/eval/`.
 
 ## Agent-runtime adapters
 

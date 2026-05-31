@@ -7,6 +7,27 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+
+- **Offline retrieval-quality eval** (`internal/eval`). A deterministic,
+  no-LLM benchmark: 28 natural-language queries over a 28-section labeled
+  corpus, reporting recall@5 / hit@1 / MRR / nDCG@5. The shipped match-any
+  retrieval scores recall@5 **0.98** (hit@1 0.96, MRR 0.97) — a **+0.91**
+  recall lift over the prior match-all behaviour. Runs in CI with
+  regression floors. Method + caveats (scope is retrieval recall, not
+  agent task-success) in [docs/eval/retrieval.md](docs/eval/retrieval.md).
+- **Open-source hygiene**: `LICENSE` (Apache-2.0), `SECURITY.md`,
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue/PR templates, and a
+  forward-looking [`ROADMAP.md`](ROADMAP.md). The implementation plan is
+  relabeled a historical build log.
+
+### Changed
+
+- **Module path renamed** `github.com/agent-memory/agent-memory` →
+  `github.com/xChuCx/agent-memory` so it matches the repository and
+  `go install github.com/xChuCx/agent-memory/cmd/agent-memory@latest`
+  resolves. No behavioural change; release binaries were unaffected.
+
 ## [0.3.0] — 2026-05-29
 
 The completeness-and-polish release. It closes the remaining design-doc
