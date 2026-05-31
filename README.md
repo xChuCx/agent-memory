@@ -36,11 +36,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full 0.3 changelist.
 | [Patterns](docs/patterns/) | Reusable design patterns documented per subsystem. |
 | [Spikes](docs/spikes/) | Pre-M1 spike outcomes (byte-preserving engine, MCP SDK, flock, FTS5). |
 
-Older revisions preserved for traceability:
-
-- [Design Doc v0.4](agent-memory-design-doc-v0.4.md)
-- [Design Doc v0.3](agent-memory-design-doc-v0.3.md)
-
 ## Quick start
 
 ```bash
@@ -280,4 +275,6 @@ Release builds via goreleaser stamp the actual tag through
 
 ## License
 
-TBD. See [Implementation Plan §18 Open Decisions](agent-memory-implementation-plan.md).
+[Apache License 2.0](LICENSE). You may use, modify, and distribute this
+software under its terms; it includes an express patent grant. Contributions
+are accepted under the same license (see [CONTRIBUTING.md](CONTRIBUTING.md)).
