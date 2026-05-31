@@ -48,8 +48,11 @@ project-specific, counter to the common default, or otherwise non-obvious:
 
 So `lift = 0` with **both arms high** means the rule was too obvious — swap
 in a more idiosyncratic one. `lift = 0` with **both arms low** means
-something upstream broke (agent didn't run, or memory wasn't fetched) — open
-the transcripts with `DEBUG=1`. The shipped
+something upstream broke — run `DEBUG=1` (it prints `len=` per trial): if
+`len` is ~0 the agent emitted nothing, so test `$AGENT_CMD` in isolation,
+e.g. `claude -p --model sonnet "reply with one word: Clock"; echo $?` — a
+retired model name or a rejected flag makes `claude -p` exit non-zero with
+empty output. The shipped
 [`scenarios.jsonl`](scenarios.jsonl) deliberately uses counter-default rules
 (injected clock, in-house feature-flag API, ULID IDs, integer-cents money).
 
@@ -82,8 +85,8 @@ project `.mcp.json`, connects to `agent-memory mcp`, and can call
 `rm -rf /`). `$AM_MCP` expands to this condition's MCP flags.
 
 ```bash
-export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model claude-sonnet-4-5 --max-turns 8'
-export TRIALS=5 MODEL=claude-sonnet-4-5
+export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model sonnet'
+export TRIALS=5 MODEL=sonnet
 bash eval/behavioural/run.sh
 ```
 
@@ -100,6 +103,10 @@ Notes (verified against Claude Code v2.1.x — adjust if your version differs):
   project memory/context tools first"* — to **both** arms. That's the role
   the installed skill plays in real use; it is identical across arms and
   does not reveal the answer. Set `HINT=''` to rely purely on skill auto-load.
+- **Model name / turns.** Prefer the version-stable `--model sonnet`/`opus`
+  alias — a pinned name like `claude-sonnet-4-5` can be retired, after which
+  `claude -p` errors and emits nothing (both arms then read 0). `--max-turns N`
+  *exits with an error* if the limit is reached, so add it only once it works.
 - **Secondary metrics.** Add `--output-format json` to capture
   `total_cost_usd`/`usage`, or `--output-format stream-json --verbose` to
   count tool calls (a proxy for "redundant rediscovery").
@@ -127,8 +134,8 @@ Windows), not PowerShell/cmd. The commands above are identical. Prereqs:
 
 ```bash
 # in a Git Bash shell, from the repo root:
-export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model claude-sonnet-4-5 --max-turns 8'
-export TRIALS=5 MODEL=claude-sonnet-4-5
+export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model sonnet'
+export TRIALS=5 MODEL=sonnet
 bash eval/behavioural/run.sh
 ```
 

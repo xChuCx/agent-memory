@@ -17,7 +17,7 @@
 #             a globally-installed MCP can't contaminate the baseline.
 #
 # Claude Code (headless) — see README.md "Run it on Claude":
-#   export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model claude-sonnet-4-5 --max-turns 8'
+#   export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model sonnet'
 #
 # Usage: export AGENT_CMD='...'; TRIALS=5 MODEL=... [DEBUG=1] bash eval/behavioural/run.sh
 set -euo pipefail
@@ -33,8 +33,8 @@ MODEL="${MODEL:-unspecified}"
 HINT="${HINT:-Before answering, consult any available project memory/context tools for known pitfalls and prior decisions, then do the task: }"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIOS="${SCENARIOS:-$HERE/scenarios.jsonl}"   # override for a 1-line smoke
-DEBUG="${DEBUG:-}"                                # set to 1 to save transcripts
-DEBUG_DIR="${DEBUG_DIR:-${TMPDIR:-/tmp}/agent-memory-behavioural}"
+DEBUG="${DEBUG:-}"                                # set to 1: save transcripts + per-trial diagnostics
+DEBUG_DIR="${DEBUG_DIR:-$PWD/behavioural-transcripts}"   # findable, in the repo root
 
 for dep in agent-memory jq git; do
   command -v "$dep" >/dev/null || { echo "missing dependency: $dep" >&2; exit 1; }
@@ -42,7 +42,10 @@ done
 
 if [ -n "$DEBUG" ]; then
   mkdir -p "$DEBUG_DIR"
-  echo "DEBUG: saving transcripts to $DEBUG_DIR (one file per scenario.cond.trial)"
+  dbg_win="$DEBUG_DIR"; command -v cygpath >/dev/null 2>&1 && dbg_win="$(cygpath -w "$DEBUG_DIR")"
+  echo "DEBUG: transcripts -> $DEBUG_DIR (one file per scenario.cond.trial)"
+  [ "$dbg_win" != "$DEBUG_DIR" ] && echo "DEBUG: open in Windows at -> $dbg_win"
+  echo "DEBUG: per-trial diagnostics (len/mistake/correct/verdict) print below as trials run."
 fi
 
 echo "model: $MODEL   trials: $TRIALS"
@@ -82,7 +85,14 @@ JSON
   local m=0 c=0
   [[ "$out" == *"$mistake"* ]] && m=1
   [[ "$out" == *"$correct"* ]] && c=1
-  if [ "$c" = 1 ] && [ "$m" = 0 ]; then echo followed; else echo missed; fi
+  local verdict=missed
+  [ "$c" = 1 ] && [ "$m" = 0 ] && verdict=followed
+  # live diagnostic to stderr (won't pollute the verdict captured on stdout).
+  # len=0 => the agent emitted nothing: a plumbing problem (bad $AGENT_CMD /
+  # rejected flag / claude not on PATH), NOT a behaviour result.
+  [ -n "$DEBUG" ] && printf '  [%-14s %-7s #%s] len=%-5s mistake=%s correct=%s -> %s\n' \
+    "$id" "$cond" "$trial" "${#out}" "$m" "$c" "$verdict" >&2
+  echo "$verdict"
 }
 
 while IFS= read -r line; do
