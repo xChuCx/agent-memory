@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	agentfs "github.com/agent-memory/agent-memory/internal/fs"
-	"github.com/agent-memory/agent-memory/internal/lock"
-	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
+	agentfs "github.com/xChuCx/agent-memory/internal/fs"
+	"github.com/xChuCx/agent-memory/internal/lock"
+	agentmd "github.com/xChuCx/agent-memory/internal/markdown"
 )
 
 // Status values for RebaseResult. StatusRejected is reused from the

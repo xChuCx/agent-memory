@@ -14,7 +14,7 @@ import (
 	"os"
 	"path/filepath"
 
-	agentfs "github.com/agent-memory/agent-memory/internal/fs"
+	agentfs "github.com/xChuCx/agent-memory/internal/fs"
 )
 
 // AdapterName is the stable identifier used by `agent-memory install <name>`.

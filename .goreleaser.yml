@@ -42,7 +42,7 @@ builds:
     # see internal/cli/root.go for the variable.
     ldflags:
       - -s -w
-      - -X github.com/agent-memory/agent-memory/internal/cli.ProgramVersion=v{{ .Version }}
+      - -X github.com/xChuCx/agent-memory/internal/cli.ProgramVersion=v{{ .Version }}
 
 archives:
   - id: default

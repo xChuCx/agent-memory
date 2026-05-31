@@ -24,11 +24,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	"github.com/agent-memory/agent-memory/internal/git"
-	"github.com/agent-memory/agent-memory/internal/index"
-	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	"github.com/xChuCx/agent-memory/internal/git"
+	"github.com/xChuCx/agent-memory/internal/index"
+	agentmd "github.com/xChuCx/agent-memory/internal/markdown"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // FetchRequest mirrors the memory.fetch_context MCP tool input.

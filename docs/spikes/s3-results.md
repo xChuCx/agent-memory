@@ -71,7 +71,7 @@ Resolved gofrs/flock version: **v0.12.1** (from go.mod after `go mod tidy`).
     flock_test.go:185: acquire delay after crash: 4.6333ms
 --- PASS: TestCrashRecovery (0.04s)
 PASS
-ok      github.com/agent-memory/agent-memory/spikes/s3-flock-cross-process      0.577s
+ok      github.com/xChuCx/agent-memory/spikes/s3-flock-cross-process      0.577s
 ```
 
 | Check | Result | Notes |

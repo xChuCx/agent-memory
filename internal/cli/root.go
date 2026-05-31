@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-memory/agent-memory/internal/logging"
+	"github.com/xChuCx/agent-memory/internal/logging"
 )
 
 // logLevelFlag is bound to the root's persistent --log-level flag. Empty
@@ -31,7 +31,7 @@ func cliLogger() *slog.Logger {
 // that clearly identifies itself as a development build. Release builds via
 // goreleaser stamp the actual git tag in via -ldflags, e.g.:
 //
-//	go build -ldflags='-X github.com/agent-memory/agent-memory/internal/cli.ProgramVersion=v0.3.0' ./cmd/agent-memory
+//	go build -ldflags='-X github.com/xChuCx/agent-memory/internal/cli.ProgramVersion=v0.3.0' ./cmd/agent-memory
 //
 // See .goreleaser.yml and .github/workflows/release.yml.
 //

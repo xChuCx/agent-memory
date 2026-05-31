@@ -13,9 +13,9 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	agentgit "github.com/agent-memory/agent-memory/internal/git"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	agentgit "github.com/xChuCx/agent-memory/internal/git"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // MemoryStatus matches the design-doc §15.11 output shape for the

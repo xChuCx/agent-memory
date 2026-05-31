@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // updateFixture builds a minimal .agent-memory/ tree for orchestrator tests:

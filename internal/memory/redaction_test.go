@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/logging"
+	"github.com/xChuCx/agent-memory/internal/logging"
 )
 
 // These tests are the executable form of the design's secret-safety rule

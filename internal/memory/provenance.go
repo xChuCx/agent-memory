@@ -3,7 +3,7 @@ package memory
 import (
 	"fmt"
 
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // Source describes one provenance entry attached to a propose_update

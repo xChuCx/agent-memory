@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-memory/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/memory"
 )
 
 // ReviewList is the structured output for `agent-memory review` with no id.

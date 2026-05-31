@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	agentfs "github.com/agent-memory/agent-memory/internal/fs"
-	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	agentfs "github.com/xChuCx/agent-memory/internal/fs"
+	agentmd "github.com/xChuCx/agent-memory/internal/markdown"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // RebuildOpts configures RebuildAll.

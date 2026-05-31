@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // ---------- sqlite.go ----------

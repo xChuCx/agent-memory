@@ -16,7 +16,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/agent-memory/agent-memory/internal/logging"
+	"github.com/xChuCx/agent-memory/internal/logging"
 )
 
 // Server is a thin wrapper over mcp.Server that knows about the agent-memory

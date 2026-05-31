@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	"github.com/agent-memory/agent-memory/internal/index"
-	"github.com/agent-memory/agent-memory/internal/memory"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	"github.com/xChuCx/agent-memory/internal/index"
+	"github.com/xChuCx/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // NewApplyCmd returns the `agent-memory apply` subcommand.

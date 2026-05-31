@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	agentmd "github.com/xChuCx/agent-memory/internal/markdown"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // DriftPolicy controls how the staging engine (M5) re-validates an

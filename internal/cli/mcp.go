@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	agentmcp "github.com/agent-memory/agent-memory/internal/mcp"
+	agentmcp "github.com/xChuCx/agent-memory/internal/mcp"
 )
 
 // NewMCPCmd returns the `agent-memory mcp` subcommand. With --stdio (the

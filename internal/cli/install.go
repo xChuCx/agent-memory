@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-memory/agent-memory/internal/adapters/agents"
-	"github.com/agent-memory/agent-memory/internal/adapters/claude"
-	"github.com/agent-memory/agent-memory/internal/adapters/cursor"
-	"github.com/agent-memory/agent-memory/internal/adapters/gemini"
+	"github.com/xChuCx/agent-memory/internal/adapters/agents"
+	"github.com/xChuCx/agent-memory/internal/adapters/claude"
+	"github.com/xChuCx/agent-memory/internal/adapters/cursor"
+	"github.com/xChuCx/agent-memory/internal/adapters/gemini"
 )
 
 // InstallResult is the structured shape returned by `agent-memory install`.

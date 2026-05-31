@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agentgit "github.com/agent-memory/agent-memory/internal/git"
+	agentgit "github.com/xChuCx/agent-memory/internal/git"
 )
 
 // statusFixture builds a fresh updateFixture and returns it along with

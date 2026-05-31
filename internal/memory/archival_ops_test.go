@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
+	agentmd "github.com/xChuCx/agent-memory/internal/markdown"
 )
 
 // fileWithSection is a small fixture: a level-1 doc with one anchored

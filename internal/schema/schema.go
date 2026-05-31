@@ -18,7 +18,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	agentfs "github.com/agent-memory/agent-memory/internal/fs"
+	agentfs "github.com/xChuCx/agent-memory/internal/fs"
 )
 
 // ApprovalMode is the approval policy assigned to a category or

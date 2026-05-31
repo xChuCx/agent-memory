@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	agentfs "github.com/agent-memory/agent-memory/internal/fs"
-	"github.com/agent-memory/agent-memory/internal/lock"
-	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
+	agentfs "github.com/xChuCx/agent-memory/internal/fs"
+	"github.com/xChuCx/agent-memory/internal/lock"
+	agentmd "github.com/xChuCx/agent-memory/internal/markdown"
 )
 
 // StagedProposal is the envelope written to staging/<id>/proposal.json by

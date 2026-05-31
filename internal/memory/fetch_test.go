@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	"github.com/agent-memory/agent-memory/internal/git"
-	"github.com/agent-memory/agent-memory/internal/index"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	"github.com/xChuCx/agent-memory/internal/git"
+	"github.com/xChuCx/agent-memory/internal/index"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // fixture sets up a temporary .agent-memory/ with conventions, index,

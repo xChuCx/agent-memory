@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
+	agentmd "github.com/xChuCx/agent-memory/internal/markdown"
 )
 
 // TestBuildBenchProject_SmallSize_ProducesParseableTree confirms the

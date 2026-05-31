@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	"github.com/agent-memory/agent-memory/internal/memory"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	"github.com/xChuCx/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // rebaseFixture inits .agent-memory/, stages an add_pitfall +

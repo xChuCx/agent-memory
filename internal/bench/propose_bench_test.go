@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/memory"
 )
 
 // BenchmarkProposeUpdate_AppendPitfall measures the apply-routing

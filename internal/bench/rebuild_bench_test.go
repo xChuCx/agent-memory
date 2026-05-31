@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/index"
+	"github.com/xChuCx/agent-memory/internal/index"
 )
 
 // BenchmarkRebuildAll_Default measures the full index rebuild over

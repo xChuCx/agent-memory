@@ -8,11 +8,11 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	agentgit "github.com/agent-memory/agent-memory/internal/git"
-	"github.com/agent-memory/agent-memory/internal/index"
-	"github.com/agent-memory/agent-memory/internal/memory"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	agentgit "github.com/xChuCx/agent-memory/internal/git"
+	"github.com/xChuCx/agent-memory/internal/index"
+	"github.com/xChuCx/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // MemoryDirName is duplicated from internal/cli to avoid a cli → mcp import

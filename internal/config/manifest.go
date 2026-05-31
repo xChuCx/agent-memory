@@ -13,8 +13,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	agentfs "github.com/agent-memory/agent-memory/internal/fs"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	agentfs "github.com/xChuCx/agent-memory/internal/fs"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // Manifest is the deserialisation target for manifest.yaml.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/index"
+	"github.com/xChuCx/agent-memory/internal/index"
 )
 
 func TestTokenize(t *testing.T) {

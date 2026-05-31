@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	agentfs "github.com/agent-memory/agent-memory/internal/fs"
-	"github.com/agent-memory/agent-memory/internal/memory"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	agentfs "github.com/xChuCx/agent-memory/internal/fs"
+	"github.com/xChuCx/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // initOptions bundles arguments to runInit. Exposed at the package level so

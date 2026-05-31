@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/memory"
 )
 
 // fetchFixture inits an .agent-memory/ in a temp dir and drops a couple of

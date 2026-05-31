@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-memory/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/memory"
 )
 
 // NewRejectCmd returns the `agent-memory reject` subcommand.

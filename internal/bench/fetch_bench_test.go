@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	agentgit "github.com/agent-memory/agent-memory/internal/git"
-	"github.com/agent-memory/agent-memory/internal/memory"
+	agentgit "github.com/xChuCx/agent-memory/internal/git"
+	"github.com/xChuCx/agent-memory/internal/memory"
 )
 
 // BenchmarkFetchContext_Bootstrap measures the empty-query path —

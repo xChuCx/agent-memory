@@ -1,4 +1,4 @@
-module github.com/agent-memory/agent-memory
+module github.com/xChuCx/agent-memory
 
 go 1.25.0
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-memory/agent-memory/internal/memory"
+	"github.com/xChuCx/agent-memory/internal/memory"
 )
 
 // proposeFixture reuses mcpFixture and ensures the extra dirs the

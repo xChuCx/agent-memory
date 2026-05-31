@@ -15,13 +15,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agent-memory/agent-memory/internal/config"
-	agentfs "github.com/agent-memory/agent-memory/internal/fs"
-	"github.com/agent-memory/agent-memory/internal/index"
-	"github.com/agent-memory/agent-memory/internal/lock"
-	"github.com/agent-memory/agent-memory/internal/logging"
-	agentmd "github.com/agent-memory/agent-memory/internal/markdown"
-	"github.com/agent-memory/agent-memory/internal/schema"
+	"github.com/xChuCx/agent-memory/internal/config"
+	agentfs "github.com/xChuCx/agent-memory/internal/fs"
+	"github.com/xChuCx/agent-memory/internal/index"
+	"github.com/xChuCx/agent-memory/internal/lock"
+	"github.com/xChuCx/agent-memory/internal/logging"
+	agentmd "github.com/xChuCx/agent-memory/internal/markdown"
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // ============================================================================

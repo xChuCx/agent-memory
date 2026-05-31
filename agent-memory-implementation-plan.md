@@ -1407,11 +1407,10 @@ Tracked here so they don't pollute MVP planning. From design doc §35 and §29.6
 Status of the yes/no calls the plan surfaced. Genuinely open items now
 live in [ROADMAP.md](ROADMAP.md).
 
-1. **Module path.** ✅ `github.com/agent-memory/agent-memory` (go.mod).
-   ⚠️ Note: the current GitHub repo is `github.com/xChuCx/agent-memory`,
-   so `go install` won't resolve until the module path and repo path
-   match — either rename the module or host under a matching org before
-   relying on `go install` (release binaries are unaffected).
+1. **Module path.** ✅ `github.com/xChuCx/agent-memory` — matches the GitHub
+   repo, so `go install github.com/xChuCx/agent-memory/cmd/agent-memory@latest`
+   resolves once the repo is public. (Renamed from the placeholder
+   `github.com/agent-memory/agent-memory` during pre-release cleanup.)
 2. **License.** ✅ Apache-2.0 (`LICENSE`).
 3. **Release distribution.** ✅ GoReleaser → GitHub Releases (cross-platform
    archives + checksums). Homebrew/Scoop deferred (see ROADMAP).

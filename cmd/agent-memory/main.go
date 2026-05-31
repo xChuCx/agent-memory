@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/agent-memory/agent-memory/internal/cli"
+	"github.com/xChuCx/agent-memory/internal/cli"
 )
 
 func main() {
