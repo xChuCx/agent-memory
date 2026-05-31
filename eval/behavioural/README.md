@@ -34,22 +34,62 @@ wall-clock).
 
 ## Run it
 
-```bash
-# A command that runs YOUR agent on a task in the current directory and
-# writes its answer/patch to stdout. Examples:
-#   export AGENT_CMD='claude -p'                 # Claude Code headless
-#   export AGENT_CMD='your-agent --task'         # any CLI agent
-export AGENT_CMD='...'
-export TRIALS=5            # runs per (scenario, condition)
-export MODEL='...'         # record which model — goes in the report
+`$AGENT_CMD` is any command that runs your agent on the task passed as a
+**trailing argument** and writes its answer to stdout. Per scenario the
+runner prepares both repo conditions and, before each call, exports
+`$AM_MCP` (this condition's MCP-config flags) and prepends a shared `$HINT`
+(see below).
 
-bash eval/behavioural/run.sh        # prints a per-scenario tally
+```bash
+export AGENT_CMD='your-agent --task'   # task arrives as the trailing arg
+export TRIALS=5                        # runs per (scenario, condition)
+export MODEL='your-model'              # recorded in the report
+bash eval/behavioural/run.sh           # prints a per-scenario tally
 ```
 
-`run.sh` sets up the two repo conditions per scenario (in `with` it seeds
-the lesson with `agent-memory propose --apply` and writes a project
-`.mcp.json`), invokes `$AGENT_CMD` `TRIALS` times each, and scores the
-output against the scenario's signals.
+In `with`, the runner seeds the lesson with `agent-memory propose --apply`
+and writes a project `.mcp.json`; in `without` it writes an empty MCP
+config. It then invokes `$AGENT_CMD` `TRIALS`× per arm and scores stdout.
+
+### Run it on Claude (headless)
+
+Claude Code's print mode (`claude -p`) is a ready agent: it reads the
+project `.mcp.json`, connects to `agent-memory mcp`, and can call
+`memory.fetch_context`. The runner's temp repos are throwaway, so
+`--dangerously-skip-permissions` is appropriate (it still refuses
+`rm -rf /`). `$AM_MCP` expands to this condition's MCP flags.
+
+```bash
+export AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP --model claude-sonnet-4-5 --max-turns 8'
+export TRIALS=5 MODEL=claude-sonnet-4-5
+bash eval/behavioural/run.sh
+```
+
+Notes (verified against Claude Code v2.1.x — adjust if your version differs):
+
+- **MCP isolation.** `$AM_MCP` is `--mcp-config .mcp.json --strict-mcp-config`
+  in *with* and `--mcp-config <empty> --strict-mcp-config` in *without*;
+  `--strict-mcp-config` ignores user/global MCP servers, so a
+  globally-installed agent-memory can't leak into the baseline.
+- **`--allowedTools` names** (if you don't skip permissions) spell dots as
+  underscores: `mcp__agent-memory__memory_fetch_context`.
+- **The `$HINT`.** Project skills don't reliably auto-load in headless mode,
+  so the runner prepends one neutral instruction — *"consult any available
+  project memory/context tools first"* — to **both** arms. That's the role
+  the installed skill plays in real use; it is identical across arms and
+  does not reveal the answer. Set `HINT=''` to rely purely on skill auto-load.
+- **Secondary metrics.** Add `--output-format json` to capture
+  `total_cost_usd`/`usage`, or `--output-format stream-json --verbose` to
+  count tool calls (a proxy for "redundant rediscovery").
+
+Fast smoke (one scenario, one trial per arm) via the `SCENARIOS` override:
+
+```bash
+head -1 eval/behavioural/scenarios.jsonl > /tmp/one.jsonl
+SCENARIOS=/tmp/one.jsonl TRIALS=1 \
+  AGENT_CMD='claude -p --dangerously-skip-permissions $AM_MCP' \
+  bash eval/behavioural/run.sh
+```
 
 ## Scoring rigor
 
