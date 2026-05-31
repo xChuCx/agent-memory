@@ -39,6 +39,24 @@ git-native, reviewable, secret-safe. The clip is reproducible:
 [`docs/demo/demo.tape`](docs/demo/demo.tape) renders the gif with
 [`vhs`](https://github.com/charmbracelet/vhs) — see [docs/demo/](docs/demo/).
 
+## How it compares
+
+| Capability | AGENTS.md / CLAUDE.md | Vendor memory (e.g. Claude) | Vector / DB memory (mem0, Zep) | **agent-memory** |
+|---|---|---|---|---|
+| Plain-text, git-versioned source of truth | ✓ flat file | ✗ vendor-managed | ✗ DB / cloud | **✓ Markdown in your repo** |
+| Structured, section-level updates | ✗ | ✗ | ~ | **✓** |
+| Human review gate (see the diff first) | ✗ free edit | ✗ | ✗ | **✓ stage → `review --diff` → apply** |
+| Vendor-neutral (MCP — any agent) | ~ broad convention | ✗ one vendor | ~ varies | **✓ Claude · Cursor · Codex · Gemini** |
+| Secret / PII scan on write | ✗ | ✗ | ~ varies | **✓** |
+| Team merge for concurrent edits | ✗ text conflicts | ✗ | ✗ | **✓ section merge driver** |
+| Runs fully local (no cloud) | ✓ | ✗ | ~ varies | **✓** |
+
+These are general characterizations and the tools evolve fast — see something
+inaccurate? [Open an issue](https://github.com/xChuCx/agent-memory/issues) and
+I'll fix the row. agent-memory is complementary to instruction files like
+`AGENTS.md`/`CLAUDE.md` (it even installs one): those say *how to behave*;
+agent-memory is the *durable, searchable, reviewed knowledge* behind it.
+
 ## Status
 
 **Release 0.4** — the team-and-launch release: open-source-ready, safe to
@@ -84,18 +102,19 @@ See [CHANGELOG.md](CHANGELOG.md) for the full changelist.
 
 ## Quick start
 
-Install — pick one:
+**Install — download a prebuilt binary** (recommended): grab the archive
+for your OS/arch from the [latest release](https://github.com/xChuCx/agent-memory/releases/latest),
+extract it, and put `agent-memory` on your `PATH`. No toolchain needed.
 
 ```bash
-# A) Go toolchain (Go 1.25+)
+# Go toolchain alternative (Go 1.25+)
 go install github.com/xChuCx/agent-memory/cmd/agent-memory@latest
 
-# B) Prebuilt binary — download from GitHub Releases for your OS/arch,
-#    extract, and put `agent-memory` on your PATH.
-
-# C) From source
+# from source
 go build -o agent-memory ./cmd/agent-memory
 ```
+
+Homebrew, Scoop, and winget packages are planned.
 
 Then, inside the repo you want to give a memory:
 
@@ -106,7 +125,7 @@ agent-memory init --name my-project
 # Install the Claude Code skill (writes .claude/skills/agent-memory/SKILL.md)
 agent-memory install claude
 
-# Verify (release binaries print the tag; go install / source builds print "dev")
+# Verify (prints the release tag, the go-install version, or dev+vcs locally)
 agent-memory version
 
 # Read context
