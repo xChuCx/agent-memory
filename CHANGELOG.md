@@ -7,6 +7,14 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-31
+
+Pre-launch polish on top of 0.4.0 — docs/UX only, no behaviour change: a
+README banner + social-preview source, worked `--help` examples (the
+end-to-end workflow plus copy-pasteable per-command examples), and
+`version`/`memory.status` now reporting the real version for `go install`
+and source builds (via build info) instead of "dev".
+
 ### Added
 
 - **Brand assets.** A hand-authored SVG banner (`docs/assets/banner.svg`) in
