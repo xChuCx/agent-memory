@@ -9,6 +9,10 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ### Added
 
+- **Brand assets.** A hand-authored SVG banner (`docs/assets/banner.svg`) in
+  the README header and a 1280×640 `social-preview.svg` source for the
+  GitHub social card (export steps in `docs/assets/README.md`). Dependency-
+  free SVG, system fonts, brand violet on dark.
 - **Worked `--help` examples.** The root help now opens with the end-to-end
   workflow (init → install → the agent's fetch/propose loop → review/apply)
   and a runnable `Examples:` block; `fetch`, `propose`, `review`, and `apply`

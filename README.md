@@ -1,5 +1,9 @@
 # agent-memory
 
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="agent-memory — git-native memory for AI coding agents" width="640">
+</p>
+
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/xChuCx/agent-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/xChuCx/agent-memory/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
