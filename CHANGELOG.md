@@ -7,6 +7,22 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+
+- **Cross-session continuity eval** (`internal/eval`, deterministic, CI).
+  Runs the real record → persist → retrieve loop: a lesson recorded in one
+  session (via `ProposeUpdate`/`ApplyStaged`) is present in the next
+  session's context pack in **5/5** scenarios with memory, **0/5** without
+  (the amnesia baseline). Honest scope — this is the necessary precondition
+  for behaviour change, not task-success. See
+  [docs/eval/continuity.md](docs/eval/continuity.md).
+- **Behavioural A/B harness scaffold** ([`eval/behavioural/`](eval/behavioural/)):
+  "groundhog-day" scenarios + protocol + a pluggable runner to measure
+  whether an agent *repeats a recorded mistake* with vs without memory.
+  LLM-in-loop, so you run it with your own model (not in CI). README gains a
+  three-layer "Evidence (measured)" section (retrieval → continuity →
+  behaviour).
+
 ## [0.4.1] — 2026-05-31
 
 Pre-launch polish on top of 0.4.0 — docs/UX only, no behaviour change: a

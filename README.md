@@ -322,24 +322,35 @@ Exposed by `agent-memory mcp` over stdio JSON-RPC:
 | `memory.propose_update` | Submit structured edits (apply or stage). |
 | `memory.status` | Report memory health: file counts, staged proposals (with drift), security/git/lock posture. |
 
-## Retrieval quality (measured)
+## Evidence (measured)
 
-`fetch` is only useful if it returns the *right* sections. On a labeled
-28-query / 28-section benchmark, the shipped match-any retrieval puts a
-relevant section in the top 5 for **98%** of queries (recall@5 0.98,
-hit@1 0.96, MRR 0.97) — a **+0.91 recall lift** over the prior match-all
-behaviour.
+Three layers, honest about scope — **retrieval → continuity → behaviour**.
+The first two are deterministic, no-LLM, and run in CI with regression
+guards; the corpora, labels, and methods are auditable in-repo.
+
+**1 · Retrieval quality.** Does `fetch` return the *right* sections? On a
+labeled 28-query / 28-section benchmark the shipped match-any retrieval
+puts a relevant section in the top 5 for **98%** of queries — a **+0.91
+recall lift** over the prior match-all behaviour.
 
 | Config | recall@5 | hit@1 | MRR |
 |---|---|---|---|
 | match-all (AND) — prior | 0.07 | 0.07 | 0.07 |
 | **match-any (OR) — shipped** | **0.98** | **0.96** | **0.97** |
 
-Offline, deterministic, no LLM, and run in CI with regression floors. The
-corpus, gold labels, and method are auditable — and the scope (retrieval
-recall, not agent task-success) is stated honestly — in
-[docs/eval/retrieval.md](docs/eval/retrieval.md). Reproduce:
-`go test -run TestRetrievalEval -v ./internal/eval/`.
+→ method + caveats: [docs/eval/retrieval.md](docs/eval/retrieval.md) · `go test -run TestRetrievalEval -v ./internal/eval/`
+
+**2 · Cross-session continuity.** Does a lesson recorded in one session
+survive into the next? Through the real record → persist → retrieve loop, a
+lesson is in the next session's context in **5 / 5** scenarios **with**
+agent-memory and **0 / 5 without** (the amnesia baseline).
+
+→ [docs/eval/continuity.md](docs/eval/continuity.md) · `go test -run TestMemoryContinuity -v ./internal/eval/`
+
+**3 · Behavioural (task-success).** Does the agent *act* on it — fewer
+repeated mistakes? That needs an LLM in the loop, so it ships as a runnable
+A/B harness ("groundhog-day", with vs without memory) you run with your own
+model: [eval/behavioural/](eval/behavioural/). (Not in CI by design.)
 
 ## Agent-runtime adapters
 
