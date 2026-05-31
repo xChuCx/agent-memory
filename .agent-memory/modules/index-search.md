@@ -16,12 +16,15 @@ truth. `RebuildOpts{AssignMissingIDs}` backfills `@id` anchors.
 
 ## query + ranking signals
 <!-- @id: index-ranking -->
+`query.go` runs FTS5 BM25 (lower score = better) and returns the section
+body as `SearchResult.Content`. `ranking.go`'s `ApplyRankingSignals`
+multiplies scores by documented signals (all package constants) and sorts
+best-first.
 
-`query.go` runs FTS5 BM25 (lower score = better). `ranking.go`'s
-`ApplyRankingSignals` multiplies scores by documented signals and sorts
-best-first. Implemented: ScopeBoost ×2.0, FreshBoost ×1.5, ArchivePenalty
-×0.4, StalePenalty ×0.6. Multipliers are package constants (mirrors the
-Jaccard threshold decision). Not-yet-wired signals (design §20.4):
-active-branch ×1.3, decision/pitfall-referencing-changed-files ×1.4,
-low-confidence ×0.8.
-**Sources:** internal/index/ranking.go, internal/index/query.go
+File-level: ScopeBoost x2.0, FreshBoost x1.5, ArchivePenalty x0.4,
+StalePenalty x0.6. Content-level (design §20.4): active-branch x1.3
+(suppressed on main/master), decision/pitfall-referencing-changed-files
+x1.4 (via `git.ChangedFiles`), low-confidence x0.8 (inferred/stale/unknown).
+
+Fresh/stale maps still await per-section freshness markers (§20.3).
+**Sources:** internal/index/ranking.go, internal/index/query.go, internal/git/changed.go

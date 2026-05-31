@@ -12,3 +12,6 @@ meta/*.db-*
 # Advisory lock files — kernel state, not portable.
 meta/lock
 meta/lock.info
+
+# Rejection/sweep audit log — per-developer, append-only local history.
+meta/rejection-log.jsonl
