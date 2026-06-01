@@ -7,6 +7,11 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-06-01
+
+First release published to npm and the MCP Registry (the 0.4.2 tag was an
+internal dry-run; its npm/registry publish did not complete).
+
 ### Added
 
 - **Cross-session continuity eval** (`internal/eval`, deterministic, CI).
