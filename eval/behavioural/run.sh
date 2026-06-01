@@ -43,6 +43,28 @@ for dep in agent-memory jq git; do
   command -v "$dep" >/dev/null || { echo "missing dependency: $dep" >&2; exit 1; }
 done
 
+# Preflight: a user-scoped 'agent-memory' MCP server CONTAMINATES the no-memory
+# arm. claude -p connects to user-scoped servers regardless of
+# --strict-mcp-config (an undocumented gap), so both arms get memory, the A/B
+# measures nothing, and the agent may even write test lessons into your real
+# store. Detect the common case ($HOME/.claude.json) and refuse. We only
+# substring-check the file; its contents are never printed.
+if [[ "$AGENT_CMD" == *claude* ]]; then
+  home_cfg="${HOME:-}/.claude.json"
+  if [ -f "$home_cfg" ] && [[ "$(cat "$home_cfg" 2>/dev/null)" == *'"agent-memory"'* ]] \
+     && [ -z "${ALLOW_GLOBAL_MEMORY:-}" ]; then
+    {
+      echo "ERROR: a user-scoped 'agent-memory' MCP server is registered ($home_cfg)."
+      echo "claude -p connects to it in BOTH arms (--strict-mcp-config does not suppress"
+      echo "user-scoped servers), so the no-memory baseline is contaminated and the agent"
+      echo "may write test lessons into your real memory. Remove it for the run:"
+      echo "    claude mcp remove agent-memory      # run the eval, then re-add it"
+      echo "Or set ALLOW_GLOBAL_MEMORY=1 to proceed anyway (results will be INVALID)."
+    } >&2
+    exit 1
+  fi
+fi
+
 if [ -n "$DEBUG" ]; then
   mkdir -p "$DEBUG_DIR"
   dbg_win="$DEBUG_DIR"; command -v cygpath >/dev/null 2>&1 && dbg_win="$(cygpath -w "$DEBUG_DIR")"

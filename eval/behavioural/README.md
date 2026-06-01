@@ -98,6 +98,22 @@ export TRIALS=5 MODEL=sonnet
 bash eval/behavioural/run.sh
 ```
 
+> **Isolation caveat (important).** If you've registered agent-memory as a
+> *user-scoped* MCP server (`claude mcp add agent-memory ...`), `claude -p`
+> connects to it in **both** arms **regardless of `--strict-mcp-config`** (an
+> undocumented gap) — so the no-memory baseline is contaminated *and* the agent
+> can write test lessons into your real store. The runner refuses to start if it
+> finds one in `~/.claude.json`. Remove it for the run, then re-add:
+>
+> ```bash
+> claude mcp remove agent-memory          # ... run the eval ...
+> claude mcp add -s user agent-memory -- /path/to/agent-memory mcp --root /path/to/repo
+> ```
+>
+> `ALLOW_GLOBAL_MEMORY=1` bypasses the guard, but the numbers will be invalid.
+> A canary scenario (a nonsense `correct_signal` like `EmitZorp`) is the way to
+> prove isolation: if the **without** arm ever emits it, memory is leaking.
+
 Notes (verified against Claude Code v2.1.x — adjust if your version differs):
 
 - **MCP isolation.** `$AM_MCP` is `--mcp-config .mcp.json --strict-mcp-config`
