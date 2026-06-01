@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.xchucx/agent-memory",
+  "name": "io.github.xChuCx/agent-memory",
   "description": "Git-native project memory for AI coding agents: Markdown source of truth, reviewable, secret-safe.",
   "repository": {
     "url": "https://github.com/xChuCx/agent-memory",
