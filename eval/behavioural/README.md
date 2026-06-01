@@ -8,8 +8,33 @@ Concretely: does it use a project-specific convention it could *only* learn
 from memory? That needs a real LLM in the loop, so you run it with your
 model; it is intentionally **not** in CI.
 
-> Status: scaffold. Scenarios + protocol + a pluggable runner are here;
-> wire in your agent (`$AGENT_CMD`) and fill the results table.
+> **Status: scaffold — no published number.** The runner, scenarios, and
+> protocol are here, but producing a *trustworthy* number needs an agent whose
+> only memory is the one we inject (see **Isolation limitation** below).
+> agent-memory's published evidence is the two deterministic evals
+> ([retrieval](../../docs/eval/retrieval.md), [continuity](../../docs/eval/continuity.md));
+> this harness is for your own experiments.
+
+## Isolation limitation (read before trusting a number)
+
+The A/B only means something if the **without** arm has *zero* memory. With
+stock, logged-in **Claude Code** that is hard to guarantee:
+
+- A user/project-scoped `agent-memory` MCP server connects in *both* arms
+  regardless of `--strict-mcp-config`. The runner's preflight refuses to start
+  if it finds one (`claude mcp remove agent-memory` first).
+- Even with **no** MCP server, Claude Code's own cross-session memory
+  (auto-memory + a globally-installed `agent-memory` skill that persists "what
+  it learned") carries a lesson from the *with* arm into later runs, so the
+  baseline sees it too. Confirmed with a canary token (`EmitZorp`) that leaked
+  into *without* despite an empty MCP config.
+- The one flag that disables that layer, `--bare`, also drops the subscription
+  login (`Not logged in`), so it is not usable here.
+
+**Net:** a clean run needs an agent with **no skills / no auto-memory** — e.g.
+a minimal Anthropic-SDK tool loop that connects *only* the injected MCP server,
+or a throwaway environment. Until then, treat any number from this harness as
+indicative for your own debugging, **not publishable**.
 
 ## The experiment ("groundhog day")
 

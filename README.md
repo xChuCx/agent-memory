@@ -350,7 +350,9 @@ agent-memory and **0 / 5 without** (the amnesia baseline).
 **3 · Behavioural (task-success).** Does the agent *act* on it — fewer
 repeated mistakes? That needs an LLM in the loop, so it ships as a runnable
 A/B harness ("groundhog-day", with vs without memory) you run with your own
-model: [eval/behavioural/](eval/behavioural/). (Not in CI by design.)
+model: [eval/behavioural/](eval/behavioural/). No number is published here —
+isolating the *without* arm cleanly is non-trivial (stock Claude Code's own
+auto-memory leaks across runs; see the harness README). Not in CI by design.
 
 ## Agent-runtime adapters
 
