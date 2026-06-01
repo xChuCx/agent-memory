@@ -67,8 +67,18 @@ archives:
     files:
       - README.md
       - CHANGELOG.md
-      # LICENSE — TBD; add to .gitignore exempt list and include here
-      # once a license is chosen (see implementation plan §18).
+      - LICENSE
+
+  # Raw, un-archived binaries (one per os/arch) alongside the tar.gz/zip.
+  # The npm launcher (npm/) and curl users download a single binary and
+  # verify it against the checksums file — no tar/zip extraction needed.
+  - id: binary
+    formats:
+      - binary
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"

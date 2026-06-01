@@ -22,6 +22,16 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   LLM-in-loop, so you run it with your own model (not in CI). README gains a
   three-layer "Evidence (measured)" section (retrieval → continuity →
   behaviour).
+- **npm launcher + MCP Registry publishing.** A dependency-free npm package
+  ([`@xchucx/agent-memory`](npm/)) downloads the verified release binary on
+  first run and execs it, so MCP clients can launch the server with
+  `npx -y @xchucx/agent-memory mcp --root .`. A root `server.json` plus a
+  `publish-mcp` release job (npm publish + `mcp-publisher` over GitHub OIDC)
+  register the server in the official
+  [MCP Registry](https://registry.modelcontextprotocol.io/). goreleaser now
+  also emits raw per-platform binaries (alongside the tar.gz/zip) so the
+  launcher can fetch + checksum a single file. Requires repo secret
+  `NPM_TOKEN`.
 
 ## [0.4.1] — 2026-05-31
 

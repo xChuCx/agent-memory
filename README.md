@@ -107,6 +107,10 @@ for your OS/arch from the [latest release](https://github.com/xChuCx/agent-memor
 extract it, and put `agent-memory` on your `PATH`. No toolchain needed.
 
 ```bash
+# npx (no Go, no manual download): fetches the verified release binary on
+# first run and caches it — also usable straight from an MCP client config.
+npx -y @xchucx/agent-memory --help
+
 # Go toolchain alternative (Go 1.25+)
 go install github.com/xChuCx/agent-memory/cmd/agent-memory@latest
 
@@ -114,7 +118,8 @@ go install github.com/xChuCx/agent-memory/cmd/agent-memory@latest
 go build -o agent-memory ./cmd/agent-memory
 ```
 
-Homebrew, Scoop, and winget packages are planned.
+Homebrew, Scoop, and winget packages are planned. agent-memory is also
+listed on the [MCP Registry](https://registry.modelcontextprotocol.io/).
 
 Then, inside the repo you want to give a memory:
 

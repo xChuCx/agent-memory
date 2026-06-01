@@ -17,9 +17,8 @@ on:
       - "v*"
 
 permissions:
-  # goreleaser needs write access to create the Release object and
-  # upload archives. No other scope needed.
-  contents: write
+  contents: write # goreleaser creates the Release object + uploads assets
+  id-token: write # OIDC auth for the MCP Registry publish job (no secret)
 
 jobs:
   goreleaser:
@@ -47,3 +46,53 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-mcp:
+    # Publish the npm launcher (@xchucx/agent-memory) and register the server
+    # in the MCP Registry. Runs AFTER goreleaser so the release binaries the
+    # launcher downloads at runtime already exist. Requires repo secret
+    # NPM_TOKEN; MCP Registry auth uses GitHub OIDC (no secret needed).
+    name: npm wrapper + MCP Registry
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Sync version to the tag
+        # Stamp the pushed tag (vX.Y.Z -> X.Y.Z) into the launcher package and
+        # server.json so the published artifacts match this release exactly.
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          VERSION="$VERSION" node -e '
+            const fs = require("fs");
+            const v = process.env.VERSION;
+            const pkg = JSON.parse(fs.readFileSync("npm/package.json", "utf8"));
+            pkg.version = v;
+            fs.writeFileSync("npm/package.json", JSON.stringify(pkg, null, 2) + "\n");
+            const s = JSON.parse(fs.readFileSync("server.json", "utf8"));
+            s.version = v; s.packages[0].version = v;
+            fs.writeFileSync("server.json", JSON.stringify(s, null, 2) + "\n");
+            console.log("synced npm + server.json to", v);
+          '
+
+      - name: Publish npm launcher
+        run: npm publish --access public
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Install mcp-publisher
+        run: curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to the MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to the MCP Registry
+        run: ./mcp-publisher publish

@@ -1,0 +1,44 @@
+{
+  "name": "@xchucx/agent-memory",
+  "version": "0.4.1",
+  "description": "Git-native project memory for AI coding agents (MCP server + CLI). Thin launcher that fetches the prebuilt agent-memory binary.",
+  "mcpName": "io.github.xchucx/agent-memory",
+  "bin": {
+    "agent-memory": "bin/agent-memory.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xChuCx/agent-memory.git"
+  },
+  "homepage": "https://github.com/xChuCx/agent-memory#readme",
+  "bugs": {
+    "url": "https://github.com/xChuCx/agent-memory/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Teterichev Anton",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "memory",
+    "claude",
+    "cursor",
+    "llm",
+    "developer-tools"
+  ]
+}
