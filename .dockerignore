@@ -1,0 +1,14 @@
+# Keep the build context to the Go sources the binary needs.
+.git
+.github
+docs
+eval
+npm
+behavioural-transcripts
+dist
+bin
+*.gif
+*.png
+*.svg
+agent-memory
+agent-memory.exe
