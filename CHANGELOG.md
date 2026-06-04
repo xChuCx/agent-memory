@@ -17,6 +17,15 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   Migrations key off this monotonic integer (separate from the product
   `version` string); file-mutating migrations are kept off read paths. Design:
   [docs/design/federated-memory.md](docs/design/federated-memory.md) §9.
+- **Referenced stores — manifest contract + lockfile** (federation, PR2). The
+  manifest gains a `stores` block (`name`/`source`/`revision`/`path`/`mode`/
+  `priority_multiplier`) with validation; a committed `meta/stores.lock` pins
+  each store to a resolved commit (rebuildable cache under gitignored
+  `meta/cache/`). New `store add|list|rm` CLI; `status` lists declared stores;
+  minimal `component`/`contract`/`actor` landscape schema kinds. No fetch
+  behavior yet — sync (PR3) and multi-store fetch (PR5) come next; with no
+  stores declared, behavior is unchanged. Pattern:
+  [docs/patterns/federation-stores.md](docs/patterns/federation-stores.md).
 
 ## [0.4.3] — 2026-06-01
 

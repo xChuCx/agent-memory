@@ -94,3 +94,18 @@ write; a timestamp in the body would cause git churn and flaky tests.
 timestamp) and writes only when content actually differs.
 **Consequences:** Idempotent regeneration; stable tests; clean diffs.
 **Sources:** internal/memory/index_gen.go, docs/patterns/index-regeneration.md
+
+**Date:** 2026-06-04
+**Status:** active
+**Confidence:** confirmed
+
+Deliver system-level ("landscape") memory as PR1–PR6, branch-per-PR, behind an
+opt-in invariant: with no `stores` declared in the manifest, behavior is
+byte-for-byte the single-store path. Contract choices: a monotonic
+`store_format_version` in manifest.yaml (fail-closed on a too-new store);
+referenced stores use the `stores` / `revision` / `priority_multiplier`
+vocabulary (priority is a multiplier on the negative-BM25 score, so <1
+penalizes); landscape stores are read-only from a consuming repo in slice 1;
+synced stores are materialised into a sanitized cache (symlink/path-escape
+rejected) and treated as untrusted context, not instructions. Full design:
+docs/design/federated-memory.md.

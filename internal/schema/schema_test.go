@@ -34,6 +34,8 @@ func TestDefaultSchema_HasExpectedCategories(t *testing.T) {
 	expected := []string{
 		"index", "conventions", "decisions", "pitfalls",
 		"modules", "archive", "current", "sessions",
+		// Federation landscape kinds (federated-memory design §6.3).
+		"component", "contract", "actor",
 	}
 	for _, name := range expected {
 		if _, ok := s.Categories[name]; !ok {

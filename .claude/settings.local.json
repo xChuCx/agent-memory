@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "PowerShell(Copy-Item \"I:\\\\agent-memory\\\\agent-memory-design-doc-v0.4.md\" \"I:\\\\agent-memory\\\\agent-memory-design-doc-v0.4.1.md\")",
-      "PowerShell(@\\('docs/patterns','docs/spikes','spikes/s1-byte-preserving-markdown/testdata/01-replace-section-simple','spikes/s1-byte-preserving-markdown/testdata/02-replace-by-id','spikes/s1-byte-preserving-markdown/testdata/03-code-fence-with-hash','spikes/s1-byte-preserving-markdown/testdata/04-end-of-file-section','spikes/s1-byte-preserving-markdown/testdata/05-duplicate-headings','spikes/s1-byte-preserving-markdown/testdata/06-nested-headings','spikes/s1-byte-preserving-markdown/testdata/07-html-comment-before-heading','spikes/s1-byte-preserving-markdown/testdata/08-yaml-frontmatter','cmd/agent-memory','internal'\\) | ForEach-Object { New-Item -ItemType Directory -Force $_ | Out-Null }; Write-Output \"Directories created\")"
+      "PowerShell(@\\('docs/patterns','docs/spikes','spikes/s1-byte-preserving-markdown/testdata/01-replace-section-simple','spikes/s1-byte-preserving-markdown/testdata/02-replace-by-id','spikes/s1-byte-preserving-markdown/testdata/03-code-fence-with-hash','spikes/s1-byte-preserving-markdown/testdata/04-end-of-file-section','spikes/s1-byte-preserving-markdown/testdata/05-duplicate-headings','spikes/s1-byte-preserving-markdown/testdata/06-nested-headings','spikes/s1-byte-preserving-markdown/testdata/07-html-comment-before-heading','spikes/s1-byte-preserving-markdown/testdata/08-yaml-frontmatter','cmd/agent-memory','internal'\\) | ForEach-Object { New-Item -ItemType Directory -Force $_ | Out-Null }; Write-Output \"Directories created\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "mcp__agent-memory-s2__ping",
+      "Bash(go test *)",
+      "Bash(go build *)",
+      "mcp__agent-memory__memory_fetch_context",
+      "mcp__agent-memory__memory_status"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "agent-memory"
+  ],
+  "enableAllProjectMcpServers": true
 }

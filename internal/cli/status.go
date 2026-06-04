@@ -34,6 +34,15 @@ type StatusReport struct {
 	ManifestPath string         `json:"manifest_path"`
 	SchemaPath   string         `json:"schema_path"`
 	Categories   map[string]int `json:"categories"`
+	Stores       []StoreStatus  `json:"stores,omitempty"`
+}
+
+// StoreStatus summarises one referenced landscape store for `status`.
+type StoreStatus struct {
+	Name     string `json:"name"`
+	Source   string `json:"source"`
+	Revision string `json:"revision,omitempty"`
+	Lock     string `json:"lock"` // resolved commit, "unlocked", or "not synced"
 }
 
 // NewStatusCmd returns the `agent-memory status` subcommand.
@@ -111,6 +120,22 @@ func runStatus(ctx context.Context, rootFlag string) (*StatusReport, error) {
 		return nil, fmt.Errorf("status: count files: %w", err)
 	}
 
+	var stores []StoreStatus
+	if len(m.Stores) > 0 {
+		lock, err := config.LoadStoresLock(filepath.Join(memDir, "meta", config.StoresLockName))
+		if err != nil {
+			return nil, fmt.Errorf("status: load stores lock: %w", err)
+		}
+		for _, s := range m.Stores {
+			stores = append(stores, StoreStatus{
+				Name:     s.Name,
+				Source:   s.Source,
+				Revision: s.Revision,
+				Lock:     lockState(lock, s.Name),
+			})
+		}
+	}
+
 	return &StatusReport{
 		MemoryStatus: mem,
 		Root:         root,
@@ -118,6 +143,7 @@ func runStatus(ctx context.Context, rootFlag string) (*StatusReport, error) {
 		ManifestPath: manifestPath,
 		SchemaPath:   schemaPath,
 		Categories:   categories,
+		Stores:       stores,
 	}, nil
 }
 
@@ -197,6 +223,15 @@ func writeStatusHuman(w io.Writer, r *StatusReport) error {
 		fmt.Fprintf(w, "  %-15s %d\n", name, r.Categories[name])
 	}
 	fmt.Fprintln(w)
+
+	// Referenced landscape stores (federation).
+	if len(r.Stores) > 0 {
+		fmt.Fprintf(w, "Referenced stores (%d):\n", len(r.Stores))
+		for _, s := range r.Stores {
+			fmt.Fprintf(w, "  %-15s %s  [%s]\n", s.Name, s.Source, s.Lock)
+		}
+		fmt.Fprintln(w)
+	}
 
 	// Staged updates.
 	if len(r.StagedUpdates) > 0 {
