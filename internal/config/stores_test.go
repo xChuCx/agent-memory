@@ -134,3 +134,13 @@ func TestStoresLock_FutureVersionFailsClosed(t *testing.T) {
 		t.Fatalf("expected ErrStoreFormatTooNew, got %v", err)
 	}
 }
+
+func TestStoresLock_MissingVersionIsMalformed(t *testing.T) {
+	p := filepath.Join(t.TempDir(), StoresLockName)
+	if err := os.WriteFile(p, []byte("stores: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadStoresLock(p); err == nil {
+		t.Fatal("expected error for a versionless (malformed) lock, got nil")
+	}
+}

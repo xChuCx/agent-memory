@@ -55,9 +55,15 @@ func LoadStoresLock(path string) (*StoresLock, error) {
 		}
 		return nil, fmt.Errorf("LoadStoresLock: %w", err)
 	}
-	l := NewStoresLock()
-	if err := yaml.Unmarshal(b, l); err != nil {
+	// Decode into a zero-value struct (not NewStoresLock) so a missing
+	// `version` reads as 0 and is rejected: the lock format has no legacy
+	// baseline, so a versionless lock is malformed, not v1.
+	var l StoresLock
+	if err := yaml.Unmarshal(b, &l); err != nil {
 		return nil, fmt.Errorf("LoadStoresLock: parse %q: %w", path, err)
+	}
+	if l.Version == 0 {
+		return nil, fmt.Errorf("LoadStoresLock: %q is missing a lock version (malformed)", path)
 	}
 	if l.Version > StoresLockVersion {
 		return nil, fmt.Errorf("LoadStoresLock: lock version %d > supported %d: %w",
@@ -66,7 +72,7 @@ func LoadStoresLock(path string) (*StoresLock, error) {
 	if l.Stores == nil {
 		l.Stores = map[string]LockedStore{}
 	}
-	return l, nil
+	return &l, nil
 }
 
 // WriteStoresLock serialises l to path atomically. yaml.v3 emits map keys in

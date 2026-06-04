@@ -70,7 +70,7 @@ func newStoreAddCmd() *cobra.Command {
 			}
 			// Only set the pointer when --priority was given, so an omitted
 			// flag means "use the default", not "0".
-			if cmd.Flags().Changed("priority") {
+			if cmd.Flags().Changed("priority-multiplier") {
 				st.PriorityMultiplier = &priority
 			}
 			m.Stores = append(m.Stores, st)
@@ -91,7 +91,7 @@ func newStoreAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&st.Revision, "revision", "", "branch/tag/commit to pin (default: the repo's default branch)")
 	cmd.Flags().StringVar(&st.Path, "path", "", "store dir within the repo (default: .agent-memory)")
 	cmd.Flags().StringVar(&st.Mode, "mode", "", "access mode (default/only: read-only)")
-	cmd.Flags().Float64Var(&priority, "priority", 0, "ranking multiplier vs local 1.0 (default 0.8; must be > 0; <1 penalizes)")
+	cmd.Flags().Float64Var(&priority, "priority-multiplier", 0, "ranking multiplier vs local 1.0 (default 0.8; must be > 0; <1 penalizes)")
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("source")
 	return cmd
@@ -170,8 +170,18 @@ func newStoreRmCmd() *cobra.Command {
 			if err := config.WriteManifest(mpath, m); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(),
-				"Removed store %q. Its cached copy (if any) is cleaned up on the next sync.\n", name)
+			// Drop the committed lock entry too, so the lockfile never carries
+			// a dead store. The gitignored cache is reconciled on the next sync.
+			lockPath := filepath.Join(filepath.Dir(mpath), config.StoresLockName)
+			if lock, lerr := config.LoadStoresLock(lockPath); lerr == nil {
+				if _, present := lock.Stores[name]; present {
+					delete(lock.Stores, name)
+					if err := config.WriteStoresLock(lockPath, lock); err != nil {
+						return err
+					}
+				}
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed store %q.\n", name)
 			return nil
 		},
 	}

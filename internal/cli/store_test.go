@@ -104,3 +104,27 @@ func TestStore_ListEmpty(t *testing.T) {
 		t.Fatalf("empty list output:\n%s", out)
 	}
 }
+
+func TestStore_RmCleansLockEntry(t *testing.T) {
+	dir := stInit(t)
+	if _, err := stRun(t, "add", "--root", dir, "--name", "p", "--source", "x"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// Pre-seed a lock entry as `sync` (PR3) eventually will.
+	lockPath := filepath.Join(dir, ".agent-memory", "meta", config.StoresLockName)
+	lk := config.NewStoresLock()
+	lk.Stores["p"] = config.LockedStore{Source: "x", ResolvedCommit: "abc123def456"}
+	if err := config.WriteStoresLock(lockPath, lk); err != nil {
+		t.Fatalf("seed lock: %v", err)
+	}
+	if _, err := stRun(t, "rm", "--root", dir, "--name", "p"); err != nil {
+		t.Fatalf("rm: %v", err)
+	}
+	got, err := config.LoadStoresLock(lockPath)
+	if err != nil {
+		t.Fatalf("load lock: %v", err)
+	}
+	if _, present := got.Stores["p"]; present {
+		t.Fatal("store rm should have removed the lock entry")
+	}
+}
