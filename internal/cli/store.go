@@ -49,6 +49,7 @@ func newStoreAddCmd() *cobra.Command {
 	var (
 		rootFlag string
 		st       config.Store
+		priority float64
 	)
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -66,6 +67,11 @@ func newStoreAddCmd() *cobra.Command {
 				if existing.Name == st.Name {
 					return fmt.Errorf("store %q already declared (use `store rm` first)", st.Name)
 				}
+			}
+			// Only set the pointer when --priority was given, so an omitted
+			// flag means "use the default", not "0".
+			if cmd.Flags().Changed("priority") {
+				st.PriorityMultiplier = &priority
 			}
 			m.Stores = append(m.Stores, st)
 			if err := m.Validate(); err != nil {
@@ -85,7 +91,7 @@ func newStoreAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&st.Revision, "revision", "", "branch/tag/commit to pin (default: the repo's default branch)")
 	cmd.Flags().StringVar(&st.Path, "path", "", "store dir within the repo (default: .agent-memory)")
 	cmd.Flags().StringVar(&st.Mode, "mode", "", "access mode (default/only: read-only)")
-	cmd.Flags().Float64Var(&st.PriorityMultiplier, "priority", 0, "ranking multiplier vs local 1.0 (default 0.8; <1 penalizes)")
+	cmd.Flags().Float64Var(&priority, "priority", 0, "ranking multiplier vs local 1.0 (default 0.8; must be > 0; <1 penalizes)")
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("source")
 	return cmd

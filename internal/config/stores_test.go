@@ -8,6 +8,8 @@ import (
 	"testing"
 )
 
+func fptr(f float64) *float64 { return &f }
+
 func TestValidateStores_ViaManifestValidate(t *testing.T) {
 	base := func() *Manifest {
 		m := DefaultManifest()
@@ -22,12 +24,21 @@ func TestValidateStores_ViaManifestValidate(t *testing.T) {
 	}{
 		{"valid", []Store{{Name: "platform", Source: "https://x"}}, false},
 		{"valid-multi", []Store{{Name: "a", Source: "x"}, {Name: "b-2", Source: "y"}}, false},
+		{"valid-priority", []Store{{Name: "a", Source: "x", PriorityMultiplier: fptr(0.5)}}, false},
+		{"valid-path", []Store{{Name: "a", Source: "x", Path: "platform/.agent-memory"}}, false},
 		{"bad-name-space", []Store{{Name: "Bad Name", Source: "x"}}, true},
 		{"bad-name-upper", []Store{{Name: "Platform", Source: "x"}}, true},
 		{"duplicate", []Store{{Name: "a", Source: "x"}, {Name: "a", Source: "y"}}, true},
 		{"missing-source", []Store{{Name: "a"}}, true},
 		{"bad-mode", []Store{{Name: "a", Source: "x", Mode: "read-write"}}, true},
-		{"negative-priority", []Store{{Name: "a", Source: "x", PriorityMultiplier: -1}}, true},
+		{"zero-priority", []Store{{Name: "a", Source: "x", PriorityMultiplier: fptr(0)}}, true},
+		{"negative-priority", []Store{{Name: "a", Source: "x", PriorityMultiplier: fptr(-1)}}, true},
+		{"abs-path", []Store{{Name: "a", Source: "x", Path: "/etc"}}, true},
+		{"dotdot-path", []Store{{Name: "a", Source: "x", Path: "../escape"}}, true},
+		{"unclean-path", []Store{{Name: "a", Source: "x", Path: "foo/../bar"}}, true},
+		{"backslash-path", []Store{{Name: "a", Source: "x", Path: `a\b`}}, true},
+		{"drive-path", []Store{{Name: "a", Source: "x", Path: "C:/x"}}, true},
+		{"dot-path", []Store{{Name: "a", Source: "x", Path: "."}}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -56,7 +67,7 @@ func TestStoreDefaults(t *testing.T) {
 		t.Errorf("EffectiveMode = %q, want %q", s.EffectiveMode(), StoreModeReadOnly)
 	}
 	// Explicit overrides are honored.
-	s2 := Store{Name: "a", Source: "x", Path: "platform/.agent-memory", PriorityMultiplier: 0.5}
+	s2 := Store{Name: "a", Source: "x", Path: "platform/.agent-memory", PriorityMultiplier: fptr(0.5)}
 	if s2.StorePath() != "platform/.agent-memory" || s2.Priority() != 0.5 {
 		t.Errorf("overrides not honored: path=%q prio=%v", s2.StorePath(), s2.Priority())
 	}

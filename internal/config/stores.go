@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"regexp"
+	"strings"
 )
 
 // Federation: a project may reference one or more shared "landscape" stores
@@ -32,12 +34,12 @@ var storeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // Store is one referenced landscape store.
 type Store struct {
-	Name               string  `yaml:"name"`
-	Source             string  `yaml:"source"`                        // git URL or local path
-	Revision           string  `yaml:"revision,omitempty"`            // branch/tag/commit; default branch if empty
-	Path               string  `yaml:"path,omitempty"`                // store dir within the repo; default ".agent-memory"
-	Mode               string  `yaml:"mode,omitempty"`                // "read-only" (default/only in slice 1)
-	PriorityMultiplier float64 `yaml:"priority_multiplier,omitempty"` // ranking multiplier; default 0.8
+	Name               string   `yaml:"name"`
+	Source             string   `yaml:"source"`                        // git URL or local path
+	Revision           string   `yaml:"revision,omitempty"`            // branch/tag/commit; default branch if empty
+	Path               string   `yaml:"path,omitempty"`                // store dir within the repo; default ".agent-memory"
+	Mode               string   `yaml:"mode,omitempty"`                // "read-only" (default/only in slice 1)
+	PriorityMultiplier *float64 `yaml:"priority_multiplier,omitempty"` // omitted = default (0.8); must be > 0 if set
 }
 
 // StorePath returns the in-repo store directory, defaulting to ".agent-memory".
@@ -48,12 +50,14 @@ func (s Store) StorePath() string {
 	return s.Path
 }
 
-// Priority returns the ranking multiplier, defaulting to DefaultStorePriority.
+// Priority returns the ranking multiplier, defaulting to DefaultStorePriority
+// when unset. A set value is guaranteed > 0 by validateStores, so there is no
+// ambiguity between "unset" and an explicit zero.
 func (s Store) Priority() float64 {
-	if s.PriorityMultiplier == 0 {
+	if s.PriorityMultiplier == nil {
 		return DefaultStorePriority
 	}
-	return s.PriorityMultiplier
+	return *s.PriorityMultiplier
 }
 
 // EffectiveMode returns the store mode, defaulting to read-only.
@@ -65,7 +69,8 @@ func (s Store) EffectiveMode() string {
 }
 
 // validateStores checks the manifest's stores block: unique safe-slug names,
-// a non-empty source, a recognised mode, and a non-negative priority.
+// a non-empty source, a recognised mode, a positive priority (when set), and a
+// safe relative store path.
 func validateStores(stores []Store) error {
 	seen := make(map[string]struct{}, len(stores))
 	for i, s := range stores {
@@ -82,8 +87,45 @@ func validateStores(stores []Store) error {
 		if s.Mode != "" && s.Mode != StoreModeReadOnly {
 			return fmt.Errorf("manifest: stores[%d] (%s): mode %q unsupported (only %q)", i, s.Name, s.Mode, StoreModeReadOnly)
 		}
-		if s.PriorityMultiplier < 0 {
-			return fmt.Errorf("manifest: stores[%d] (%s): priority_multiplier must be >= 0", i, s.Name)
+		if s.PriorityMultiplier != nil && *s.PriorityMultiplier <= 0 {
+			return fmt.Errorf("manifest: stores[%d] (%s): priority_multiplier must be > 0 when set (omit it for the default %g)", i, s.Name, DefaultStorePriority)
+		}
+		if err := validateStorePath(s.Path); err != nil {
+			return fmt.Errorf("manifest: stores[%d] (%s): %w", i, s.Name, err)
+		}
+	}
+	return nil
+}
+
+// validateStorePath checks a store's in-repo path declaratively. The actual
+// filesystem sandboxing (symlink rejection, containment of the synced tree)
+// lands with sync in PR3; here we reject paths that could never be a safe,
+// portable, in-repo subdirectory. Empty is allowed and defaults to
+// ".agent-memory" (see Store.StorePath). The path uses forward slashes (the
+// project-wide convention) and must be a clean, relative subdirectory.
+func validateStorePath(p string) error {
+	if p == "" {
+		return nil
+	}
+	if strings.ContainsRune(p, '\\') {
+		return fmt.Errorf("path %q must use forward slashes", p)
+	}
+	if len(p) >= 2 && p[1] == ':' &&
+		((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) {
+		return fmt.Errorf("path %q must be relative (no drive letter)", p)
+	}
+	if path.IsAbs(p) {
+		return fmt.Errorf("path %q must be relative", p)
+	}
+	if c := path.Clean(p); c != p {
+		return fmt.Errorf("path %q must be in clean form (e.g. %q)", p, c)
+	}
+	if p == "." || p == ".." {
+		return fmt.Errorf("path %q must name a subdirectory", p)
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return fmt.Errorf("path %q must not contain '..'", p)
 		}
 	}
 	return nil
