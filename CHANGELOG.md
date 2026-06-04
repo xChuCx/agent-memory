@@ -7,6 +7,17 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+
+- **Store-format versioning** (federation groundwork + 1.0 hardening). A
+  `store_format_version` field in `manifest.yaml` (baseline `1`) with a
+  load-time guard: legacy stores with no such field resolve to the baseline
+  unchanged, and a store written by a newer agent-memory **fails closed**
+  (`ErrStoreFormatTooNew`) instead of risking a misread of a future layout.
+  Migrations key off this monotonic integer (separate from the product
+  `version` string); file-mutating migrations are kept off read paths. Design:
+  [docs/design/federated-memory.md](docs/design/federated-memory.md) §9.
+
 ## [0.4.3] — 2026-06-01
 
 First release published to npm and the MCP Registry (the 0.4.2 tag was an

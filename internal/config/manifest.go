@@ -19,18 +19,19 @@ import (
 
 // Manifest is the deserialisation target for manifest.yaml.
 type Manifest struct {
-	Version     string      `yaml:"version"`
-	Project     Project     `yaml:"project"`
-	Budgets     Budgets     `yaml:"budgets"`
-	Updates     Updates     `yaml:"updates"`
-	Staging     Staging     `yaml:"staging"`
-	Security    Security    `yaml:"security"`
-	Git         Git         `yaml:"git"`
-	Archive     Archive     `yaml:"archive"`
-	Concurrency Concurrency `yaml:"concurrency"`
-	LocalState  LocalState  `yaml:"local_state"`
-	Sessions    Sessions    `yaml:"sessions"`
-	Eval        Eval        `yaml:"eval,omitempty"`
+	Version            string      `yaml:"version"`
+	StoreFormatVersion int         `yaml:"store_format_version,omitempty"`
+	Project            Project     `yaml:"project"`
+	Budgets            Budgets     `yaml:"budgets"`
+	Updates            Updates     `yaml:"updates"`
+	Staging            Staging     `yaml:"staging"`
+	Security           Security    `yaml:"security"`
+	Git                Git         `yaml:"git"`
+	Archive            Archive     `yaml:"archive"`
+	Concurrency        Concurrency `yaml:"concurrency"`
+	LocalState         LocalState  `yaml:"local_state"`
+	Sessions           Sessions    `yaml:"sessions"`
+	Eval               Eval        `yaml:"eval,omitempty"`
 }
 
 // Project identifies the repository the manifest belongs to.
@@ -150,8 +151,9 @@ type Eval struct {
 // DefaultManifest returns the recommended manifest from design doc §26.1.
 func DefaultManifest() *Manifest {
 	return &Manifest{
-		Version: "0.4.1",
-		Project: Project{Root: "."},
+		Version:            "0.4.1",
+		StoreFormatVersion: CurrentStoreFormatVersion,
+		Project:            Project{Root: "."},
 		Budgets: Budgets{
 			BootstrapChars:    12000,
 			FetchContextChars: 24000,
@@ -213,6 +215,9 @@ func LoadManifest(path string) (*Manifest, error) {
 	m := DefaultManifest()
 	if err := yaml.Unmarshal(b, m); err != nil {
 		return nil, fmt.Errorf("LoadManifest: parse %q: %w", path, err)
+	}
+	if err := migrateManifest(m); err != nil {
+		return nil, fmt.Errorf("LoadManifest: %w", err)
 	}
 	return m, nil
 }

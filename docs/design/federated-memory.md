@@ -314,6 +314,11 @@ Small but mandatory; also a standing 1.0 item.
 - Formalise a **store-format version** + a migration runner invoked on load
   (`vN → vN+1`); no-op baseline today, exercised by the first real change
   (landscape kinds, `stores`).
+- **Carrier (PR1, implemented):** a `store_format_version: int` in
+  `manifest.yaml` (baseline `1`), guarded in `LoadManifest` — absent/0 →
+  baseline, `> current` → fail closed (`ErrStoreFormatTooNew`). Migrations key
+  off this monotonic int (separate from the product `version` string);
+  file-mutating migrations stay off read paths.
 - Golden tests: a current-format store opens and round-trips after migration; an
   unknown future version **fails closed** with a clear message.
 - Freeze the manifest + MCP tool shapes considered stable.
