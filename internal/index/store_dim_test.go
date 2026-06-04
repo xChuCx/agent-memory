@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xChuCx/agent-memory/internal/schema"
@@ -156,9 +157,25 @@ func TestRebuildAll_LocalAndCachedStores(t *testing.T) {
 	// A materialised external store (as PR3 sync would produce).
 	writeStoreFile(t, memDir, "meta/cache/stores/platform/decisions.md",
 		"# Decisions\n\n## Platformwidget rollout\n<!-- @id: d-pw -->\n- Decision: ship platformwidget\n- Status: accepted\n")
+	// Transient session content (a GitTracked=false category). The local store
+	// indexes its own (unchanged behavior); an external store must NOT — it
+	// could be a developer's private working context in a local-path store.
+	writeStoreFile(t, memDir, "sessions/notes.md",
+		"# Session\n\n## scratch localtransient\n- working note\n")
+	writeStoreFile(t, memDir, "meta/cache/stores/platform/sessions/notes.md",
+		"# Session\n\n## scratch cachedtransient\n- working note\n")
 
 	if err := idx.RebuildAll(ctx, memDir, schema.DefaultSchema(), RebuildOpts{AssignMissingIDs: true}); err != nil {
 		t.Fatalf("RebuildAll: %v", err)
+	}
+
+	// The local store indexes its own transient session file.
+	if r, _ := idx.Search(ctx, "localtransient", 5); len(r) == 0 {
+		t.Fatal("local store should index its own session/local files")
+	}
+	// The external store must NOT index a transient (non-git-tracked) category.
+	if r, _ := idx.SearchPerStore(ctx, "cachedtransient", 5, []string{"platform"}); len(r) != 0 {
+		t.Fatalf("external store leaked a transient session file into the index: %+v", r)
 	}
 
 	// Local content is found by the local-scoped Search; every hit is tagged
@@ -192,13 +209,20 @@ func TestRebuildAll_LocalAndCachedStores(t *testing.T) {
 	}
 
 	// ListFiles / GetFile are local-only: the cached decisions.md is excluded
-	// even though it shares the relative path.
+	// even though it shares the relative path, so exactly one decisions.md (the
+	// local one) appears — not the cached store's.
 	files, err := idx.ListFiles(ctx, "")
 	if err != nil {
 		t.Fatalf("ListFiles: %v", err)
 	}
-	if len(files) != 1 || files[0].File != "decisions.md" {
-		t.Fatalf("ListFiles should return only the local decisions.md, got %+v", files)
+	decisionsCount := 0
+	for _, f := range files {
+		if f.File == "decisions.md" {
+			decisionsCount++
+		}
+	}
+	if decisionsCount != 1 {
+		t.Fatalf("ListFiles should contain exactly one (local) decisions.md, got %d in %+v", decisionsCount, files)
 	}
 	if _, err := idx.GetFile(ctx, "decisions.md"); err != nil {
 		t.Fatalf("GetFile(decisions.md) local: %v", err)
@@ -222,5 +246,28 @@ func TestRebuildAll_NoCacheUnchanged(t *testing.T) {
 	// No cache dir exists → any external store query is empty.
 	if r, _ := idx.SearchPerStore(ctx, "zorptoken", 5, []string{"platform"}); len(r) != 0 {
 		t.Fatalf("no cache dir, yet an external store returned rows: %+v", r)
+	}
+}
+
+// A cached store with a present-but-invalid meta/schema.yaml must FAIL the
+// rebuild — never silently fall back to the consumer's schema, which would turn
+// a broken store into a hard-to-spot retrieval bug. (An absent schema.yaml is
+// fine and falls back; that path is covered by the other RebuildAll tests.)
+func TestRebuildAll_InvalidCachedSchemaFails(t *testing.T) {
+	idx, ctx := openTestIndex(t)
+	memDir := t.TempDir()
+	writeStoreFile(t, memDir, "decisions.md",
+		"# Decisions\n\n## Local d\n<!-- @id: d-local -->\n- Decision: x\n- Status: accepted\n")
+	// Present but broken YAML (unterminated flow sequence).
+	writeStoreFile(t, memDir, "meta/cache/stores/platform/meta/schema.yaml", "categories: [unterminated")
+	writeStoreFile(t, memDir, "meta/cache/stores/platform/decisions.md",
+		"# Decisions\n\n## Platform d\n<!-- @id: d-plat -->\n- Decision: y\n- Status: accepted\n")
+
+	err := idx.RebuildAll(ctx, memDir, schema.DefaultSchema(), RebuildOpts{AssignMissingIDs: true})
+	if err == nil {
+		t.Fatal("RebuildAll should fail on a present-but-invalid cached meta/schema.yaml")
+	}
+	if !strings.Contains(err.Error(), "invalid meta/schema.yaml") {
+		t.Fatalf("error should name the invalid schema, got: %v", err)
 	}
 }

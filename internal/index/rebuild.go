@@ -76,6 +76,14 @@ func (i *Index) indexTree(ctx context.Context, store, baseDir string, sch *schem
 			// Markdown file outside any schema category — skip silently.
 			return nil
 		}
+		// External stores contribute durable "landscape" memory only. Skip the
+		// transient local/session categories (GitTracked=false): in a git store
+		// these are usually gitignored anyway, but a local-path store could
+		// otherwise pull a developer's private working context into the shared
+		// index, and they are retrieval noise across repos regardless.
+		if store != LocalStore && !cat.GitTracked {
+			return nil
+		}
 		return i.IndexFile(ctx, store, baseDir, relSlash, cat, opts)
 	})
 }
@@ -107,7 +115,16 @@ func (i *Index) indexCachedStores(ctx context.Context, memDir string, fallback *
 		}
 		storeDir := filepath.Join(cacheRoot, name)
 		sch := fallback
-		if s, serr := schema.LoadSchema(filepath.Join(storeDir, "meta", "schema.yaml")); serr == nil {
+		// Only an ABSENT schema falls back to the consumer's. A present-but-
+		// invalid meta/schema.yaml is a configuration error and MUST fail the
+		// rebuild — silently indexing the store under the consumer schema would
+		// turn a broken store into a hard-to-spot retrieval bug.
+		schemaPath := filepath.Join(storeDir, "meta", "schema.yaml")
+		if agentfs.PathExists(schemaPath) {
+			s, serr := schema.LoadSchema(schemaPath)
+			if serr != nil {
+				return fmt.Errorf("store %q: invalid meta/schema.yaml: %w", name, serr)
+			}
 			sch = s
 		}
 		if err := i.indexTree(ctx, name, storeDir, sch, RebuildOpts{}); err != nil {

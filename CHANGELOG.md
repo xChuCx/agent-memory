@@ -43,7 +43,11 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `(store, file, section_id)` and `(store, file)`), so one index holds the local
   memory **and** every cached store without collisions. `RebuildAll` now indexes
   the local tree (under the reserved `local` store, skipping `meta/cache/`) plus
-  each cached store under its manifest name (read-only). New
+  each cached store under its manifest name (read-only, indexing only that
+  store's **durable** landscape categories — transient local/session files are
+  skipped so a local-path store can't leak private working context; a present-
+  but-invalid cached `meta/schema.yaml` fails the rebuild rather than silently
+  falling back to the consumer schema). New
   `SearchPerStore(query, kPerStore, stores)` does per-store-fair retrieval; the
   legacy `Search`/`Get*`/`List*` stay scoped to the local store, so **fetch and
   status are unchanged** (multi-store fetch is PR5). The schema bump (1 → 2) is
