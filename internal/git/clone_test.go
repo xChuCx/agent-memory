@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,21 +37,22 @@ func mkGitRepo(t *testing.T) string {
 func TestClone_HeadCommit_Checkout(t *testing.T) {
 	src := mkGitRepo(t)
 	dst := filepath.Join(t.TempDir(), "clone")
+	ctx := context.Background()
 
-	if err := Clone(src, dst); err != nil {
+	if err := Clone(ctx, src, dst); err != nil {
 		t.Fatalf("clone: %v", err)
 	}
 	if !IsWorkTree(dst) {
 		t.Fatal("clone should be a git work tree")
 	}
-	commit, err := HeadCommit(dst)
+	commit, err := HeadCommit(ctx, dst)
 	if err != nil {
 		t.Fatalf("head commit: %v", err)
 	}
 	if len(commit) < 40 {
 		t.Fatalf("commit sha looks too short: %q", commit)
 	}
-	if err := Checkout(dst, commit); err != nil {
+	if err := Checkout(ctx, dst, commit); err != nil {
 		t.Fatalf("checkout %s: %v", commit, err)
 	}
 }
@@ -60,7 +62,7 @@ func TestClone_BadSourceErrors(t *testing.T) {
 		t.Skip("git not installed")
 	}
 	dst := filepath.Join(t.TempDir(), "clone")
-	if err := Clone(filepath.Join(t.TempDir(), "nope"), dst); err == nil {
+	if err := Clone(context.Background(), filepath.Join(t.TempDir(), "nope"), dst); err == nil {
 		t.Fatal("expected clone of a nonexistent source to fail")
 	}
 }

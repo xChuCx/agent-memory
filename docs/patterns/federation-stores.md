@@ -44,8 +44,9 @@ file pinning each store to a `resolved_commit` (analogous to `go.sum`) so a
 team/CI sees identical landscape memory. The materialised copy lives under
 `meta/cache/stores/<name>/` — **gitignored, rebuildable** (consistent with
 `meta/index.sqlite`). A local-path source that is not a git work tree is recorded
-`unlocked` (not reproducible; dev/monorepo only). It is populated by
-`agent-memory sync` (below).
+`unlocked` (not reproducible; dev/monorepo only). It is **authoritative**:
+`agent-memory sync` re-materialises a pinned store at its locked commit; the pin
+moves forward only with `--update` or a changed `revision` (below).
 
 ## Minimal landscape schema
 
@@ -71,19 +72,28 @@ declared stores and their lock state (`not synced` until `agent-memory sync`).
 `memory.Sync` materialises each declared store into the cache and writes the
 lock. Per store:
 
-1. **Clone** the source into a throwaway temp dir, check out the `revision`, and
-   resolve the commit — or, for a local non-git path, take it in place and mark
-   the lock entry `unlocked`.
-2. **Sandbox-validate + copy** the store dir (`<repo>/<path>`) into a staging
+1. **Resolve the commit.** For a git source, reproduce the lock's pinned
+   `resolved_commit` — so a team/CI gets identical landscape memory — unless
+   `--update` is passed or the manifest's `revision` changed, in which case the
+   requested revision is resolved fresh and re-pinned. A local non-git path is
+   taken in place and recorded `unlocked` (a `revision` on such a source is an
+   error).
+2. **Clone** the source into a throwaway temp dir and check out that commit.
+3. **Validate** it is an agent-memory store: `meta/manifest.yaml` must load
+   (which applies the store-format-version guard — a too-new store **fails
+   closed**) and pass manifest validation.
+4. **Sandbox-validate + copy** the store dir (`<repo>/<path>`) into a staging
    dir: `fs.CopyDirValidated` rejects symlinks (never follows them), keeps every
    path under the destination, and copies regular files only.
-3. **Scan on ingest**: each `.md` is secret/PII-scanned with the *consuming*
-   repo's `security` settings; a store's own allowlist markers are **not**
-   honored (it cannot self-exempt). Any finding rejects that store (reason codes
-   only — never secret bytes).
-4. **Atomic swap** the staging dir into `meta/cache/stores/<name>/`
-   (`fs.SwapDir`, Windows-safe) — no half-synced cache is ever visible.
-5. **Record** the resolved commit + timestamp in `stores.lock`.
+5. **Scan on ingest**: text files (`.md`, `.yaml`/`.yml`, `.json`, `.txt`) are
+   secret/PII-scanned with the *consuming* repo's `security` settings; a store's
+   own allowlist markers are **not** honored (it cannot self-exempt). Any
+   finding rejects that store (reason codes only — never secret bytes).
+6. **Swap** the staging dir into `meta/cache/stores/<name>/` (`fs.SwapDir`,
+   Windows-safe two-step). This is not fully atomic — there is a brief window
+   where the cache dir is absent — which is fine while nothing reads the cache
+   concurrently; PR5 (fetch) will coordinate via a shared lock.
+7. **Record** the resolved commit + timestamp in `stores.lock`.
 
 A failed store is reported and skipped; the others still sync. Stores removed
 from the manifest are **reconciled** out of both the lock and the cache. `sync`

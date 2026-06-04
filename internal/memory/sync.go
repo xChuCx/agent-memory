@@ -2,13 +2,17 @@
 // the rebuildable cache under .agent-memory/meta/cache/stores/<name>/ and pins
 // each to a resolved commit in meta/stores.lock. The pipeline per store is:
 //
-//	clone (or local-path copy) → sandbox-validate (no symlinks, contained) →
-//	secret/PII scan → atomic swap into the cache → record in the lock
+//	clone (or local-path copy) → validate it is an agent-memory store →
+//	sandbox-validate (no symlinks, contained) → secret/PII scan →
+//	swap into the cache → record in the lock
 //
-// No half-synced cache is ever visible (we build in a staging dir and swap),
-// and external content is treated as untrusted (its own allowlist markers do
-// NOT exempt it from scanning). The index store dimension lands in PR4, so
-// sync does not rebuild the index here.
+// The committed lock is authoritative: a store already pinned at a commit is
+// re-materialised at THAT commit on every sync (reproducible landscape memory),
+// not silently re-pinned to a moving branch. Pass Update to deliberately move a
+// pin forward to the latest of its requested revision. External content is
+// treated as untrusted (its own allowlist markers do NOT exempt it from
+// scanning). The index store dimension lands in PR4, so sync does not rebuild
+// the index here.
 package memory
 
 import (
@@ -31,6 +35,9 @@ type SyncDeps struct {
 	MemoryDir string // absolute path to the consuming repo's .agent-memory/
 	Manifest  *config.Manifest
 	Logger    *slog.Logger
+	// Update, when true, moves each git store's pin forward to the latest of
+	// its requested revision instead of reproducing the locked commit.
+	Update bool
 	// Now is injectable for deterministic tests; nil → time.Now.
 	Now func() time.Time
 }
@@ -55,16 +62,15 @@ type StoreSyncResult struct {
 	Name           string
 	ResolvedCommit string
 	Unlocked       bool
+	Reused         bool // reproduced the previously-locked commit (no re-pin)
 	Err            error
 }
 
 // Sync materialises every referenced store and rewrites meta/stores.lock.
-// Stores no longer declared in the manifest are reconciled away (their cache
-// dir and lock entry are removed). The returned error is for whole-operation
-// failures (a malformed lock, an unwritable lock); per-store failures live in
-// the results.
+// Stores no longer declared in the manifest are reconciled away (cache dir +
+// lock entry removed). The returned error is for whole-operation failures (a
+// malformed lock, an unwritable lock); per-store failures live in the results.
 func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
-	_ = ctx
 	cacheRoot := filepath.Join(deps.MemoryDir, "meta", "cache", "stores")
 	lockPath := filepath.Join(deps.MemoryDir, "meta", config.StoresLockName)
 
@@ -83,7 +89,8 @@ func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
 	var results []StoreSyncResult
 	for _, st := range deps.Manifest.Stores {
 		declared[st.Name] = true
-		res := syncOneStore(deps, st, cacheRoot)
+		locked, haveLock := lock.Stores[st.Name]
+		res := syncOneStore(ctx, deps, st, cacheRoot, locked, haveLock)
 		results = append(results, res)
 		if res.Err != nil {
 			deps.log().Warn("store sync failed", "store", st.Name, "error", res.Err.Error())
@@ -97,7 +104,8 @@ func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
 			StorePath:         st.StorePath(),
 			Unlocked:          res.Unlocked,
 		}
-		deps.log().Info("store synced", "store", st.Name, "commit", res.ResolvedCommit, "unlocked", res.Unlocked)
+		deps.log().Info("store synced", "store", st.Name, "commit", res.ResolvedCommit,
+			"unlocked", res.Unlocked, "reused", res.Reused)
 	}
 
 	// Reconcile: drop lock entries + cache dirs for undeclared stores.
@@ -108,9 +116,8 @@ func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
 	}
 	if entries, derr := os.ReadDir(cacheRoot); derr == nil {
 		for _, e := range entries {
-			name := strings.TrimSuffix(e.Name(), ".old")
-			name = strings.TrimSuffix(name, ".tmp")
-			if e.IsDir() && !declared[name] {
+			base := strings.TrimSuffix(strings.TrimSuffix(e.Name(), ".old"), ".tmp")
+			if e.IsDir() && !declared[base] {
 				_ = os.RemoveAll(filepath.Join(cacheRoot, e.Name()))
 			}
 		}
@@ -123,7 +130,7 @@ func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
 }
 
 // syncOneStore materialises a single store into cacheRoot/<name>.
-func syncOneStore(deps SyncDeps, st config.Store, cacheRoot string) StoreSyncResult {
+func syncOneStore(ctx context.Context, deps SyncDeps, st config.Store, cacheRoot string, locked config.LockedStore, haveLock bool) StoreSyncResult {
 	res := StoreSyncResult{Name: st.Name}
 
 	if err := os.MkdirAll(cacheRoot, 0o755); err != nil {
@@ -133,43 +140,67 @@ func syncOneStore(deps SyncDeps, st config.Store, cacheRoot string) StoreSyncRes
 	staging := filepath.Join(cacheRoot, st.Name+".tmp")
 	_ = os.RemoveAll(staging)
 
-	var srcStoreDir string
 	localExists := agentfs.PathExists(st.Source)
 	useGit := !localExists || git.IsWorkTree(st.Source)
 
+	if !useGit && st.Revision != "" {
+		res.Err = fmt.Errorf("revision %q is set but source %q is a local non-git path (unlocked; pin a git source instead)",
+			st.Revision, st.Source)
+		return res
+	}
+
+	var srcStoreDir string
 	if useGit {
+		// The committed lock is authoritative: reproduce the pinned commit
+		// unless --update was passed or the requested revision changed.
+		checkoutRef := st.Revision
+		reused := false
+		if !deps.Update && haveLock && !locked.Unlocked &&
+			locked.ResolvedCommit != "" && locked.RequestedRevision == st.Revision {
+			checkoutRef = locked.ResolvedCommit
+			reused = true
+		}
+
 		clone, err := os.MkdirTemp("", "am-sync-")
 		if err != nil {
 			res.Err = err
 			return res
 		}
-		defer os.RemoveAll(clone)
+		defer func() { _ = os.RemoveAll(clone) }()
 		repoDir := filepath.Join(clone, "repo")
-		if err := git.Clone(st.Source, repoDir); err != nil {
+		if err := git.Clone(ctx, st.Source, repoDir); err != nil {
 			res.Err = err
 			return res
 		}
-		if st.Revision != "" {
-			if err := git.Checkout(repoDir, st.Revision); err != nil {
+		if checkoutRef != "" {
+			if err := git.Checkout(ctx, repoDir, checkoutRef); err != nil {
 				res.Err = err
 				return res
 			}
 		}
-		commit, err := git.HeadCommit(repoDir)
+		commit, err := git.HeadCommit(ctx, repoDir)
 		if err != nil {
 			res.Err = err
 			return res
 		}
 		res.ResolvedCommit = commit
+		res.Reused = reused && commit == locked.ResolvedCommit
 		srcStoreDir = filepath.Join(repoDir, filepath.FromSlash(st.StorePath()))
 	} else {
-		// Local, non-git path → not reproducible: recorded as unlocked.
 		res.Unlocked = true
 		srcStoreDir = filepath.Join(st.Source, filepath.FromSlash(st.StorePath()))
 	}
 
 	if !agentfs.PathExists(srcStoreDir) {
 		res.Err = fmt.Errorf("store path %q not found in source %q", st.StorePath(), st.Source)
+		return res
+	}
+
+	// Confirm the referenced content is actually an agent-memory store and that
+	// its store-format version is one we understand (fail closed on a future
+	// version — the same guard that protects the local store).
+	if err := validateReferencedStore(srcStoreDir); err != nil {
+		res.Err = fmt.Errorf("store %q: %w", st.Name, err)
 		return res
 	}
 
@@ -194,6 +225,7 @@ func syncOneStore(deps SyncDeps, st config.Store, cacheRoot string) StoreSyncRes
 		return res
 	}
 
+	// Replace the cache dir with the freshly-built staging dir.
 	if err := agentfs.SwapDir(staging, filepath.Join(cacheRoot, st.Name)); err != nil {
 		_ = os.RemoveAll(staging)
 		res.Err = err
@@ -202,10 +234,35 @@ func syncOneStore(deps SyncDeps, st config.Store, cacheRoot string) StoreSyncRes
 	return res
 }
 
-// scanStoreTree scans the Markdown content of a materialised store using the
+// validateReferencedStore checks that storeDir is a well-formed agent-memory
+// store before it is cached: it must have meta/manifest.yaml, the manifest must
+// load (which applies the store-format-version guard — a too-new store fails
+// closed), and it must pass manifest validation.
+func validateReferencedStore(storeDir string) error {
+	mPath := filepath.Join(storeDir, "meta", "manifest.yaml")
+	if !agentfs.PathExists(mPath) {
+		return fmt.Errorf("not an agent-memory store (missing meta/manifest.yaml)")
+	}
+	m, err := config.LoadManifest(mPath) // applies migrateManifest → fail-closed on future version
+	if err != nil {
+		return fmt.Errorf("referenced store manifest: %w", err)
+	}
+	if err := m.Validate(); err != nil {
+		return fmt.Errorf("referenced store manifest invalid: %w", err)
+	}
+	return nil
+}
+
+// scannableExts are the text extensions scanned on ingest. The whole store is
+// copied (incl. meta/*.yaml and any importer outputs), so we scan beyond .md.
+var scannableExts = map[string]bool{
+	".md": true, ".markdown": true, ".yaml": true, ".yml": true, ".json": true, ".txt": true,
+}
+
+// scanStoreTree scans the text content of a materialised store using the
 // consuming repo's security settings. External allowlist markers are NOT
 // honored (Allowlist is left nil) so a referenced store cannot self-exempt
-// content from the scan. Returns "rel:line type" descriptions (no secret bytes).
+// content. Returns "rel:line type" descriptions (no secret bytes).
 func scanStoreTree(dir string, sec config.Security) ([]string, error) {
 	if !sec.SecretScan && !sec.PIIScan {
 		return nil, nil // consumer opted out of scanning entirely
@@ -224,7 +281,7 @@ func scanStoreTree(dir string, sec config.Security) ([]string, error) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if d.IsDir() || !strings.HasSuffix(p, ".md") {
+		if d.IsDir() || !scannableExts[strings.ToLower(filepath.Ext(p))] {
 			return nil
 		}
 		content, rerr := os.ReadFile(p)

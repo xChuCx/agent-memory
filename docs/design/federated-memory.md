@@ -345,14 +345,16 @@ Federation ships as a sequence of small PRs with clean boundaries.
   `stores.lock` parser/writer; `store add|list|rm` CLI; `status` lists declared
   stores; minimal `component`/`contract`/`actor` schema kinds (§6.3); `.gitignore`
   for `meta/cache/`. Backward compat: old manifests load unchanged.
-- **PR3 — Sync lifecycle.** `agent-memory sync`: clone/fetch/checkout into a temp
-  dir → **sandbox-validate** (reject & never-follow symlinks, path containment
-  under root, skip `.git/`) → secret/PII scan → **atomic swap into the cache** →
-  write the lock. *Every* store (git or local-path) is materialised into the
-  sanitized cache; downstream reads only the cache, never `source`. No half-synced
-  cache is ever visible to fetch. (Windows: two-step dir swap — write `<name>.tmp`,
-  rotate old `<name>`→`<name>.old`, rename, remove `.old`.) Index rebuild wired in
-  PR4.
+- **PR3 — Sync lifecycle.** `agent-memory sync`: reproduce the lock's pinned
+  commit (`--update` moves the pin forward) → clone/checkout into a temp dir →
+  validate it is an agent-memory store (too-new store-format version fails
+  closed) → **sandbox-validate** (reject & never-follow symlinks, path
+  containment) → secret/PII scan → **two-step swap into the cache** → write the
+  lock. *Every* store (git or local-path) is materialised into the sanitized
+  cache; downstream reads only the cache, never `source`. (Windows: two-step dir
+  swap — write `<name>.tmp`, rotate old `<name>`→`<name>.old`, rename, remove
+  `.old`. Brief missing-dir window; PR5 fetch will coordinate via a shared lock.)
+  Index rebuild wired in PR4.
 - **PR4 — Index store dimension.** Add `store` to the FTS / docs / sections schema;
   key `(store, file, section_id)`; **rebuild-on-index-version-bump** (no in-place
   ALTER); `RebuildAll` indexes local + cached stores; `Result.Store`;

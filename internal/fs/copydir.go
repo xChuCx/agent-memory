@@ -93,11 +93,16 @@ func copyRegularFile(src, dst string) error {
 	return out.Close()
 }
 
-// SwapDir atomically replaces dest with staging (both must be on the same
-// filesystem). Windows-safe: a rename onto an existing directory fails there,
-// so the existing dest is moved aside first and removed only after the swap
-// succeeds; on failure the original is restored. No half-synced state is ever
-// visible at dest.
+// SwapDir replaces dest with staging via a two-step rename (both must be on the
+// same filesystem). Windows-safe: a rename onto an existing directory fails
+// there, so the existing dest is moved aside first and removed only after the
+// swap succeeds; on failure the original is restored best-effort.
+//
+// This is NOT fully atomic: there is a brief window between the two renames
+// where dest is absent. That is acceptable while nothing reads the cache
+// concurrently (sync is the only toucher today); a concurrent reader (PR5
+// fetch) must coordinate via a shared lock or tolerate a transiently-missing
+// dir.
 func SwapDir(staging, dest string) error {
 	old := dest + ".old"
 	_ = os.RemoveAll(old)

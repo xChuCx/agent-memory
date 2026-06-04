@@ -14,7 +14,10 @@ import (
 // referenced landscape stores (federation; see docs/design/federated-memory.md
 // and docs/patterns/federation-stores.md).
 func NewSyncCmd() *cobra.Command {
-	var rootFlag string
+	var (
+		rootFlag string
+		update   bool
+	)
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Fetch & pin referenced landscape stores into the local cache",
@@ -51,6 +54,7 @@ fetch lands in a later release.`,
 				MemoryDir: memDir,
 				Manifest:  m,
 				Logger:    cliLogger(),
+				Update:    update,
 			})
 			if err != nil {
 				return err
@@ -84,5 +88,6 @@ fetch lands in a later release.`,
 		},
 	}
 	cmd.Flags().StringVar(&rootFlag, "root", "", "repo root (default: current working directory)")
+	cmd.Flags().BoolVar(&update, "update", false, "move each git store's pin forward to the latest of its requested revision")
 	return cmd
 }
