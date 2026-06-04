@@ -26,6 +26,15 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   behavior yet — sync (PR3) and multi-store fetch (PR5) come next; with no
   stores declared, behavior is unchanged. Pattern:
   [docs/patterns/federation-stores.md](docs/patterns/federation-stores.md).
+- **`agent-memory sync`** (federation, PR3) — fetches & pins referenced stores
+  into the rebuildable cache. Per store: clone (or copy a local path) into a
+  temp dir → **sandbox-validate** (reject/never-follow symlinks, contain paths)
+  → **secret/PII scan on ingest** (consumer's `security`; external allowlist
+  markers do not self-exempt) → **atomic swap** into `meta/cache/stores/<name>/`
+  (Windows-safe; no half-synced cache visible) → record the resolved commit in
+  `stores.lock`. Local non-git paths are recorded `unlocked`. Removed stores are
+  reconciled out of the lock + cache. No context/index changes yet (multi-store
+  fetch is PR5).
 
 ## [0.4.3] — 2026-06-01
 
