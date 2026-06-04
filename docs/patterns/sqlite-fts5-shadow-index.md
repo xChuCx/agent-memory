@@ -102,6 +102,74 @@ LIMIT ?;
   (`content` column) is also selected so content-level ranking signals can
   inspect it.
 
+## Federation: the `store` dimension (schema v2)
+
+Federated "landscape" memory (see [federation-stores.md](federation-stores.md))
+lets a repo reference shared external stores, synced read-only into
+`meta/cache/stores/<name>/`. The index gained a `store` dimension so one shadow
+index can hold the local memory **and** every cached store without their rows
+colliding:
+
+```sql
+CREATE VIRTUAL TABLE memory_search USING fts5(
+    file, section_id, title, headings, content, tags,
+    store UNINDEXED,                 -- last column; see note below
+    tokenize='porter unicode61'
+);
+CREATE TABLE memory_sections (
+    store TEXT NOT NULL, file TEXT NOT NULL, section_id TEXT NOT NULL,
+    /* heading, heading_level, byte_start, byte_end, content_hash ... */
+    PRIMARY KEY (store, file, section_id)
+);
+CREATE TABLE memory_docs (
+    store TEXT NOT NULL, file TEXT NOT NULL, /* category, freshness, ... */
+    PRIMARY KEY (store, file)
+);
+```
+
+- **`store` is `UNINDEXED` and last in the FTS5 column list.** UNINDEXED keeps
+  it out of the tokenizer, so a store name can never match a `MATCH` term and
+  pollute relevance — yet it is still stored and filterable with `store = ?`.
+  Putting it *last* leaves every prior column's positional index unchanged, so
+  `snippet(memory_search, 4, …)` still points at `content`.
+- **`LocalStore = "local"`** labels the consuming repo's own content (the rows
+  that existed before federation). Cached stores use their manifest name; the
+  name `local` is reserved (rejected by manifest validation).
+
+### Opt-in invariant: legacy queries stay local
+
+Every pre-federation query method (`Search`, `GetSection`, `ListSections`,
+`GetFile`, `ListFiles`) is scoped to `store = LocalStore`. So with no cached
+stores the index behaves exactly as before, and even *with* cached stores the
+fetch/status paths see only local rows until PR5 opts in. Multi-store retrieval
+is the new `SearchPerStore(query, kPerStore, stores)`:
+
+- Runs the FTS query once per named store with its own `LIMIT kPerStore`
+  (**per-store-fair**: one noisy store can't crowd out the others in a global
+  top-N), tagging each hit with its `Store`.
+- The caller (PR5 fetch) merges and re-ranks across stores, applying each
+  store's priority multiplier.
+
+The incremental upsert/delete path only ever touches the local store, so
+`SectionDoc.Store`/`FileDoc.Store` default to `LocalStore` when empty and the
+`Delete*` helpers are hard-scoped to local. `RebuildAll` is the only writer that
+sets a non-local store: it indexes the local tree (skipping `meta/cache/`) then
+walks `meta/cache/stores/<name>/`, indexing each cached store under its name
+(read-only — never `AssignMissingIDs`, and using the cached store's own
+`meta/schema.yaml` when present).
+
+### Migration: rebuild-on-version-bump
+
+The schema change is a **`SchemaVersion` bump (1 → 2)**, not an in-place
+migration: FTS5's column set and the new composite primary keys can't be
+`ALTER`ed. Because the index is a derived, rebuildable cache, `Init` detects a
+stale `PRAGMA user_version`, **drops the three tables, and recreates the current
+schema empty**; the caller repopulates. Every index-opening path already
+self-heals an empty index by calling `RebuildAll` (the read paths did this for
+first use; PR4 added the same guard to the `propose`/`apply` write paths so a
+migrated index never ends up partially populated). A fresh database
+(`user_version` 0) and an already-current one both skip the drop.
+
 ## Driver
 
 `modernc.org/sqlite` — pure-Go port. CGo-free, which keeps cross-compilation simple. FTS5 is compiled in by default. Driver name is `"sqlite"` (singular, not `"sqlite3"`).

@@ -109,6 +109,13 @@ func runProposeUpdate(ctx context.Context, root string, logger *slog.Logger, inp
 	if err := idx.Init(ctx); err != nil {
 		return nil, fmt.Errorf("memory.propose_update: init index: %w", err)
 	}
+	// Self-heal an empty index (fresh repo, or just migrated by a schema bump
+	// in Init) before the incremental upsert, so it doesn't end up partial.
+	if n, err := idx.CountSections(ctx); err == nil && n == 0 {
+		if err := idx.RebuildAll(ctx, memDir, sch, index.RebuildOpts{}); err != nil {
+			return nil, fmt.Errorf("memory.propose_update: rebuild index: %w", err)
+		}
+	}
 
 	resp, err := memory.ProposeUpdate(ctx, memory.ProposeRequest{
 		Intent:     memory.Intent(input.Intent),

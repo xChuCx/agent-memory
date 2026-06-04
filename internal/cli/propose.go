@@ -177,6 +177,13 @@ func runPropose(ctx context.Context, f *proposeFlags, stdin io.Reader) (*Propose
 	if err := idx.Init(ctx); err != nil {
 		return nil, fmt.Errorf("propose: init index: %w", err)
 	}
+	// Self-heal an empty index (fresh repo, or just migrated by a schema bump
+	// in Init) before the incremental upsert, so it doesn't end up partial.
+	if n, err := idx.CountSections(ctx); err == nil && n == 0 {
+		if err := idx.RebuildAll(ctx, memDir, sch, index.RebuildOpts{}); err != nil {
+			return nil, fmt.Errorf("propose: rebuild index: %w", err)
+		}
+	}
 
 	req, err := f.buildRequest(stdin)
 	if err != nil {

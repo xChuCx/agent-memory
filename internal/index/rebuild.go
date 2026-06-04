@@ -25,67 +25,115 @@ type RebuildOpts struct {
 	AssignMissingIDs bool
 }
 
-// RebuildAll wipes the index and re-walks memDir, indexing every Markdown
-// file that maps to a schema category. memDir is the absolute path to
-// .agent-memory/.
+// RebuildAll wipes the index and rebuilds it from disk: first the local store
+// (the consuming repo's own .agent-memory/, rooted at memDir), then every cached
+// external "landscape" store under meta/cache/stores/<name>/ (federation, PR4).
+// memDir is the absolute path to .agent-memory/.
 //
-// The two pre-existing rows for any file present in the wipe survive — we
-// fully reset the three index tables and rebuild from disk. This is the
-// canonical "make everything consistent" operation; M3's incremental path
-// (per-file upserts after propose_update) keeps the index fresh between
-// rebuilds.
+// This is the canonical "make everything consistent" operation; the incremental
+// path (per-file upserts after propose_update) keeps the local store fresh
+// between rebuilds, and sync rebuilds the cached stores. With no cached stores
+// the cache dir is absent and only the local store is indexed — identical to
+// pre-federation behavior (the opt-in invariant).
 func (i *Index) RebuildAll(ctx context.Context, memDir string, sch *schema.Schema, opts RebuildOpts) error {
 	if err := i.wipeAll(ctx); err != nil {
 		return fmt.Errorf("RebuildAll: wipe: %w", err)
 	}
+	if err := i.indexTree(ctx, LocalStore, memDir, sch, opts); err != nil {
+		return fmt.Errorf("RebuildAll: local: %w", err)
+	}
+	if err := i.indexCachedStores(ctx, memDir, sch); err != nil {
+		return fmt.Errorf("RebuildAll: cached stores: %w", err)
+	}
+	return nil
+}
 
-	walkErr := filepath.WalkDir(memDir, func(p string, d fs.DirEntry, walkErr error) error {
+// indexTree walks baseDir and indexes every Markdown file that maps to a schema
+// category, tagging each row with the given store name. The rebuildable cache
+// (meta/cache relative to baseDir) is never descended into — those files belong
+// to external stores and are indexed separately under their own names.
+func (i *Index) indexTree(ctx context.Context, store, baseDir string, sch *schema.Schema, opts RebuildOpts) error {
+	return filepath.WalkDir(baseDir, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
+		rel, err := filepath.Rel(baseDir, p)
+		if err != nil {
+			return err
+		}
+		relSlash := filepath.ToSlash(rel)
 		if d.IsDir() {
+			if relSlash == "meta/cache" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(p, ".md") {
 			return nil
 		}
-
-		rel, err := filepath.Rel(memDir, p)
-		if err != nil {
-			return err
-		}
-		relSlash := filepath.ToSlash(rel)
-
 		cat, ok := sch.CategoryForPath(relSlash)
 		if !ok {
 			// Markdown file outside any schema category — skip silently.
 			return nil
 		}
-
-		return i.IndexFile(ctx, memDir, relSlash, cat, opts)
+		return i.IndexFile(ctx, store, baseDir, relSlash, cat, opts)
 	})
-	if walkErr != nil {
-		return fmt.Errorf("RebuildAll: walk: %w", walkErr)
+}
+
+// indexCachedStores indexes each materialised external store under
+// meta/cache/stores/<name>/, tagging its rows with the store name. A cached
+// store is a read-only copy (synced by PR3), so AssignMissingIDs is never
+// applied — mutating it would be pointless (the next sync overwrites it). Each
+// store is indexed with its own meta/schema.yaml when present, falling back to
+// the consuming repo's schema, so a landscape store with custom categories
+// still indexes correctly. An absent cache dir is a no-op (opt-in invariant).
+func (i *Index) indexCachedStores(ctx context.Context, memDir string, fallback *schema.Schema) error {
+	cacheRoot := filepath.Join(memDir, "meta", "cache", "stores")
+	entries, err := os.ReadDir(cacheRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read cache: %w", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Transient swap artifacts left by fs.SwapDir — never index.
+		if strings.HasSuffix(name, ".tmp") || strings.HasSuffix(name, ".old") {
+			continue
+		}
+		storeDir := filepath.Join(cacheRoot, name)
+		sch := fallback
+		if s, serr := schema.LoadSchema(filepath.Join(storeDir, "meta", "schema.yaml")); serr == nil {
+			sch = s
+		}
+		if err := i.indexTree(ctx, name, storeDir, sch, RebuildOpts{}); err != nil {
+			return fmt.Errorf("store %q: %w", name, err)
+		}
 	}
 	return nil
 }
 
-// IndexFile reads, optionally assigns missing anchor IDs, parses, and
-// indexes a single file. The full path on disk is memDir/relPath (relPath
-// in forward-slash form).
+// IndexFile reads, optionally assigns missing anchor IDs, parses, and indexes a
+// single file under the given store. The full path on disk is baseDir/relPath
+// (relPath in forward-slash form).
 //
-// If opts.AssignMissingIDs is true AND the category requires section IDs,
-// AssignMissingIDs runs first; modified bytes are written back atomically
-// before parsing. Files that don't need assignments are not touched.
-func (i *Index) IndexFile(ctx context.Context, memDir, relPath string, cat schema.Category, opts RebuildOpts) error {
-	full := filepath.Join(memDir, filepath.FromSlash(relPath))
+// AssignMissingIDs runs only for the local store AND only when the category
+// requires section IDs: cached external stores are read-only copies we never
+// mutate. When it runs, modified bytes are written back atomically before
+// parsing; files that don't need assignments are not touched.
+func (i *Index) IndexFile(ctx context.Context, store, baseDir, relPath string, cat schema.Category, opts RebuildOpts) error {
+	full := filepath.Join(baseDir, filepath.FromSlash(relPath))
 
 	src, err := os.ReadFile(full)
 	if err != nil {
 		return fmt.Errorf("IndexFile: read %s: %w", relPath, err)
 	}
 
-	if opts.AssignMissingIDs && cat.SectionIDRequired {
+	if opts.AssignMissingIDs && store == LocalStore && cat.SectionIDRequired {
 		newSrc, _, err := agentmd.AssignMissingIDs(src)
 		if err != nil {
 			return fmt.Errorf("IndexFile: assign IDs %s: %w", relPath, err)
@@ -112,6 +160,7 @@ func (i *Index) IndexFile(ctx context.Context, memDir, relPath string, cat schem
 		}
 		body := string(src[s.ByteStart:s.ByteEnd])
 		docs = append(docs, SectionDoc{
+			Store:        store,
 			File:         relPath,
 			SectionID:    s.AnchorID,
 			Heading:      s.HeadingText,
@@ -134,6 +183,7 @@ func (i *Index) IndexFile(ctx context.Context, memDir, relPath string, cat schem
 		return fmt.Errorf("IndexFile: stat %s: %w", relPath, err)
 	}
 	return i.UpsertFile(ctx, FileDoc{
+		Store:        store,
 		File:         relPath,
 		Category:     cat.Name,
 		LastModified: info.ModTime().UTC().Format(time.RFC3339),

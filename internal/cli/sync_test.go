@@ -133,14 +133,14 @@ func TestSync_LocalPath_Unlocked(t *testing.T) {
 		".agent-memory/components.md": "# Components\n## svc\n<!-- @id: c-svc -->\n- Owner: team\n",
 	}))
 	dir := stInit(t)
-	mustAddStore(t, dir, "--name", "local", "--source", src)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
 	if out, err := runSyncCmd(t, "--root", dir); err != nil {
 		t.Fatalf("sync: %v\n%s", err, out)
 	}
-	if !exists(cachePath(dir, "local", "components.md")) {
+	if !exists(cachePath(dir, "platform", "components.md")) {
 		t.Fatal("expected cached components.md")
 	}
-	if ls := lockFor(t, dir).Stores["local"]; !ls.Unlocked {
+	if ls := lockFor(t, dir).Stores["platform"]; !ls.Unlocked {
 		t.Fatalf("local non-git path should be unlocked, got %+v", ls)
 	}
 }
@@ -186,15 +186,15 @@ func TestSync_ReproducesLockedCommit(t *testing.T) {
 func TestSync_ReconcileRemovesCacheAndLock(t *testing.T) {
 	src := newPlainStore(t, storeFiles(map[string]string{".agent-memory/components.md": "# C\n## s\n<!-- @id: s -->\n- Owner: t\n"}))
 	dir := stInit(t)
-	mustAddStore(t, dir, "--name", "local", "--source", src)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
 	if _, err := runSyncCmd(t, "--root", dir); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	cacheDir := filepath.Join(dir, ".agent-memory", "meta", "cache", "stores", "local")
+	cacheDir := filepath.Join(dir, ".agent-memory", "meta", "cache", "stores", "platform")
 	if !exists(cacheDir) {
 		t.Fatal("store should be cached after first sync")
 	}
-	if _, err := stRun(t, "rm", "--root", dir, "--name", "local"); err != nil {
+	if _, err := stRun(t, "rm", "--root", dir, "--name", "platform"); err != nil {
 		t.Fatalf("store rm: %v", err)
 	}
 	if _, err := runSyncCmd(t, "--root", dir); err != nil {
@@ -203,7 +203,7 @@ func TestSync_ReconcileRemovesCacheAndLock(t *testing.T) {
 	if exists(cacheDir) {
 		t.Error("reconcile should remove the cache dir of a removed store")
 	}
-	if _, present := lockFor(t, dir).Stores["local"]; present {
+	if _, present := lockFor(t, dir).Stores["platform"]; present {
 		t.Error("reconcile should remove the lock entry of a removed store")
 	}
 }
@@ -212,7 +212,7 @@ func TestSync_RejectsNonStore(t *testing.T) {
 	// No meta/manifest.yaml → not an agent-memory store.
 	src := newPlainStore(t, map[string]string{".agent-memory/contracts.md": "# C\n"})
 	dir := stInit(t)
-	mustAddStore(t, dir, "--name", "local", "--source", src)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
 	out, err := runSyncCmd(t, "--root", dir)
 	if err == nil {
 		t.Fatalf("expected rejection of a non-store source\n%s", out)
@@ -228,7 +228,7 @@ func TestSync_FailsClosedOnFutureStoreVersion(t *testing.T) {
 		".agent-memory/contracts.md":       "# C\n",
 	})
 	dir := stInit(t)
-	mustAddStore(t, dir, "--name", "local", "--source", src)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
 	out, err := runSyncCmd(t, "--root", dir)
 	if err == nil {
 		t.Fatalf("expected fail-closed on a future store-format version\n%s", out)
@@ -238,7 +238,7 @@ func TestSync_FailsClosedOnFutureStoreVersion(t *testing.T) {
 func TestSync_LocalPathRevisionFails(t *testing.T) {
 	src := newPlainStore(t, storeFiles(map[string]string{".agent-memory/contracts.md": "# C\n"}))
 	dir := stInit(t)
-	mustAddStore(t, dir, "--name", "local", "--source", src, "--revision", "v1")
+	mustAddStore(t, dir, "--name", "platform", "--source", src, "--revision", "v1")
 	out, err := runSyncCmd(t, "--root", dir)
 	if err == nil {
 		t.Fatalf("expected failure: revision on a local non-git source\n%s", out)
@@ -257,7 +257,7 @@ func TestSync_RejectsSymlinkInStore(t *testing.T) {
 		t.Skip("symlink unsupported on this platform: " + err.Error())
 	}
 	dir := stInit(t)
-	mustAddStore(t, dir, "--name", "local", "--source", src)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
 	out, err := runSyncCmd(t, "--root", dir)
 	if err == nil {
 		t.Fatalf("expected sync to fail on a symlink in the store\n%s", out)
@@ -272,7 +272,7 @@ func TestSync_RejectsSecretOnIngest(t *testing.T) {
 		".agent-memory/notes.md": "# Notes\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n",
 	}))
 	dir := stInit(t)
-	mustAddStore(t, dir, "--name", "local", "--source", src)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
 	out, err := runSyncCmd(t, "--root", dir)
 	if err == nil {
 		t.Fatalf("expected sync to reject a store containing a secret\n%s", out)
@@ -280,7 +280,7 @@ func TestSync_RejectsSecretOnIngest(t *testing.T) {
 	if !strings.Contains(out, "finding") {
 		t.Fatalf("expected a scan-finding reason in output:\n%s", out)
 	}
-	if exists(filepath.Join(dir, ".agent-memory", "meta", "cache", "stores", "local")) {
+	if exists(filepath.Join(dir, ".agent-memory", "meta", "cache", "stores", "platform")) {
 		t.Error("a rejected store must not leave a cache dir")
 	}
 }

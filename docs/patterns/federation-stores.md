@@ -101,6 +101,11 @@ does not touch the agent's context or rebuild the index.
 
 ## Deliberately deferred (later PRs)
 
-The index `store` dimension (PR4) and per-store-fair multi-store fetch (PR5, with
-provenance + the untrusted-context trust boundary at *read* time), plus the
-multi-store retrieval eval (PR6). See the design doc §6.2, §7.
+The index `store` dimension landed in PR4 — cached stores are now indexed under
+their name and queryable via `SearchPerStore`, while the legacy query path stays
+local-scoped so fetch is unchanged. See
+[sqlite-fts5-shadow-index.md](sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2).
+
+Still deferred: per-store-fair multi-store **fetch** (PR5, with provenance + the
+untrusted-context trust boundary at *read* time) and the multi-store retrieval
+eval (PR6). See the design doc §6.2, §7.

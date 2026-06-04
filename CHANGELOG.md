@@ -37,6 +37,21 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   `meta/cache/stores/<name>/` → record the resolved commit. Local non-git paths
   are `unlocked` (a `revision` there is an error). Removed stores are reconciled
   out of lock + cache. No context/index changes yet (multi-store fetch is PR5).
+- **Index `store` dimension** (federation, PR4). The shadow index gains a
+  `store` column across all three tables (`memory_search` `UNINDEXED`/last so
+  positional `snippet()` and `MATCH` relevance are unchanged; composite keys
+  `(store, file, section_id)` and `(store, file)`), so one index holds the local
+  memory **and** every cached store without collisions. `RebuildAll` now indexes
+  the local tree (under the reserved `local` store, skipping `meta/cache/`) plus
+  each cached store under its manifest name (read-only). New
+  `SearchPerStore(query, kPerStore, stores)` does per-store-fair retrieval; the
+  legacy `Search`/`Get*`/`List*` stay scoped to the local store, so **fetch and
+  status are unchanged** (multi-store fetch is PR5). The schema bump (1 → 2) is
+  handled by **rebuild-on-version-bump** — `Init` drops and recreates the index
+  (no in-place `ALTER`, since FTS5 columns and composite PKs can't be migrated),
+  and every index-opening path self-heals an empty index. The store name `local`
+  is reserved. Pattern:
+  [docs/patterns/sqlite-fts5-shadow-index.md](docs/patterns/sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2).
 
 ## [0.4.3] — 2026-06-01
 
