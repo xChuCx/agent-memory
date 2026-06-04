@@ -74,6 +74,11 @@ surface.
 
 ## The bet — Federated / system-level memory *(post-1.0)*
 
+> **Status: design accepted (2026-06-04)** — see
+> [docs/design/federated-memory.md](docs/design/federated-memory.md). Delivery as
+> PR1–PR6 (opt-in: no `stores` declared → unchanged behavior); PR1 (store-format
+> versioning) doubles as a 1.0-hardening item. Tag **0.5.0** after the slice.
+
 Today memory is single-repo. The next leap serves **solution
 architecture**: when an agent designs a feature spanning many services, it
 needs a map of the surrounding system — components, their public
