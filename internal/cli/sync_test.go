@@ -125,7 +125,9 @@ func TestSync_LocalPath_Unlocked(t *testing.T) {
 func TestSync_ReconcileRemovesCacheAndLock(t *testing.T) {
 	src := newPlainStore(t, map[string]string{".agent-memory/components.md": "# C\n## s\n<!-- @id: s -->\n- Owner: t\n"})
 	dir := stInit(t)
-	stRun(t, "add", "--root", dir, "--name", "local", "--source", src)
+	if _, err := stRun(t, "add", "--root", dir, "--name", "local", "--source", src); err != nil {
+		t.Fatalf("store add: %v", err)
+	}
 	if _, err := runSyncCmd(t, "--root", dir); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
@@ -134,7 +136,9 @@ func TestSync_ReconcileRemovesCacheAndLock(t *testing.T) {
 		t.Fatal("store should be cached after first sync")
 	}
 	// Remove the store, then sync again → reconcile.
-	stRun(t, "rm", "--root", dir, "--name", "local")
+	if _, err := stRun(t, "rm", "--root", dir, "--name", "local"); err != nil {
+		t.Fatalf("store rm: %v", err)
+	}
 	if _, err := runSyncCmd(t, "--root", dir); err != nil {
 		t.Fatalf("reconcile sync: %v", err)
 	}
@@ -155,7 +159,9 @@ func TestSync_RejectsSymlinkInStore(t *testing.T) {
 		t.Skip("symlink unsupported on this platform: " + err.Error())
 	}
 	dir := stInit(t)
-	stRun(t, "add", "--root", dir, "--name", "local", "--source", src)
+	if _, err := stRun(t, "add", "--root", dir, "--name", "local", "--source", src); err != nil {
+		t.Fatalf("store add: %v", err)
+	}
 	out, err := runSyncCmd(t, "--root", dir)
 	if err == nil {
 		t.Fatalf("expected sync to fail on a symlink in the store\n%s", out)
@@ -170,7 +176,9 @@ func TestSync_RejectsSecretOnIngest(t *testing.T) {
 		".agent-memory/notes.md": "# Notes\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n",
 	})
 	dir := stInit(t)
-	stRun(t, "add", "--root", dir, "--name", "local", "--source", src)
+	if _, err := stRun(t, "add", "--root", dir, "--name", "local", "--source", src); err != nil {
+		t.Fatalf("store add: %v", err)
+	}
 	out, err := runSyncCmd(t, "--root", dir)
 	if err == nil {
 		t.Fatalf("expected sync to reject a store containing a secret\n%s", out)
