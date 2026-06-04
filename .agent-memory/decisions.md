@@ -109,3 +109,17 @@ penalizes); landscape stores are read-only from a consuming repo in slice 1;
 synced stores are materialised into a sanitized cache (symlink/path-escape
 rejected) and treated as untrusted context, not instructions. Full design:
 docs/design/federated-memory.md.
+
+**Date:** 2026-06-04
+**Status:** active
+**Confidence:** confirmed
+
+`agent-memory sync` (PR3) materialises each referenced store into the gitignored
+cache and pins it in stores.lock. Pipeline per store: clone+checkout (or
+local-path copy → `unlocked`) into a temp dir → fs.CopyDirValidated (reject and
+never-follow symlinks, contain paths, regular files only) → secret/PII scan on
+ingest using the CONSUMER's security settings (external allowlist markers do NOT
+self-exempt) → fs.SwapDir atomic swap into meta/cache/stores/<name> (Windows-safe;
+no half-synced cache ever visible) → record the resolved commit. Failed stores are
+reported and skipped; removed stores are reconciled out of lock + cache. No
+context/index changes yet (PR4/PR5). See docs/design/federated-memory.md §6.2, §7.
