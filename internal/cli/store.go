@@ -171,14 +171,18 @@ func newStoreRmCmd() *cobra.Command {
 				return err
 			}
 			// Drop the committed lock entry too, so the lockfile never carries
-			// a dead store. The gitignored cache is reconciled on the next sync.
+			// a dead store. LoadStoresLock returns an empty lock (no error) when
+			// the file is missing, so this only surfaces a genuinely malformed /
+			// too-new lock — which we fail fast on rather than silently skip.
 			lockPath := filepath.Join(filepath.Dir(mpath), config.StoresLockName)
-			if lock, lerr := config.LoadStoresLock(lockPath); lerr == nil {
-				if _, present := lock.Stores[name]; present {
-					delete(lock.Stores, name)
-					if err := config.WriteStoresLock(lockPath, lock); err != nil {
-						return err
-					}
+			lock, err := config.LoadStoresLock(lockPath)
+			if err != nil {
+				return err
+			}
+			if _, present := lock.Stores[name]; present {
+				delete(lock.Stores, name)
+				if err := config.WriteStoresLock(lockPath, lock); err != nil {
+					return err
 				}
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed store %q.\n", name)

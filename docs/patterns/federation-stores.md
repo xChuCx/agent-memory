@@ -28,7 +28,9 @@ stores:
 ```
 
 Validation (`validateStores`, wired into `Manifest.Validate`): unique safe-slug
-names, non-empty source, recognised mode, non-negative priority.
+names, non-empty source, recognised mode, a **positive priority when set** (omit
+`priority_multiplier` to use the default 0.8), and a safe relative `path`
+(forward-slash, clean, no `..`, no drive letter).
 
 **`priority_multiplier` and the negative-BM25 sign.** It multiplies the existing
 score from `internal/index/ranking.go`, where BM25 is **negative** (more-negative

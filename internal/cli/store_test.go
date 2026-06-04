@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,5 +127,19 @@ func TestStore_RmCleansLockEntry(t *testing.T) {
 	}
 	if _, present := got.Stores["p"]; present {
 		t.Fatal("store rm should have removed the lock entry")
+	}
+}
+
+func TestStore_RmFailsOnMalformedLock(t *testing.T) {
+	dir := stInit(t)
+	if _, err := stRun(t, "add", "--root", dir, "--name", "p", "--source", "x"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	lockPath := filepath.Join(dir, ".agent-memory", "meta", config.StoresLockName)
+	if err := os.WriteFile(lockPath, []byte("stores: {}\n"), 0o644); err != nil { // no version → malformed
+		t.Fatal(err)
+	}
+	if _, err := stRun(t, "rm", "--root", dir, "--name", "p"); err == nil {
+		t.Fatal("expected rm to fail fast on a malformed lock")
 	}
 }
