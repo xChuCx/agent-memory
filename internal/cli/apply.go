@@ -91,6 +91,14 @@ func runApply(ctx context.Context, rootFlag, stagingID string) (*memory.ApplyRes
 	if err := idx.Init(ctx); err != nil {
 		return nil, fmt.Errorf("apply: init index: %w", err)
 	}
+	// Self-heal an empty index (fresh repo, or just migrated by a schema bump
+	// in Init) before the apply's incremental upsert, so it doesn't end up
+	// partial.
+	if n, err := idx.CountSections(ctx); err == nil && n == 0 {
+		if err := idx.RebuildAll(ctx, memDir, sch, index.RebuildOpts{}); err != nil {
+			return nil, fmt.Errorf("apply: rebuild index: %w", err)
+		}
+	}
 
 	return memory.ApplyStaged(ctx, stagingID, memory.UpdateDeps{
 		Manifest:  manifest,

@@ -32,6 +32,12 @@ const StoreModeReadOnly = "read-only"
 // becomes a cache directory and a provenance label.
 var storeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// reservedLocalStoreName is the store name the index uses for the consuming
+// repo's own content (kept in sync with index.LocalStore — config must not
+// import index). A referenced store may not claim it, or its rows would
+// collide with the local store in the shadow index.
+const reservedLocalStoreName = "local"
+
 // Store is one referenced landscape store.
 type Store struct {
 	Name               string   `yaml:"name"`
@@ -76,6 +82,9 @@ func validateStores(stores []Store) error {
 	for i, s := range stores {
 		if !storeNameRe.MatchString(s.Name) {
 			return fmt.Errorf("manifest: stores[%d]: name %q must match %s", i, s.Name, storeNameRe.String())
+		}
+		if s.Name == reservedLocalStoreName {
+			return fmt.Errorf("manifest: stores[%d]: name %q is reserved (it labels the consuming repo's own store in the index)", i, s.Name)
 		}
 		if _, dup := seen[s.Name]; dup {
 			return fmt.Errorf("manifest: stores[%d]: duplicate store name %q", i, s.Name)

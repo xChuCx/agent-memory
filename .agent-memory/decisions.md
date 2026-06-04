@@ -123,3 +123,25 @@ self-exempt) → fs.SwapDir atomic swap into meta/cache/stores/<name> (Windows-s
 no half-synced cache ever visible) → record the resolved commit. Failed stores are
 reported and skipped; removed stores are reconciled out of lock + cache. No
 context/index changes yet (PR4/PR5). See docs/design/federated-memory.md §6.2, §7.
+
+**Date:** 2026-06-04
+**Status:** active
+**Confidence:** confirmed
+
+**Context:** Federation (PR4) needed one shadow index to hold the local memory
+plus cached landscape stores. FTS5's column set and composite primary keys
+can't be ALTERed in place, and the index is a derived, rebuildable cache.
+**Decision:** Add a `store` column to all three index tables — UNINDEXED and
+last in `memory_search` so `MATCH` relevance and the positional `snippet()`
+index are unchanged; composite keys `(store,file,section_id)` / `(store,file)`.
+Bump `SchemaVersion` 1->2 and migrate by rebuild-on-version-bump: `Init`
+drops+recreates, and every index-opening path self-heals an empty index (the
+`propose`/`apply` write paths gained the read paths' rebuild-if-empty guard).
+The legacy `Search`/`Get*`/`List*` stay scoped to the reserved `local` store so
+fetch and status are byte-for-byte unchanged; `SearchPerStore(query,kPerStore,
+stores)` does per-store-fair top-K retrieval for PR5. `RebuildAll` indexes the
+local tree (skipping `meta/cache/`) then each cached store under its name.
+**Consequences:** The opt-in invariant holds (no cache dir -> identical
+behavior); cached-store rows never collide with local rows; no fragile in-place
+migrations to maintain.
+**Sources:** internal/index/{sqlite,query,rebuild,incremental}.go, docs/patterns/sqlite-fts5-shadow-index.md

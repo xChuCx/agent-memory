@@ -11,6 +11,7 @@ import (
 
 // SearchResult is one hit from a Search query, ranked by BM25.
 type SearchResult struct {
+	Store     string // memory the hit came from (LocalStore or a cached store name)
 	File      string
 	SectionID string
 	Title     string
@@ -56,31 +57,76 @@ func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchRe
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := i.db.QueryContext(ctx,
-		`SELECT
-		   file,
-		   section_id,
-		   title,
-		   headings,
-		   snippet(memory_search, 4, '[', ']', '...', 16) AS snip,
-		   bm25(memory_search) AS score,
-		   content
-		 FROM memory_search
-		 WHERE memory_search MATCH ?
-		 ORDER BY score
-		 LIMIT ?`,
-		match, limit,
-	)
+	// Scoped to the local store: Search preserves its pre-federation behavior of
+	// returning only the consuming repo's own sections. Multi-store retrieval is
+	// SearchPerStore, wired into fetch in PR5.
+	rows, err := i.db.QueryContext(ctx, searchSQL+` ORDER BY score LIMIT ?`,
+		match, LocalStore, limit)
 	if err != nil {
 		return nil, fmt.Errorf("Search: %w", err)
 	}
-	defer rows.Close()
+	results, err := scanSearchRows(rows)
+	if err != nil {
+		return nil, fmt.Errorf("Search: %w", err)
+	}
+	return results, nil
+}
 
+// SearchPerStore runs the FTS query independently within each named store and
+// returns up to kPerStore hits per store (per-store-fair retrieval: a single
+// noisy store can't crowd out the others in a global top-N). Every result
+// carries its Store; ordering within a store is ascending BM25. The caller
+// (PR5 fetch) merges and re-ranks across stores, applying each store's priority
+// multiplier. An empty stores slice, or a query with no alphanumeric tokens,
+// returns nil. Unknown store names simply contribute no rows.
+func (i *Index) SearchPerStore(ctx context.Context, query string, kPerStore int, stores []string) ([]SearchResult, error) {
+	match := sanitizeFTSMatch(query)
+	if match == "" || len(stores) == 0 {
+		return nil, nil
+	}
+	if kPerStore <= 0 {
+		kPerStore = 10
+	}
+	var out []SearchResult
+	for _, store := range stores {
+		rows, err := i.db.QueryContext(ctx, searchSQL+` ORDER BY score LIMIT ?`,
+			match, store, kPerStore)
+		if err != nil {
+			return nil, fmt.Errorf("SearchPerStore(%s): %w", store, err)
+		}
+		results, err := scanSearchRows(rows)
+		if err != nil {
+			return nil, fmt.Errorf("SearchPerStore(%s): %w", store, err)
+		}
+		out = append(out, results...)
+	}
+	return out, nil
+}
+
+// searchSQL is the shared projection + MATCH/store filter for Search and
+// SearchPerStore. Callers append `ORDER BY score LIMIT ?` and bind
+// (match, store, limit). snippet() column index 4 is `content` — the FTS5
+// `store` column is UNINDEXED and last, so this positional index is stable.
+const searchSQL = `SELECT
+	   file,
+	   section_id,
+	   title,
+	   headings,
+	   snippet(memory_search, 4, '[', ']', '...', 16) AS snip,
+	   bm25(memory_search) AS score,
+	   content,
+	   store
+	 FROM memory_search
+	 WHERE memory_search MATCH ? AND store = ?`
+
+// scanSearchRows scans (and closes) the rows produced by searchSQL.
+func scanSearchRows(rows *sql.Rows) ([]SearchResult, error) {
+	defer rows.Close()
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.File, &r.SectionID, &r.Title, &r.Headings, &r.Snippet, &r.Score, &r.Content); err != nil {
-			return nil, fmt.Errorf("Search: scan: %w", err)
+		if err := rows.Scan(&r.File, &r.SectionID, &r.Title, &r.Headings, &r.Snippet, &r.Score, &r.Content, &r.Store); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
 		}
 		results = append(results, r)
 	}
@@ -139,8 +185,8 @@ func (i *Index) GetSection(ctx context.Context, file, sectionID string) (Section
 	var s SectionInfo
 	err := i.db.QueryRowContext(ctx,
 		`SELECT file, section_id, heading, heading_level, byte_start, byte_end, content_hash
-		 FROM memory_sections WHERE file = ? AND section_id = ?`,
-		file, sectionID,
+		 FROM memory_sections WHERE store = ? AND file = ? AND section_id = ?`,
+		LocalStore, file, sectionID,
 	).Scan(&s.File, &s.SectionID, &s.Heading, &s.HeadingLevel, &s.ByteStart, &s.ByteEnd, &s.ContentHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SectionInfo{}, ErrNotFound
@@ -151,14 +197,14 @@ func (i *Index) GetSection(ctx context.Context, file, sectionID string) (Section
 	return s, nil
 }
 
-// ListSections returns every section for a file in document order
+// ListSections returns every section for a local file in document order
 // (ascending byte_start).
 func (i *Index) ListSections(ctx context.Context, file string) ([]SectionInfo, error) {
 	rows, err := i.db.QueryContext(ctx,
 		`SELECT file, section_id, heading, heading_level, byte_start, byte_end, content_hash
-		 FROM memory_sections WHERE file = ?
+		 FROM memory_sections WHERE store = ? AND file = ?
 		 ORDER BY byte_start`,
-		file,
+		LocalStore, file,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("ListSections: %w", err)
@@ -184,8 +230,8 @@ func (i *Index) GetFile(ctx context.Context, file string) (FileDoc, error) {
 	err := i.db.QueryRowContext(ctx,
 		`SELECT file, category, freshness, confidence, last_modified,
 		         committed, local_state, archived, size_bytes, checksum
-		   FROM memory_docs WHERE file = ?`,
-		file,
+		   FROM memory_docs WHERE store = ? AND file = ?`,
+		LocalStore, file,
 	).Scan(
 		&f.File, &f.Category, &f.Freshness, &f.Confidence, &f.LastModified,
 		&committed, &localState, &archived, &f.SizeBytes, &f.Checksum,
@@ -202,8 +248,9 @@ func (i *Index) GetFile(ctx context.Context, file string) (FileDoc, error) {
 	return f, nil
 }
 
-// ListFiles returns memory_docs entries; if categoryFilter is non-empty,
-// only rows whose category matches are returned.
+// ListFiles returns the local store's memory_docs entries; if categoryFilter is
+// non-empty, only rows whose category matches are returned. Cached external
+// stores are excluded (status/index generation are local-only in PR4).
 func (i *Index) ListFiles(ctx context.Context, categoryFilter string) ([]FileDoc, error) {
 	var (
 		rows *sql.Rows
@@ -213,13 +260,14 @@ func (i *Index) ListFiles(ctx context.Context, categoryFilter string) ([]FileDoc
 		rows, err = i.db.QueryContext(ctx,
 			`SELECT file, category, freshness, confidence, last_modified,
 			         committed, local_state, archived, size_bytes, checksum
-			   FROM memory_docs ORDER BY file`)
+			   FROM memory_docs WHERE store = ? ORDER BY file`,
+			LocalStore)
 	} else {
 		rows, err = i.db.QueryContext(ctx,
 			`SELECT file, category, freshness, confidence, last_modified,
 			         committed, local_state, archived, size_bytes, checksum
-			   FROM memory_docs WHERE category = ? ORDER BY file`,
-			categoryFilter)
+			   FROM memory_docs WHERE store = ? AND category = ? ORDER BY file`,
+			LocalStore, categoryFilter)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("ListFiles: %w", err)

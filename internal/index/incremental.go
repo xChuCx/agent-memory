@@ -9,6 +9,10 @@ import (
 // the FTS5 + memory_sections columns; the index doesn't try to validate them
 // further (e.g., that ByteEnd > ByteStart) — that's the caller's job.
 type SectionDoc struct {
+	// Store names the memory this section belongs to. Empty defaults to
+	// LocalStore (the consuming repo) — the incremental propose/apply path
+	// only ever touches the local store, so its callers can leave it unset.
+	Store        string
 	File         string
 	SectionID    string
 	Heading      string
@@ -24,6 +28,7 @@ type SectionDoc struct {
 
 // FileDoc bundles per-file metadata for ranking + status reporting.
 type FileDoc struct {
+	Store        string // memory this file belongs to; empty defaults to LocalStore
 	File         string
 	Category     string
 	Freshness    string
@@ -58,31 +63,32 @@ func (i *Index) UpsertSections(ctx context.Context, sections []SectionDoc) error
 	defer func() { _ = tx.Rollback() }()
 
 	for _, s := range sections {
+		store := storeOrLocal(s.Store)
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM memory_search WHERE file = ? AND section_id = ?`,
-			s.File, s.SectionID,
+			`DELETE FROM memory_search WHERE store = ? AND file = ? AND section_id = ?`,
+			store, s.File, s.SectionID,
 		); err != nil {
-			return fmt.Errorf("UpsertSections: delete search (%s/%s): %w", s.File, s.SectionID, err)
+			return fmt.Errorf("UpsertSections: delete search (%s:%s/%s): %w", store, s.File, s.SectionID, err)
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO memory_search (file, section_id, title, headings, content, tags)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			s.File, s.SectionID, s.Title, s.Headings, s.Content, s.Tags,
+			`INSERT INTO memory_search (store, file, section_id, title, headings, content, tags)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			store, s.File, s.SectionID, s.Title, s.Headings, s.Content, s.Tags,
 		); err != nil {
-			return fmt.Errorf("UpsertSections: insert search (%s/%s): %w", s.File, s.SectionID, err)
+			return fmt.Errorf("UpsertSections: insert search (%s:%s/%s): %w", store, s.File, s.SectionID, err)
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO memory_sections (file, section_id, heading, heading_level, byte_start, byte_end, content_hash)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT (file, section_id) DO UPDATE SET
+			`INSERT INTO memory_sections (store, file, section_id, heading, heading_level, byte_start, byte_end, content_hash)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (store, file, section_id) DO UPDATE SET
 			   heading       = excluded.heading,
 			   heading_level = excluded.heading_level,
 			   byte_start    = excluded.byte_start,
 			   byte_end      = excluded.byte_end,
 			   content_hash  = excluded.content_hash`,
-			s.File, s.SectionID, s.Heading, s.HeadingLevel, s.ByteStart, s.ByteEnd, s.ContentHash,
+			store, s.File, s.SectionID, s.Heading, s.HeadingLevel, s.ByteStart, s.ByteEnd, s.ContentHash,
 		); err != nil {
-			return fmt.Errorf("UpsertSections: upsert sections (%s/%s): %w", s.File, s.SectionID, err)
+			return fmt.Errorf("UpsertSections: upsert sections (%s:%s/%s): %w", store, s.File, s.SectionID, err)
 		}
 	}
 	return tx.Commit()
@@ -91,6 +97,10 @@ func (i *Index) UpsertSections(ctx context.Context, sections []SectionDoc) error
 // DeleteSections removes the listed (file, section_id) rows from both
 // memory_search and memory_sections in a single transaction. An empty
 // sectionIDs slice is a no-op.
+//
+// Scoped to LocalStore: the incremental apply path only ever removes the
+// consuming repo's own sections. Cached external stores are only ever rebuilt
+// wholesale by sync → RebuildAll, never edited section-by-section.
 func (i *Index) DeleteSections(ctx context.Context, file string, sectionIDs []string) error {
 	if len(sectionIDs) == 0 {
 		return nil
@@ -103,14 +113,14 @@ func (i *Index) DeleteSections(ctx context.Context, file string, sectionIDs []st
 
 	for _, id := range sectionIDs {
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM memory_search WHERE file = ? AND section_id = ?`,
-			file, id,
+			`DELETE FROM memory_search WHERE store = ? AND file = ? AND section_id = ?`,
+			LocalStore, file, id,
 		); err != nil {
 			return fmt.Errorf("DeleteSections: delete search (%s/%s): %w", file, id, err)
 		}
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM memory_sections WHERE file = ? AND section_id = ?`,
-			file, id,
+			`DELETE FROM memory_sections WHERE store = ? AND file = ? AND section_id = ?`,
+			LocalStore, file, id,
 		); err != nil {
 			return fmt.Errorf("DeleteSections: delete sections (%s/%s): %w", file, id, err)
 		}
@@ -118,8 +128,9 @@ func (i *Index) DeleteSections(ctx context.Context, file string, sectionIDs []st
 	return tx.Commit()
 }
 
-// DeleteFile removes ALL rows for the given file across the three tables.
+// DeleteFile removes ALL rows for the given local file across the three tables.
 // Used when a memory file is removed from the layout (e.g., archive flow).
+// Scoped to LocalStore for the same reason as DeleteSections.
 func (i *Index) DeleteFile(ctx context.Context, file string) error {
 	tx, err := i.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -128,25 +139,26 @@ func (i *Index) DeleteFile(ctx context.Context, file string) error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, q := range []string{
-		`DELETE FROM memory_search WHERE file = ?`,
-		`DELETE FROM memory_sections WHERE file = ?`,
-		`DELETE FROM memory_docs WHERE file = ?`,
+		`DELETE FROM memory_search WHERE store = ? AND file = ?`,
+		`DELETE FROM memory_sections WHERE store = ? AND file = ?`,
+		`DELETE FROM memory_docs WHERE store = ? AND file = ?`,
 	} {
-		if _, err := tx.ExecContext(ctx, q, file); err != nil {
+		if _, err := tx.ExecContext(ctx, q, LocalStore, file); err != nil {
 			return fmt.Errorf("DeleteFile (%s): %w", file, err)
 		}
 	}
 	return tx.Commit()
 }
 
-// UpsertFile inserts or updates the memory_docs row for file.
+// UpsertFile inserts or updates the memory_docs row for (store, file).
 func (i *Index) UpsertFile(ctx context.Context, doc FileDoc) error {
+	store := storeOrLocal(doc.Store)
 	_, err := i.db.ExecContext(ctx,
 		`INSERT INTO memory_docs (
-		   file, category, freshness, confidence, last_modified,
+		   store, file, category, freshness, confidence, last_modified,
 		   committed, local_state, archived, size_bytes, checksum
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT (file) DO UPDATE SET
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (store, file) DO UPDATE SET
 		   category      = excluded.category,
 		   freshness     = excluded.freshness,
 		   confidence    = excluded.confidence,
@@ -156,14 +168,25 @@ func (i *Index) UpsertFile(ctx context.Context, doc FileDoc) error {
 		   archived      = excluded.archived,
 		   size_bytes    = excluded.size_bytes,
 		   checksum      = excluded.checksum`,
-		doc.File, doc.Category, doc.Freshness, doc.Confidence, doc.LastModified,
+		store, doc.File, doc.Category, doc.Freshness, doc.Confidence, doc.LastModified,
 		boolToInt(doc.Committed), boolToInt(doc.LocalState), boolToInt(doc.Archived),
 		doc.SizeBytes, doc.Checksum,
 	)
 	if err != nil {
-		return fmt.Errorf("UpsertFile (%s): %w", doc.File, err)
+		return fmt.Errorf("UpsertFile (%s:%s): %w", store, doc.File, err)
 	}
 	return nil
+}
+
+// storeOrLocal maps an empty store name to LocalStore. The incremental
+// propose/apply path only ever touches the consuming repo's own store, so its
+// callers can leave SectionDoc.Store / FileDoc.Store unset and get the local
+// store. RebuildAll sets the store explicitly (LocalStore or a cached name).
+func storeOrLocal(s string) string {
+	if s == "" {
+		return LocalStore
+	}
+	return s
 }
 
 // CountSections returns the total number of rows in memory_sections.

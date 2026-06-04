@@ -1,8 +1,10 @@
 # Pattern: federation — referenced stores (manifest + lockfile)
 
-**Scope:** PR2 of the federation slice — the *declaration + pinning* contract
-only. Sync (PR3), the index store dimension (PR4), multi-store fetch (PR5), and
-the retrieval eval (PR6) build on this. Full design:
+**Scope:** the federation slice's *declaration + pinning* contract (introduced
+in PR2). Sync (PR3) and the index `store` dimension (PR4,
+[shadow-index pattern](sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2))
+build on it and have landed; multi-store fetch (PR5) and the retrieval eval
+(PR6) are still to come. Full design:
 [docs/design/federated-memory.md](../design/federated-memory.md).
 
 ## Problem
@@ -101,6 +103,8 @@ does not touch the agent's context or rebuild the index.
 
 ## Deliberately deferred (later PRs)
 
-The index `store` dimension (PR4) and per-store-fair multi-store fetch (PR5, with
-provenance + the untrusted-context trust boundary at *read* time), plus the
-multi-store retrieval eval (PR6). See the design doc §6.2, §7.
+Per-store-fair multi-store **fetch** (PR5, with provenance + the
+untrusted-context trust boundary at *read* time) and the multi-store retrieval
+eval (PR6). See the design doc §6.2, §7. (The index `store` dimension these
+build on landed in PR4 — see the
+[shadow-index pattern](sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2).)

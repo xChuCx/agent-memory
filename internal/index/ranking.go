@@ -48,6 +48,14 @@ const (
 
 // RankingContext bundles the inputs ApplyRankingSignals needs. All fields
 // are optional; an empty RankingContext leaves BM25 ordering unchanged.
+//
+// File-level signals (FreshFiles / StaleFiles, scope, archive) are keyed by
+// file path ALONE. That is correct while the fetch path is local-only (PR4):
+// every ranked result comes from the local store. PR5 (multi-store fetch) MUST
+// re-key these by (store, file) before merging results — otherwise a file path
+// present in more than one store (e.g. "decisions.md" in both local and a
+// landscape store) would collect another store's freshness boost. SearchResult
+// already carries Store for exactly this.
 type RankingContext struct {
 	// Scope: each entry is checked as a substring of the result's file
 	// path. A hit applies ScopeBoost. Multiple scope entries → boost
