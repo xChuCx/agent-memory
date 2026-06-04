@@ -161,6 +161,7 @@ meta/*.sqlite
 meta/*.sqlite-*
 meta/*.db
 meta/*.db-*
+meta/cache/
 
 # Advisory lock files — kernel state, not portable.
 meta/lock

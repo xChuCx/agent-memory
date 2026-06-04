@@ -122,10 +122,14 @@ type Store struct {
     Source             string  `yaml:"source"`               // git URL or local path
     Revision           string  `yaml:"revision,omitempty"`   // branch/tag/commit; default branch if empty
     Path               string  `yaml:"path,omitempty"`       // store dir within repo; default ".agent-memory"
-    Mode               string  `yaml:"mode,omitempty"`       // "read-only" (default/only in slice 1)
-    PriorityMultiplier float64 `yaml:"priority_multiplier,omitempty"` // default 0.8
+    Mode               string   `yaml:"mode,omitempty"`       // "read-only" (default/only in slice 1)
+    PriorityMultiplier *float64 `yaml:"priority_multiplier,omitempty"` // omitted = default 0.8; an explicit value must be > 0 (<= 0 invalid)
 }
 ```
+
+`PriorityMultiplier` is a pointer so "omitted" (use the default 0.8) is
+distinguishable from an explicit value; `validateStores` rejects an explicit
+`<= 0` rather than silently treating `0` as the default.
 
 **Referenced repo layout (review #5).** `source` points at a **git repo root**.
 The store directory inside it is `<repo>/<path>`, where `path` defaults to

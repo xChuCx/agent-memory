@@ -222,6 +222,45 @@ func defaultSchema() *Schema {
 				AgentWritable: true,
 				GitTracked:    false,
 			},
+			// Federation landscape kinds (federated-memory design §6.3).
+			// Declared in every store's default schema but authored only in a
+			// landscape / platform-memory store; a normal repo never creates
+			// these files, so the categories are inert there.
+			"component": {
+				File:              "components.md",
+				SectionIDRequired: true,
+				Approval:          ApprovalStage,
+				AgentWritable:     true,
+				GitTracked:        true,
+				SectionSchema: &SectionSchema{
+					PerSectionRequiredFields: []FieldSpec{{Name: "Owner"}},
+					PerSectionOptionalFields: []FieldSpec{{Name: "Repo"}, {Name: "Summary"}},
+				},
+			},
+			"contract": {
+				File:              "contracts.md",
+				SectionIDRequired: true,
+				Approval:          ApprovalStage,
+				AgentWritable:     true,
+				GitTracked:        true,
+				SectionSchema: &SectionSchema{
+					PerSectionRequiredFields: []FieldSpec{
+						{Name: "Kind", Enum: []string{"http", "event"}},
+						{Name: "Direction", Enum: []string{"produces", "consumes"}},
+					},
+					PerSectionOptionalFields: []FieldSpec{{Name: "Owner"}, {Name: "Summary"}},
+				},
+			},
+			"actor": {
+				File:              "actors.md",
+				SectionIDRequired: true,
+				Approval:          ApprovalStage,
+				AgentWritable:     true,
+				GitTracked:        true,
+				SectionSchema: &SectionSchema{
+					PerSectionOptionalFields: []FieldSpec{{Name: "Contact"}},
+				},
+			},
 		},
 	}
 }

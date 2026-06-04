@@ -32,6 +32,7 @@ type Manifest struct {
 	LocalState         LocalState  `yaml:"local_state"`
 	Sessions           Sessions    `yaml:"sessions"`
 	Eval               Eval        `yaml:"eval,omitempty"`
+	Stores             []Store     `yaml:"stores,omitempty"`
 }
 
 // Project identifies the repository the manifest belongs to.
@@ -287,6 +288,10 @@ func (m *Manifest) Validate() error {
 	}
 	if m.Archive.StaleThresholdDays < 0 {
 		return errors.New("manifest: archive.stale_threshold_days must be non-negative")
+	}
+
+	if err := validateStores(m.Stores); err != nil {
+		return err
 	}
 
 	return nil
