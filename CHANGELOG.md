@@ -5,7 +5,12 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] — 2026-06-05
+
+The **federation** release: a repo can reference shared, git-pinned, read-only
+"landscape" stores, blended into `fetch_context` with per-store-fair ranking,
+provenance, and a trust boundary — behind an opt-in invariant (no stores
+declared → byte-for-byte the single-repo path). Delivered as PR1–PR6.
 
 ### Added
 
