@@ -195,3 +195,29 @@ stores; a malformed lock degrades to local-only. Bootstrap stays local-only.
 byte-for-byte, regression-tested); landscape is secondary by default; external
 content is clearly fenced as untrusted reference; reads are path-contained.
 **Sources:** internal/memory/fetch.go, internal/memory/fetch_stores.go, docs/patterns/multi-store-fetch.md
+
+**Date:** 2026-06-05
+**Status:** active
+**Confidence:** confirmed
+
+**Context:** PR6 closes the federation slice with a deterministic eval that
+proves multi-store retrieval works, matching the existing offline retrieval /
+continuity evals (no LLM, CI-guarded).
+**Decision:** The multi-store eval (internal/eval/federation_test.go) runs gold
+cross-repo queries through the REAL federated fetch (memory.BuildContextPack
+with a cached landscape store) and asserts on the bytes the agent sees — it
+parses each section's provenance header (`@file/@store/@id`) out of the pack
+into a ranked list, rather than re-implementing the merge in the test. Metrics:
+recall@5 WITH store-origin correctness (the gold must come from the right
+store) behind a CI floor (0.85; observed 1.0 on the curated corpus), plus
+local-vs-landscape ranking sanity (local wins when both relevant; landscape
+surfaces when local is silent; neither starves under the per-store-fair merge),
+a trust-boundary rendering check, and graceful budget starvation (tiny budget
+keeps local, drops landscape via Omitted, never crashes). The corpus doubles as
+the federation demo fixture. Federation is documented in the README +
+docs/patterns. Slice complete (PR1-PR6); tag 0.5.0.
+**Consequences:** Federation retrieval is regression-guarded in CI on the real
+pipeline (merge + priority + dedup + budget + provenance), not a stand-in. The
+provenance-complete pack (deterministic included_files, Omitted.Origin) makes
+the eval assertions clean.
+**Sources:** internal/eval/federation_test.go, docs/design/federated-memory.md

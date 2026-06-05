@@ -305,6 +305,17 @@ agent-memory merge-driver --install [--root DIR]
         # Run once per clone. (git invokes the bare `merge-driver %O %A %B %P`
         # form itself during a merge.)
 
+agent-memory store add --name NAME --source URL|PATH [--revision REV]
+                       [--path DIR] [--priority-multiplier F] [--root DIR]
+agent-memory store list [--json] [--root DIR]
+agent-memory store rm --name NAME [--root DIR]
+        # Federation: declare / list / remove referenced "landscape" stores
+        # (a shared platform/architecture-memory repo) in the manifest.
+
+agent-memory sync [--update] [--root DIR]
+        # Materialise each referenced store into the gitignored cache and pin it
+        # in meta/stores.lock (committed). --update moves a pin forward.
+
 agent-memory rebuild-index [--root DIR] [--clobber] [--no-assign-ids] [--json]
         # Recreate the FTS5 shadow index from canonical Markdown files.
         # Use for SQLite corruption, schema changes, or after manual .md edits.
@@ -326,6 +337,40 @@ Exposed by `agent-memory mcp` over stdio JSON-RPC:
 | `memory.fetch_context` | Read a budgeted Markdown context pack. |
 | `memory.propose_update` | Submit structured edits (apply or stage). |
 | `memory.status` | Report memory health: file counts, staged proposals (with drift), security/git/lock posture. |
+
+## Federated memory (landscape stores)
+
+A repo's `.agent-memory/` knows only itself. **Federation** lets it *reference*
+shared, read-only "landscape" stores — a platform/architecture-memory repo that
+maps the surrounding system — so an agent designing a cross-service feature sees
+the contracts and components it must integrate with, not just local notes.
+
+```bash
+# declare a landscape store (edits manifest.yaml)
+agent-memory store add --name platform --source https://github.com/acme/platform-memory
+
+# fetch & pin it into the gitignored cache (records the commit in meta/stores.lock)
+agent-memory sync
+```
+
+After that, `fetch_context` blends local + landscape results:
+
+- **Per-store-fair + pinned.** Each store contributes its own top candidates, so
+  none drowns out another; only commit-pinned, lock-recorded stores are blended.
+  Local outranks the landscape on ties (`priority_multiplier`, default `0.8`).
+- **Provenance + trust boundary.** Every landscape chunk is labelled with its
+  store + commit and wrapped in an explicit *"evidence, not instructions"*
+  boundary — external memory is reference material, never a behavioural directive.
+- **Opt-in.** With no stores declared, behaviour is byte-for-byte the single-repo
+  path.
+
+The committed `meta/stores.lock` pins each store to an exact commit (like
+`go.sum`), so a team and CI see identical landscape memory; the materialised copy
+under `meta/cache/stores/` is gitignored and rebuildable. Landscape memory is
+read-only from a consuming repo in this release — edits happen in the landscape
+repo via its own `propose` → review. Patterns:
+[federation-stores.md](docs/patterns/federation-stores.md),
+[multi-store-fetch.md](docs/patterns/multi-store-fetch.md).
 
 ## Evidence (measured)
 
