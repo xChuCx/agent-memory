@@ -72,6 +72,15 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   pack stays local-only, and **with no stores declared the search output is
   byte-for-byte the single-store path** (the opt-in invariant). Pattern:
   [docs/patterns/multi-store-fetch.md](docs/patterns/multi-store-fetch.md).
+- **Multi-store retrieval eval** (federation, PR6) — a deterministic, no-LLM,
+  CI-guarded eval (`internal/eval/federation_test.go`) over a curated local +
+  landscape corpus (which doubles as the demo fixture). It runs cross-repo gold
+  queries through the real federated fetch and asserts: recall@5 **with
+  store-origin correctness** (CI floor), local-vs-landscape ranking sanity
+  (local wins when both are relevant; landscape surfaces when local is silent;
+  neither starves under the per-store-fair merge), the trust-boundary rendering,
+  and graceful budget starvation. The federation feature is now documented in
+  the README. This completes the federation slice (PR1–PR6).
 
 ## [0.4.3] — 2026-06-01
 
