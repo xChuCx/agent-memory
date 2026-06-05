@@ -155,12 +155,12 @@ func TestFetch_Federation_CrossStoreDedup(t *testing.T) {
 	}
 	var deduped bool
 	for _, o := range resp.Omitted {
-		if o.Store == "platform" && strings.Contains(o.Reason, "near-duplicate") {
+		if o.Store == "platform" && o.Origin == platformOrigin && strings.Contains(o.Reason, "near-duplicate") {
 			deduped = true
 		}
 	}
 	if !deduped {
-		t.Errorf("expected the platform duplicate in Omitted with a near-duplicate reason: %+v", resp.Omitted)
+		t.Errorf("expected the platform duplicate in Omitted with provenance + a near-duplicate reason: %+v", resp.Omitted)
 	}
 }
 
@@ -194,16 +194,24 @@ func TestFetch_Federation_OptInOff_Unchanged(t *testing.T) {
 	}
 }
 
-// LoadFetchStores includes only synced stores and labels them name@<short>.
+// LoadFetchStores federates a store only when it is BOTH materialised (cache
+// dir) AND recorded in the lock; provenance is never opaque (commit, or an
+// explicit @unlocked for local-path sources).
 func TestLoadFetchStores(t *testing.T) {
 	memDir := t.TempDir()
-	// One synced store (cache dir present) + one declared-but-unsynced.
-	cacheDir := filepath.Join(memDir, "meta", "cache", "stores", "platform")
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		t.Fatal(err)
+	mkCache := func(name string) {
+		if err := os.MkdirAll(filepath.Join(memDir, "meta", "cache", "stores", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
+	// platform: synced + commit-pinned. localdev: synced + unlocked (local path).
+	// orphan: cache dir but NO lock entry. unsynced: declared, no cache dir.
+	mkCache("platform")
+	mkCache("localdev")
+	mkCache("orphan")
 	lock := &config.StoresLock{Version: config.StoresLockVersion, Stores: map[string]config.LockedStore{
 		"platform": {Source: "x", ResolvedCommit: "abc123def4567890", StorePath: ".agent-memory"},
+		"localdev": {Source: "/tmp/x", Unlocked: true, StorePath: ".agent-memory"},
 	}}
 	if err := config.WriteStoresLock(filepath.Join(memDir, "meta", config.StoresLockName), lock); err != nil {
 		t.Fatal(err)
@@ -211,6 +219,8 @@ func TestLoadFetchStores(t *testing.T) {
 	mf := config.DefaultManifest()
 	mf.Stores = []config.Store{
 		{Name: "platform", Source: "x"},
+		{Name: "localdev", Source: "/tmp/x"},
+		{Name: "orphan", Source: "z"},
 		{Name: "unsynced", Source: "y"},
 	}
 
@@ -218,14 +228,24 @@ func TestLoadFetchStores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(refs) != 1 {
-		t.Fatalf("expected only the synced store, got %+v", refs)
+	byName := map[string]StoreRef{}
+	for _, r := range refs {
+		byName[r.Name] = r
 	}
-	if refs[0].Name != "platform" || refs[0].Origin != "platform@abc123def456" {
-		t.Errorf("ref = %+v, want platform@abc123def456 (12-char short)", refs[0])
+	if len(refs) != 2 {
+		t.Fatalf("expected platform + localdev only (orphan + unsynced skipped), got %+v", refs)
 	}
-	if refs[0].PriorityMultiplier != config.DefaultStorePriority {
-		t.Errorf("priority = %v, want default %v", refs[0].PriorityMultiplier, config.DefaultStorePriority)
+	if got := byName["platform"].Origin; got != "platform@abc123def456" {
+		t.Errorf("platform origin = %q, want platform@abc123def456 (12-char short)", got)
+	}
+	if byName["platform"].PriorityMultiplier != config.DefaultStorePriority {
+		t.Errorf("priority = %v, want default %v", byName["platform"].PriorityMultiplier, config.DefaultStorePriority)
+	}
+	if got := byName["localdev"].Origin; got != "localdev@unlocked" {
+		t.Errorf("unlocked store origin = %q, want localdev@unlocked", got)
+	}
+	if _, ok := byName["orphan"]; ok {
+		t.Error("a cache dir with no lock entry must NOT federate (unrecorded/unpinned)")
 	}
 
 	// No declared stores → nil, no error (single-store path).

@@ -93,8 +93,9 @@ lock. Per store:
    finding rejects that store (reason codes only — never secret bytes).
 6. **Swap** the staging dir into `meta/cache/stores/<name>/` (`fs.SwapDir`,
    Windows-safe two-step). This is not fully atomic — there is a brief window
-   where the cache dir is absent — which is fine while nothing reads the cache
-   concurrently; PR5 (fetch) will coordinate via a shared lock.
+   where the cache dir is absent — which is fine: PR5's fetch reads cached files
+   directly and treats a transiently-missing/half-swapped file as a read error
+   (that section is simply omitted, never a crash), so no shared lock is needed.
 7. **Record** the resolved commit + timestamp in `stores.lock`.
 
 A failed store is reported and skipped; the others still sync. Stores removed

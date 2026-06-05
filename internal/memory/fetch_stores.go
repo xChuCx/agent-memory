@@ -9,12 +9,15 @@ import (
 
 // LoadFetchStores builds the cached-store registry for the fetch search path
 // (federation, PR5) from the manifest's declared stores and the committed
-// meta/stores.lock. Only stores already materialised into the cache
-// (meta/cache/stores/<name>/) are included — a declared-but-unsynced store
-// contributes nothing until `agent-memory sync` runs. The lock supplies each
-// store's resolved commit for the provenance origin (`name@<short>`); a store
-// missing from the lock (or an unlocked local-path store) still federates with
-// origin `name`.
+// meta/stores.lock. A store is federated only when it is BOTH materialised
+// (cache dir present) AND recorded in the lock — the federation contract is
+// that nothing opaque or unpinned lands, and every chunk's provenance shows the
+// store + pin state. So:
+//
+//   - declared but not synced (no cache dir)     → skipped (run `sync`);
+//   - cache dir but no lock entry (orphan)       → skipped (sync reconciles it);
+//   - locked with a resolved commit              → origin "name@<short>";
+//   - unlocked local-path source (recorded)      → origin "name@unlocked".
 //
 // Returns (nil, nil) when no stores are declared — the caller then runs the
 // single-store path unchanged (the opt-in invariant). A malformed or too-new
@@ -36,9 +39,18 @@ func LoadFetchStores(memDir string, manifest *config.Manifest) ([]StoreRef, erro
 		if !agentfs.PathExists(dir) {
 			continue // declared but not synced yet
 		}
-		origin := st.Name
-		if locked, ok := lock.Stores[st.Name]; ok && locked.ResolvedCommit != "" {
+		locked, ok := lock.Stores[st.Name]
+		if !ok {
+			continue // materialised but unrecorded — not a pinned/reviewable store
+		}
+		var origin string
+		switch {
+		case locked.ResolvedCommit != "":
 			origin = st.Name + "@" + shortCommit(locked.ResolvedCommit)
+		case locked.Unlocked:
+			origin = st.Name + "@unlocked" // local-path: recorded but not commit-pinned
+		default:
+			continue // lock entry with neither a commit nor unlocked → skip
 		}
 		refs = append(refs, StoreRef{
 			Name:               st.Name,

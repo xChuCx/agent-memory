@@ -99,10 +99,9 @@ func copyRegularFile(src, dst string) error {
 // swap succeeds; on failure the original is restored best-effort.
 //
 // This is NOT fully atomic: there is a brief window between the two renames
-// where dest is absent. That is acceptable while nothing reads the cache
-// concurrently (sync is the only toucher today); a concurrent reader (PR5
-// fetch) must coordinate via a shared lock or tolerate a transiently-missing
-// dir.
+// where dest is absent. A concurrent reader tolerates this — PR5's fetch reads
+// cached files directly and treats a transiently-missing/half-swapped file as a
+// read error (that section is omitted), so no shared lock is required.
 func SwapDir(staging, dest string) error {
 	old := dest + ".old"
 	_ = os.RemoveAll(old)

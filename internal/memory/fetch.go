@@ -72,7 +72,12 @@ type IncludedFile struct {
 type OmittedFile struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
-	Store  string `json:"store,omitempty"` // set for non-local candidates
+	// Store + Origin mirror IncludedFile's provenance for non-local candidates,
+	// so a dropped landscape section is as traceable as an included one (useful
+	// for budget/dedup/stale-cache debugging and the PR6 eval). Local omits
+	// leave both empty.
+	Store  string `json:"store,omitempty"`
+	Origin string `json:"origin,omitempty"`
 }
 
 // ContextMetadata is sidecar info the agent can use to decide follow-up
@@ -368,12 +373,25 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 	// cluster we accept is the higher-ranked one (usually local, since the
 	// landscape multiplier penalises), so a later match against it is dropped.
 	var acceptedTokens []map[string]struct{}
+	// includedOrder records each (store, file) at first inclusion so the rollup
+	// below is deterministic (ranging a map would shuffle included_files).
+	var includedOrder []sfKey
 	externalPreambleEmitted := false
 
 	for _, r := range results {
 		dir, origin, ok := deps.storeDir(r.Store)
+		// omit records a dropped candidate, mirroring an included one's
+		// provenance (Store/Origin set only for non-local stores).
+		omit := func(reason string) OmittedFile {
+			return OmittedFile{
+				Path:   r.File,
+				Reason: reason,
+				Store:  externalName(r.Store),
+				Origin: externalOrigin(r.Store, origin),
+			}
+		}
 		if !ok {
-			omitted = append(omitted, OmittedFile{Path: r.File, Reason: "unknown store", Store: r.Store})
+			omitted = append(omitted, omit("unknown store"))
 			continue
 		}
 		key := sfKey{r.Store, r.File}
@@ -381,12 +399,12 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 		if !cached {
 			src, rerr := readStoreFile(dir, r.File)
 			if rerr != nil {
-				omitted = append(omitted, OmittedFile{Path: r.File, Reason: "read error", Store: externalName(r.Store)})
+				omitted = append(omitted, omit("read error"))
 				continue
 			}
 			sections, perr := agentmd.ParseSections(src)
 			if perr != nil {
-				omitted = append(omitted, OmittedFile{Path: r.File, Reason: "parse error", Store: externalName(r.Store)})
+				omitted = append(omitted, omit("parse error"))
 				continue
 			}
 			fc = fileCache{src: src, sections: sections}
@@ -396,7 +414,7 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 		if !found || sec == nil {
 			// SectionID not present in the current file — index is stale for
 			// this section. Skip; the incremental update path keeps it in sync.
-			omitted = append(omitted, OmittedFile{Path: r.File, Reason: "section not in current file", Store: externalName(r.Store)})
+			omitted = append(omitted, omit("section not in current file"))
 			continue
 		}
 		body := fc.src[sec.ByteStart:sec.ByteEnd]
@@ -407,28 +425,31 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 		// header, whose tokens would pollute the set.
 		tokens := tokenize(string(body))
 		if isNearDuplicate(tokens, acceptedTokens) {
-			omitted = append(omitted, OmittedFile{Path: r.File, Reason: "near-duplicate of higher-ranked section", Store: externalName(r.Store)})
+			omitted = append(omitted, omit("near-duplicate of higher-ranked section"))
 			continue
 		}
 
 		isExternal := federating && r.Store != "" && r.Store != index.LocalStore
 		chunk := renderChunk(chunkArgs{
-			federating:      federating,
-			external:        isExternal,
-			emitPreamble:    isExternal && !externalPreambleEmitted,
-			file:            r.File,
-			origin:          origin,
-			sectionID:       r.SectionID,
-			score:           r.Score,
-			body:            body,
+			federating:   federating,
+			external:     isExternal,
+			emitPreamble: isExternal && !externalPreambleEmitted,
+			file:         r.File,
+			origin:       origin,
+			sectionID:    r.SectionID,
+			score:        r.Score,
+			body:         body,
 		})
 		if used+len(chunk) > budget {
-			omitted = append(omitted, OmittedFile{Path: r.File, Reason: "budget exhausted", Store: externalName(r.Store)})
+			omitted = append(omitted, omit("budget exhausted"))
 			continue
 		}
 		pack.WriteString(chunk)
 		used += len(chunk)
 		acceptedTokens = append(acceptedTokens, tokens)
+		if sectionCount[key] == 0 {
+			includedOrder = append(includedOrder, key)
+		}
 		sectionCount[key]++
 		originByKey[key] = origin
 		if isExternal {
@@ -436,12 +457,13 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 		}
 	}
 
-	// Roll up included files (one IncludedFile per unique (store, file)).
-	for key, count := range sectionCount {
+	// Roll up included files (one IncludedFile per unique (store, file)), in
+	// first-inclusion order so included_files is stable across runs.
+	for _, key := range includedOrder {
 		inc := IncludedFile{
 			Path:         key.file,
 			Reason:       "matched query",
-			SectionCount: count,
+			SectionCount: sectionCount[key],
 		}
 		if key.store != "" && key.store != index.LocalStore {
 			inc.Store = key.store
@@ -512,6 +534,16 @@ func externalName(store string) string {
 		return ""
 	}
 	return store
+}
+
+// externalOrigin returns the provenance origin for a non-local store, else ""
+// (kept absent for local candidates via omitempty). origin may itself be ""
+// when the store is unknown (storeDir failed) — then there is nothing to label.
+func externalOrigin(store, origin string) string {
+	if store == "" || store == index.LocalStore {
+		return ""
+	}
+	return origin
 }
 
 // branchLocalPath returns the per-branch local-state file path under

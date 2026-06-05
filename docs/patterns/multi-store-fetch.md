@@ -59,10 +59,13 @@ real requirement — the section cache, section-count rollup, `IncludedFile`, an
 store to `MemoryDir` and cached stores via the registry.
 
 `LoadFetchStores(memDir, manifest)` builds the registry from the manifest's
-declared stores + `meta/stores.lock`: only **synced** stores (cache dir present)
-are included; the lock supplies the `name@<short>` origin. A malformed/too-new
-lock returns an error and the caller **degrades to a local-only fetch** (logs a
-warning) rather than failing the request.
+declared stores + `meta/stores.lock`. A store federates only when it is **both
+materialised** (cache dir present) **and lock-recorded** — a cache dir with no
+lock entry is an unrecorded/unpinned orphan and is skipped, so **nothing opaque
+or unpinned lands** (the core federation contract). The origin is
+`name@<short-commit>`, or `name@unlocked` for a recorded local-path source. A
+malformed/too-new lock returns an error and the caller **degrades to a
+local-only fetch** (logs a warning) rather than failing the request.
 
 ## Provenance + trust boundary (design §7A, §15.4)
 

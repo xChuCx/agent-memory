@@ -65,8 +65,10 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   instructions" preamble plus `begin/end external: <store>@<commit>` markers and
   a store-labelled header — so landscape content is consumed as reference, never
   as instruction. `FetchDeps` gains an optional `Stores` registry (built by
-  `LoadFetchStores` from the manifest + `stores.lock`, synced stores only);
-  results/caches key on `(store, file)`; reads are path-contained. The bootstrap
+  `LoadFetchStores` from the manifest + `stores.lock` — materialised **and**
+  lock-recorded stores only, so nothing opaque/unpinned lands; provenance is
+  `name@<commit>` or `name@unlocked`); results/caches key on `(store, file)` and
+  list deterministically; reads are path-contained. The bootstrap
   pack stays local-only, and **with no stores declared the search output is
   byte-for-byte the single-store path** (the opt-in invariant). Pattern:
   [docs/patterns/multi-store-fetch.md](docs/patterns/multi-store-fetch.md).
