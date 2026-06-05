@@ -59,34 +59,34 @@ agent-memory is the *durable, searchable, reviewed knowledge* behind it.
 
 ## Status
 
-**Release 0.4** — the team-and-launch release: open-source-ready, safe to
-share across a team (section-aware git merge driver), with a measured
-retrieval-quality number. It builds on 0.3, the completeness-and-polish
-release that closed the remaining design-doc gaps — much of it surfaced by
-dogfooding agent-memory on its own repo:
+**Release 0.5** — the **federation** release: a repo can now reference shared,
+git-pinned, read-only "landscape" stores, so an agent designing a cross-service
+feature sees the surrounding system map — blended into `fetch_context` with
+per-store-fair ranking, provenance, and a trust boundary. Built behind an
+**opt-in invariant**: with no stores declared, behaviour is byte-for-byte the
+single-repo path.
 
-- **Full MCP surface** — `memory.status` joins `fetch_context` and
-  `propose_update` as the third tool.
-- **M4 archival ops** — `archive_section` / `remove_section` /
-  `rename_heading`, plus a server-maintained `index.md`.
-- **Security layer** — secret + PII scanning with allowlist size limits;
-  real per-section schema validation.
-- **Observability** — structured `slog` logging (stderr-only, secret-safe).
-- **Smarter retrieval** — Jaccard dedup, the §20.4 ranking signals,
-  OR-match recall, crash-safe FTS queries.
-- **Fuller CLI** — `propose` (write without an MCP server), `review --diff`,
-  staging-id prefixes + `--latest`.
+Federation (PR1–PR6):
 
-The Core Contract from v0.1.0 (Design Doc v0.4.1: MCP server, structured
-operations, drift-checked staging, secret scanning, Claude Code adapter)
-is unchanged — every release since has been additive.
+- **Store-format versioning** — a `store_format_version` with a fail-closed load
+  guard, so a too-new store is never misread.
+- **Referenced stores** — a manifest `stores` block + a committed, go.sum-style
+  `meta/stores.lock` pinning each store to an exact commit.
+- **`agent-memory sync`** — clone → validate → sandbox-copy (symlink-safe) →
+  secret/PII scan → atomic swap into the gitignored cache.
+- **Store-keyed index** — one FTS5 index holds local + every cached store
+  (`SearchPerStore`), migrated by rebuild-on-version-bump.
+- **Multi-store fetch** — per-store-fair merge + `priority_multiplier` +
+  cross-store dedup + provenance / trust-boundary rendering.
+- **Federation eval** — a deterministic, CI-guarded multi-store retrieval eval
+  (recall@5 with store-origin correctness; ranking + starvation guards).
 
-**0.4 adds:** the section-aware git **merge driver** (team-shared memory
-unions instead of conflicting), an offline **retrieval-quality eval**
-(recall@5 0.98, CI-guarded), Apache-2.0 licensing + open-source packaging,
-and a corrected Go module path so `go install …@latest` works. The
-behavioural eval harness remains the main deferred item — see
-[ROADMAP.md](ROADMAP.md).
+It builds on **0.4** (the team-and-launch release: section-aware git merge
+driver, an offline retrieval-quality eval at recall@5 0.98, Apache-2.0
+open-source packaging) and the unchanged Core Contract from v0.1.0 (MCP server,
+structured operations, drift-checked staging, secret scanning) — every release
+since has been additive. The behavioural eval harness remains the main deferred
+item — see [ROADMAP.md](ROADMAP.md).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full changelist.
 

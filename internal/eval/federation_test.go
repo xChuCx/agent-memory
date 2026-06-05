@@ -74,6 +74,32 @@ var fedCorpus = []fedDoc{
 		"kind: event. direction: produces. Order lifecycle events published to the platform event bus."},
 	{evalStore, "actors.md", "actor-merchant", "Merchant",
 		"Contact: partners@acme.example. An external merchant integrating with the platform through the public refunds and orders API."},
+
+	// ---- distractors (shared vocab: payments / refund / idempotency / owner /
+	// endpoint), deliberately WEAKER matches than the golds. They exist so the
+	// eval is a real stress test: a regression to a single global Search(top-N)
+	// would let one store's distractors bury the other store's gold, dropping it
+	// out of the pack — which these assertions would catch. The per-store-fair
+	// merge keeps each store's gold.
+	{"", "modules/refunds.md", "refund-worker", "Refund worker",
+		"The refund worker retries failed customer refunds with exponential backoff."},
+	{"", "modules/refunds.md", "refund-policy", "Refund policy",
+		"Full refunds within 30 days; partial refunds afterwards, minus processing fees."},
+	{"", "modules/billing.md", "billing-owner", "Billing module owner",
+		"The billing module is owned by the local payments squad; it tracks charges and invoices."},
+	{"", "modules/http.md", "http-client", "Shared HTTP client",
+		"Our shared HTTP client wraps every outbound endpoint call with retries and timeouts."},
+	{"", "pitfalls.md", "refund-double", "Double refunds on retry",
+		"Retrying a refund without reusing the original idempotency key can issue a second refund."},
+	{"", "modules/payments.md", "settlement-note", "Settlement reconciliation",
+		"Settlement reconciles charges and refunds nightly against the platform statements."},
+
+	{evalStore, "contracts.md", "contract-charges", "POST /charges",
+		"kind: http. direction: produces. Owner: team-payments. Create a charge for a new payment."},
+	{evalStore, "contracts.md", "contract-refund-status", "GET /refunds/{id}",
+		"kind: http. direction: consumes. Read the status of a previously issued refund by id."},
+	{evalStore, "components.md", "settlement-service", "settlement-service",
+		"Owner: team-settlement. Settles charges and refunds across the whole platform nightly."},
 }
 
 // fedGold is a cross-repo query with the section a human considers the answer,
@@ -189,19 +215,38 @@ func TestFederationEval_BudgetStarvation(t *testing.T) {
 		t.Errorf("wide budget: landscape contract starved despite room\n%s", wide.Context)
 	}
 
-	// Tiny budget → local content still served; landscape gracefully omitted.
-	tight, err := memory.BuildContextPack(ctx, memory.FetchRequest{Query: q, Budget: 320}, deps)
+	// Tight budget → local content still served; landscape gracefully omitted.
+	// Sized to fit the always-prepended local state + the top local section, but
+	// not the (lower-ranked, priority-penalised) landscape chunk.
+	const tightBudget = 500
+	tight, err := memory.BuildContextPack(ctx, memory.FetchRequest{Query: q, Budget: tightBudget}, deps)
 	if err != nil {
 		t.Fatalf("tight-budget fetch must not error: %v", err)
 	}
 	tightHits := parsePackHits(tight.Context)
+	// The local gold is KEPT (not just "landscape absent" — guards against an
+	// empty pack trivially satisfying the next check).
+	if rankOf(tightHits, index.LocalStore, "idempotency", len(tightHits)) < 0 {
+		t.Errorf("tight budget: local idempotency decision should be kept\n%s", tight.Context)
+	}
+	// The landscape is dropped from the pack...
 	for _, h := range tightHits {
 		if h.store == evalStore {
 			t.Errorf("tight budget should drop landscape, but it appeared: %v", tightHits)
 		}
 	}
-	if tight.ContextMetadata.BudgetUsed > 320 {
-		t.Errorf("tight budget exceeded: used %d > 320", tight.ContextMetadata.BudgetUsed)
+	// ...and recorded in Omitted with its provenance (FetchResponse.Omitted).
+	var omittedPlatform bool
+	for _, o := range tight.Omitted {
+		if o.Store == evalStore && o.Origin == evalOrigin {
+			omittedPlatform = true
+		}
+	}
+	if !omittedPlatform {
+		t.Errorf("tight budget: expected the landscape omitted with provenance, got %#v", tight.Omitted)
+	}
+	if tight.ContextMetadata.BudgetUsed > tightBudget {
+		t.Errorf("tight budget exceeded: used %d > %d", tight.ContextMetadata.BudgetUsed, tightBudget)
 	}
 }
 
@@ -263,6 +308,16 @@ func buildFederatedEvalCorpus(t *testing.T) (memory.FetchDeps, context.Context) 
 
 	cacheDir := filepath.Join(memDir, "meta", "cache", "stores", evalStore)
 	writeFedCorpus(t, memDir, cacheDir)
+	// Make the cached store resemble a real materialised store: sync copies the
+	// referenced repo's meta/manifest.yaml into the cache. Not needed for the
+	// fetch path (Stores is passed explicitly below), but keeps the demo
+	// fixture honest.
+	if err := os.MkdirAll(filepath.Join(cacheDir, "meta"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteDefault(filepath.Join(cacheDir, "meta", "manifest.yaml"), evalStore); err != nil {
+		t.Fatal(err)
+	}
 	// A small always-prepended local current-state file.
 	writeFile(t, filepath.Join(memDir, "local", "current.shared.md"),
 		"## Current work\n<!-- @id: current -->\n\nWiring the refund flow end to end.\n")
