@@ -125,6 +125,15 @@ func runFetch(ctx context.Context, opts fetchOptions) (*memory.FetchResponse, er
 	// signal. A failure (no git, not a repo) just means no boost.
 	changed, _ := agentgit.ChangedFiles(root)
 
+	// Federation (PR5): cached landscape stores to blend into the search path.
+	// A malformed/too-new lock degrades to a local-only fetch rather than
+	// failing the request; with no stores declared this is nil (unchanged).
+	stores, serr := memory.LoadFetchStores(memDir, manifest)
+	if serr != nil {
+		cliLogger().Warn("federation disabled for this fetch", "error", serr.Error())
+		stores = nil
+	}
+
 	return memory.BuildContextPack(ctx, memory.FetchRequest{
 		Query:          opts.Query,
 		Scope:          opts.Scope,
@@ -137,6 +146,7 @@ func runFetch(ctx context.Context, opts fetchOptions) (*memory.FetchResponse, er
 		Manifest:     manifest,
 		MemoryDir:    memDir,
 		Branch:       branch,
+		Stores:       stores,
 		ChangedFiles: changed,
 		Logger:       cliLogger(),
 	})

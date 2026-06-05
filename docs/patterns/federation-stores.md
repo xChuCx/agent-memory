@@ -1,11 +1,11 @@
 # Pattern: federation — referenced stores (manifest + lockfile)
 
 **Scope:** the federation slice's *declaration + pinning* contract (introduced
-in PR2). Sync (PR3) and the index `store` dimension (PR4,
-[shadow-index pattern](sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2))
-build on it and have landed; multi-store fetch (PR5) and the retrieval eval
-(PR6) are still to come. Full design:
-[docs/design/federated-memory.md](../design/federated-memory.md).
+in PR2). Sync (PR3), the index `store` dimension (PR4,
+[shadow-index pattern](sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2)),
+and multi-store fetch (PR5, [multi-store-fetch pattern](multi-store-fetch.md))
+build on it and have landed; the retrieval eval (PR6) is still to come. Full
+design: [docs/design/federated-memory.md](../design/federated-memory.md).
 
 ## Problem
 
@@ -93,8 +93,9 @@ lock. Per store:
    finding rejects that store (reason codes only — never secret bytes).
 6. **Swap** the staging dir into `meta/cache/stores/<name>/` (`fs.SwapDir`,
    Windows-safe two-step). This is not fully atomic — there is a brief window
-   where the cache dir is absent — which is fine while nothing reads the cache
-   concurrently; PR5 (fetch) will coordinate via a shared lock.
+   where the cache dir is absent — which is fine: PR5's fetch reads cached files
+   directly and treats a transiently-missing/half-swapped file as a read error
+   (that section is simply omitted, never a crash), so no shared lock is needed.
 7. **Record** the resolved commit + timestamp in `stores.lock`.
 
 A failed store is reported and skipped; the others still sync. Stores removed
@@ -103,8 +104,7 @@ does not touch the agent's context or rebuild the index.
 
 ## Deliberately deferred (later PRs)
 
-Per-store-fair multi-store **fetch** (PR5, with provenance + the
-untrusted-context trust boundary at *read* time) and the multi-store retrieval
-eval (PR6). See the design doc §6.2, §7. (The index `store` dimension these
-build on landed in PR4 — see the
-[shadow-index pattern](sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2).)
+The multi-store retrieval **eval** (PR6) — a deterministic check that the
+local + landscape blend ranks correctly and neither side starves under the
+per-store-fair merge. See the design doc §11. (The multi-store fetch it measures
+landed in PR5 — see [multi-store-fetch.md](multi-store-fetch.md).)

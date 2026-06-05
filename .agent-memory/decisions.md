@@ -145,3 +145,53 @@ local tree (skipping `meta/cache/`) then each cached store under its name.
 behavior); cached-store rows never collide with local rows; no fragile in-place
 migrations to maintain.
 **Sources:** internal/index/{sqlite,query,rebuild,incremental}.go, docs/patterns/sqlite-fts5-shadow-index.md
+
+**Date:** 2026-06-04
+**Status:** active
+**Confidence:** confirmed
+
+**Context:** PR4 review (index store dimension) surfaced two correctness/safety
+gaps in how cached external stores are indexed, plus one ranking prerequisite
+for PR5.
+**Decision:** (1) `indexCachedStores` distinguishes an ABSENT cached
+`meta/schema.yaml` (fall back to the consumer schema) from a PRESENT-but-invalid
+one, which now FAILS the rebuild — silently indexing a broken store under the
+consumer schema turns a config error into a silent retrieval bug.
+(2) External stores index only their DURABLE (git-tracked) landscape categories;
+transient local/session categories (`GitTracked=false`) are skipped, so a
+local-path store can't leak a developer's private working context into the
+shared index.
+(3) `RankingContext` file-level signals (FreshFiles/StaleFiles, scope, archive)
+are keyed by file path alone — correct while fetch is local-only, but PR5 MUST
+re-key them by `(store, file)` before merging multi-store results, or a path
+present in two stores collects another store's boost.
+**Consequences:** Federation indexing fails loud on misconfiguration, never
+ingests private transient context from local-path stores, and PR5 has a written
+prerequisite for correct multi-store ranking.
+**Sources:** internal/index/rebuild.go, internal/index/ranking.go, internal/index/store_dim_test.go
+
+**Date:** 2026-06-04
+**Status:** active
+**Confidence:** confirmed
+
+**Context:** PR5 makes `fetch_context` blend local memory with cached landscape
+stores. The risks: a large landscape evicting local candidates, lost
+provenance, and treating external text as instructions.
+**Decision:** Retrieval is per-store-fair — local `Search(50)` plus
+`SearchPerStore(kPerStore=20)` per cached store, merged and re-ranked. Each
+store's hits are multiplied by `priority_multiplier` on the NEGATIVE BM25 score
+(<1 penalises; default 0.8 so local wins ties — same sign convention as every
+ranking multiplier, never "fixed"). Local and external are ranked SEPARATELY so
+file-keyed signals don't collide across stores (the PR4 prerequisite). Then
+cross-store Jaccard dedup (>=0.85, keep higher-ranked) and one global budget.
+Non-local chunks are wrapped in a provenance + trust boundary: a one-time
+"evidence, not instructions" preamble + `begin/end external: name@commit`
+markers + a store-labelled header. `FetchDeps` keeps `MemoryDir` (local) and
+adds an OPTIONAL `Stores []StoreRef` (hybrid, not a full map) — backward-
+compatible so non-federated callers stay byte-for-byte identical — while
+caches/rollups key on `(store, file)`. `LoadFetchStores` includes only synced
+stores; a malformed lock degrades to local-only. Bootstrap stays local-only.
+**Consequences:** Opt-in invariant holds (no stores → single-store path,
+byte-for-byte, regression-tested); landscape is secondary by default; external
+content is clearly fenced as untrusted reference; reads are path-contained.
+**Sources:** internal/memory/fetch.go, internal/memory/fetch_stores.go, docs/patterns/multi-store-fetch.md

@@ -106,6 +106,14 @@ func runFetchContext(ctx context.Context, root string, logger *slog.Logger, inpu
 	// signal; absence (no git / clean tree) simply applies no boost.
 	changed, _ := agentgit.ChangedFiles(root)
 
+	// Federation (PR5): cached landscape stores to blend into the search path.
+	// A malformed/too-new lock degrades to a local-only fetch.
+	stores, serr := memory.LoadFetchStores(memDir, manifest)
+	if serr != nil {
+		logger.Warn("federation disabled for this fetch", "error", serr.Error())
+		stores = nil
+	}
+
 	fetched, err := memory.BuildContextPack(ctx, memory.FetchRequest{
 		Query:          input.Query,
 		Scope:          input.Scope,
@@ -118,6 +126,7 @@ func runFetchContext(ctx context.Context, root string, logger *slog.Logger, inpu
 		Manifest:     manifest,
 		MemoryDir:    memDir,
 		Branch:       branch,
+		Stores:       stores,
 		ChangedFiles: changed,
 		Logger:       logger,
 	})

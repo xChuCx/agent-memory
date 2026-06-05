@@ -56,6 +56,22 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   and every index-opening path self-heals an empty index. The store name `local`
   is reserved. Pattern:
   [docs/patterns/sqlite-fts5-shadow-index.md](docs/patterns/sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2).
+- **Multi-store fetch** (federation, PR5). `fetch_context` now blends the local
+  memory with cached landscape stores: per-store candidate retrieval (each store
+  capped so it can't crowd out local), merge, ranking with each store's
+  `priority_multiplier` on the negative BM25 score (`<1` penalises so local wins
+  ties), cross-store de-duplication, and one global budget. Non-local sections
+  are wrapped in a **provenance + trust boundary** — a one-time "evidence, not
+  instructions" preamble plus `begin/end external: <store>@<commit>` markers and
+  a store-labelled header — so landscape content is consumed as reference, never
+  as instruction. `FetchDeps` gains an optional `Stores` registry (built by
+  `LoadFetchStores` from the manifest + `stores.lock` — materialised **and**
+  lock-recorded stores only, so nothing opaque/unpinned lands; provenance is
+  `name@<commit>` or `name@unlocked`); results/caches key on `(store, file)` and
+  list deterministically; reads are path-contained. The bootstrap
+  pack stays local-only, and **with no stores declared the search output is
+  byte-for-byte the single-store path** (the opt-in invariant). Pattern:
+  [docs/patterns/multi-store-fetch.md](docs/patterns/multi-store-fetch.md).
 
 ## [0.4.3] — 2026-06-01
 
