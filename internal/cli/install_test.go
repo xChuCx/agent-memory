@@ -13,6 +13,15 @@ import (
 // runInstall: claude adapter
 // =============================================================================
 
+func containsPath(paths []string, want string) bool {
+	for _, p := range paths {
+		if p == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRunInstall_ClaudeProjectLocal(t *testing.T) {
 	root := t.TempDir()
 	res, err := runInstall(installOptions{
@@ -25,11 +34,17 @@ func TestRunInstall_ClaudeProjectLocal(t *testing.T) {
 	if res.Adapter != "claude" {
 		t.Errorf("Adapter = %q, want claude", res.Adapter)
 	}
-	wantPath := filepath.Join(root, ".claude", "skills", "agent-memory", "SKILL.md")
-	if len(res.Files) != 1 || res.Files[0] != wantPath {
-		t.Errorf("Files = %v, want [%s]", res.Files, wantPath)
+	// A project install writes both the skill and the project .mcp.json so the
+	// agent's writes land in THIS repo (the 0.5.1 fix).
+	skill := filepath.Join(root, ".claude", "skills", "agent-memory", "SKILL.md")
+	mcp := filepath.Join(root, ".mcp.json")
+	if !containsPath(res.Files, skill) {
+		t.Errorf("Files %v missing skill %s", res.Files, skill)
 	}
-	body, _ := os.ReadFile(wantPath)
+	if !containsPath(res.Files, mcp) {
+		t.Errorf("Files %v missing .mcp.json %s", res.Files, mcp)
+	}
+	body, _ := os.ReadFile(skill)
 	if !strings.Contains(string(body), "memory.fetch_context") {
 		t.Error("installed SKILL.md missing tool reference")
 	}
@@ -54,7 +69,7 @@ func TestRunInstall_RefusesOverwriteWithoutForce(t *testing.T) {
 	if _, err := runInstall(installOptions{Adapter: "claude", Root: root}); err != nil {
 		t.Fatal(err)
 	}
-	// Second install (no force): nothing written, file is skipped.
+	// Second install (no force): nothing written, both artifacts skipped.
 	res, err := runInstall(installOptions{Adapter: "claude", Root: root})
 	if err != nil {
 		t.Fatal(err)
@@ -62,8 +77,8 @@ func TestRunInstall_RefusesOverwriteWithoutForce(t *testing.T) {
 	if len(res.Files) != 0 {
 		t.Errorf("Files = %v, want empty (no overwrite)", res.Files)
 	}
-	if len(res.Skipped) != 1 {
-		t.Errorf("Skipped = %v, want one entry", res.Skipped)
+	if len(res.Skipped) != 2 {
+		t.Errorf("Skipped = %v, want two entries (skill + .mcp.json)", res.Skipped)
 	}
 }
 
@@ -84,10 +99,11 @@ func TestRunInstall_ForceOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Files) != 1 {
-		t.Errorf("Files = %v, want [installed path]", res.Files)
+	skill := filepath.Join(skillDir, "SKILL.md")
+	if !containsPath(res.Files, skill) {
+		t.Errorf("Files = %v, want to include the rewritten skill", res.Files)
 	}
-	got, _ := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	got, _ := os.ReadFile(skill)
 	if !strings.Contains(string(got), "memory.propose_update") {
 		t.Error("force install didn't replace stale content")
 	}
@@ -136,8 +152,11 @@ func TestCobra_InstallClaude_JSON(t *testing.T) {
 	if got.Adapter != "claude" {
 		t.Errorf("Adapter = %q, want claude", got.Adapter)
 	}
-	if len(got.Files) != 1 {
-		t.Errorf("Files = %v, want one entry", got.Files)
+	// Project install writes the skill + the project .mcp.json.
+	skill := filepath.Join(root, ".claude", "skills", "agent-memory", "SKILL.md")
+	mcp := filepath.Join(root, ".mcp.json")
+	if !containsPath(got.Files, skill) || !containsPath(got.Files, mcp) {
+		t.Errorf("Files = %v, want skill + .mcp.json", got.Files)
 	}
 }
 

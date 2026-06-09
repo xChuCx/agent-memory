@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -164,6 +166,15 @@ func runDoctor(rootFlag string) ([]Finding, error) {
 		}
 	}
 
+	// MCP registration sanity: a project .mcp.json whose agent-memory server is
+	// pinned to a fixed --root that isn't this repo silently routes the agent's
+	// memory writes to the wrong project (the 0.5.1 footgun). Best-effort, and
+	// scoped to the project file so doctor stays hermetic — a portable
+	// ${CLAUDE_PROJECT_DIR...} root or an absent --root is never flagged.
+	if b, rerr := os.ReadFile(filepath.Join(root, ".mcp.json")); rerr == nil {
+		findings = append(findings, mcpRootFindings(root, []mcpScopeConfig{{scope: ".mcp.json", data: b}})...)
+	}
+
 	// Stable order for deterministic output.
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].Severity != findings[j].Severity {
@@ -173,6 +184,67 @@ func runDoctor(rootFlag string) ([]Finding, error) {
 	})
 
 	return findings, nil
+}
+
+// mcpScopeConfig is one MCP config source (a scope label + its raw JSON).
+type mcpScopeConfig struct {
+	scope string
+	data  []byte
+}
+
+// mcpRootFindings flags an `agent-memory` MCP server whose fixed `--root`
+// points somewhere other than this repo — the misconfiguration that silently
+// routes the agent's memory writes to the wrong project. A `--root` that uses
+// `${CLAUDE_PROJECT_DIR...}` (the portable form `install` writes) or is absent
+// (resolved from the environment / cwd at spawn) is correct and never flagged.
+// Parsing is best-effort: an unparseable config yields no finding.
+func mcpRootFindings(repoRoot string, configs []mcpScopeConfig) []Finding {
+	repoAbs, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return nil
+	}
+	var out []Finding
+	for _, c := range configs {
+		var doc struct {
+			MCPServers map[string]struct {
+				Args []string `json:"args"`
+			} `json:"mcpServers"`
+		}
+		if json.Unmarshal(c.data, &doc) != nil {
+			continue
+		}
+		srv, ok := doc.MCPServers["agent-memory"]
+		if !ok {
+			continue
+		}
+		rootArg, hasRoot := flagValue(srv.Args, "--root")
+		if !hasRoot || strings.Contains(rootArg, "${") {
+			continue // env-resolved or portable → correct
+		}
+		ra, err := filepath.Abs(rootArg)
+		if err != nil {
+			continue
+		}
+		if !strings.EqualFold(filepath.Clean(ra), filepath.Clean(repoAbs)) {
+			out = append(out, Finding{
+				Severity: SeverityWarning,
+				Message: fmt.Sprintf(
+					"MCP server 'agent-memory' in %s is pinned to --root %q, not this repo (%s); the agent's memory writes will land in the wrong project. Re-run `agent-memory install claude` here, or fix the --root.",
+					c.scope, rootArg, repoAbs),
+			})
+		}
+	}
+	return out
+}
+
+// flagValue returns the argument following flag in args, if present.
+func flagValue(args []string, flag string) (string, bool) {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }
 
 func severityRank(s Severity) int {

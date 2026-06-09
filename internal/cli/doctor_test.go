@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -183,6 +184,68 @@ func TestDoctor_NoStaleAdvisoryWhenAllFresh(t *testing.T) {
 		if strings.Contains(f.Message, "past TTL") {
 			t.Errorf("unexpected stale-staging advisory on fresh repo: %+v", f)
 		}
+	}
+}
+
+func TestMCPRootFindings(t *testing.T) {
+	repo := t.TempDir()
+	other := t.TempDir()
+	mk := func(args ...string) []byte {
+		b, _ := json.Marshal(map[string]any{
+			"mcpServers": map[string]any{
+				"agent-memory": map[string]any{"args": args},
+			},
+		})
+		return b
+	}
+	cases := []struct {
+		name string
+		data []byte
+		warn bool
+	}{
+		{"pinned elsewhere", mk("mcp", "--root", other), true},
+		{"matches repo", mk("mcp", "--root", repo), false},
+		{"portable CLAUDE_PROJECT_DIR", mk("mcp", "--root", "${CLAUDE_PROJECT_DIR:-.}"), false},
+		{"no --root (env/cwd resolved)", mk("mcp"), false},
+		{"other server only", []byte(`{"mcpServers":{"other":{"args":["x"]}}}`), false},
+		{"unparseable", []byte("not json"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mcpRootFindings(repo, []mcpScopeConfig{{scope: "test", data: tc.data}})
+			if tc.warn && len(got) == 0 {
+				t.Errorf("expected a mis-rooted warning, got none")
+			}
+			if !tc.warn && len(got) != 0 {
+				t.Errorf("expected no findings, got %+v", got)
+			}
+		})
+	}
+}
+
+func TestDoctor_FlagsMisrootedProjectMCP(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	// A project .mcp.json pinned to some other repo (the 0.5.1 footgun).
+	bad := `{"mcpServers":{"agent-memory":{"args":["mcp","--root","/some/other/repo"]}}}`
+	if err := os.WriteFile(filepath.Join(dir, ".mcp.json"), []byte(bad), 0644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := runDoctor(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range findings {
+		if strings.Contains(f.Message, "pinned to --root") && f.Severity == SeverityWarning {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a mis-rooted MCP warning, got: %+v", findings)
 	}
 }
 

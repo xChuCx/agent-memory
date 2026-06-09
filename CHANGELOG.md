@@ -5,6 +5,23 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-06-09
+
+### Fixed
+
+- **Per-project MCP root (critical).** `agent-memory install claude` now also
+  registers the MCP server in the repo's `.mcp.json` as
+  `agent-memory mcp --root ${CLAUDE_PROJECT_DIR:-.}`, so each repo's agent writes
+  to **its own** `.agent-memory/`. Previously `install` wrote only the skill; a
+  single user-scoped server with a hardcoded `--root` then served *every* project
+  from one repo, silently routing one project's memory writes into another. The
+  server now resolves its root from `--root`, then `$CLAUDE_PROJECT_DIR` (which
+  Claude Code sets per spawn — it does **not** change the working directory),
+  then the cwd. `agent-memory doctor` flags a project `.mcp.json` whose
+  `agent-memory --root` is pinned to a different repo, and the README no longer
+  recommends a hardcoded user-scoped `--root`. The `.mcp.json` merge is
+  non-destructive (existing servers and keys are preserved).
+
 ## [0.5.0] — 2026-06-05
 
 The **federation** release: a repo can reference shared, git-pinned, read-only

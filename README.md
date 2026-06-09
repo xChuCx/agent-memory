@@ -127,7 +127,8 @@ Then, inside the repo you want to give a memory:
 # Scaffold .agent-memory/ in a repo
 agent-memory init --name my-project
 
-# Install the Claude Code skill (writes .claude/skills/agent-memory/SKILL.md)
+# Install the Claude Code skill + register the project MCP server
+# (writes .claude/skills/agent-memory/SKILL.md and merges .mcp.json)
 agent-memory install claude
 
 # Verify (prints the release tag, the go-install version, or dev+vcs locally)
@@ -141,24 +142,22 @@ agent-memory fetch "auth"         # FTS query
 agent-memory mcp
 ```
 
-Register the MCP server with your agent. For Claude Code, either run
-`claude mcp add agent-memory -- agent-memory mcp --root /abs/path/to/repo`,
-or commit a project-scoped `.mcp.json` at the repo root:
+`install claude` registers the MCP server for you: it merges a project-scoped
+`.mcp.json` at the repo root that runs `agent-memory mcp --root ${CLAUDE_PROJECT_DIR:-.}`.
+Claude Code expands `CLAUDE_PROJECT_DIR` to the repo at spawn, so the server
+always serves **this** repo — the config is portable across clones and (by
+Claude Code's scope precedence, local > project > user) overrides any stray
+user-scoped server. Commit `.mcp.json` so your team shares it.
 
-```json
-{
-  "mcpServers": {
-    "agent-memory": {
-      "command": "agent-memory",
-      "args": ["mcp", "--root", "/abs/path/to/repo"]
-    }
-  }
-}
-```
+> ⚠️ **Do not** register a single **user-scoped** server with a hardcoded root
+> (`claude mcp add -s user agent-memory -- agent-memory mcp --root /some/repo`):
+> it serves *every* project from that one repo, so memory you write in project B
+> silently lands in project A. Per-project registration (what `install` writes)
+> is the correct model; `agent-memory doctor` flags a mis-rooted registration.
 
-Pinning `--root` makes the server independent of the launch directory. Other
-runtimes (Cursor, Gemini CLI, anything reading `AGENTS.md`) use the same
-server — install their adapter (see below) and point them at `agent-memory mcp`.
+The server resolves its repo from `--root`, then `$CLAUDE_PROJECT_DIR`, then the
+working directory. Other runtimes (Cursor, Gemini CLI, anything reading
+`AGENTS.md`) use the same server — install their adapter (see below).
 
 ## Adopt on an existing project
 
