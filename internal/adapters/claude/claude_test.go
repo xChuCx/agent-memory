@@ -1,11 +1,21 @@
 package claude
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func contains(paths []string, want string) bool {
+	for _, p := range paths {
+		if p == want {
+			return true
+		}
+	}
+	return false
+}
 
 // =============================================================================
 // SkillContent: embedded asset sanity checks
@@ -65,26 +75,69 @@ func TestSkillContent_TeachesBootstrapCall(t *testing.T) {
 // Install: project-local
 // =============================================================================
 
-func TestInstall_ProjectLocal_WritesSkillFile(t *testing.T) {
+func TestInstall_ProjectLocal_WritesSkillAndMCPConfig(t *testing.T) {
 	root := t.TempDir()
 	res, err := Install(Options{Root: root})
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if len(res.Files) != 1 {
-		t.Fatalf("Files = %v, want one file", res.Files)
+	skill := filepath.Join(root, ".claude", "skills", "agent-memory", "SKILL.md")
+	mcp := filepath.Join(root, ".mcp.json")
+	if !contains(res.Files, skill) {
+		t.Errorf("Files %v missing skill %s", res.Files, skill)
 	}
-	want := filepath.Join(root, ".claude", "skills", "agent-memory", "SKILL.md")
-	if res.Files[0] != want {
-		t.Errorf("Files[0] = %q, want %q", res.Files[0], want)
+	if !contains(res.Files, mcp) {
+		t.Errorf("Files %v missing .mcp.json %s", res.Files, mcp)
 	}
 
-	body, err := os.ReadFile(want)
+	body, err := os.ReadFile(skill)
 	if err != nil {
 		t.Fatalf("read installed skill: %v", err)
 	}
 	if !strings.Contains(string(body), "agent-memory") {
 		t.Error("installed SKILL.md doesn't match embedded asset")
+	}
+
+	// The MCP registration must be project-portable: the server resolves the
+	// repo from $CLAUDE_PROJECT_DIR at spawn, not a hardcoded path.
+	mb, err := os.ReadFile(mcp)
+	if err != nil {
+		t.Fatalf("read .mcp.json: %v", err)
+	}
+	for _, want := range []string{`"agent-memory"`, `"mcp"`, `${CLAUDE_PROJECT_DIR:-.}`} {
+		if !strings.Contains(string(mb), want) {
+			t.Errorf(".mcp.json missing %q:\n%s", want, mb)
+		}
+	}
+}
+
+func TestInstall_MergesExistingMCPConfig(t *testing.T) {
+	root := t.TempDir()
+	// A pre-existing .mcp.json with another server + an unrelated top-level key.
+	pre := `{"mcpServers":{"other":{"command":"x"}},"foo":"bar"}`
+	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(pre), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(Options{Root: root}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("merged .mcp.json is invalid JSON: %v\n%s", err, raw)
+	}
+	if doc["foo"] != "bar" {
+		t.Errorf("merge dropped the unrelated top-level key: %v", doc)
+	}
+	servers, _ := doc["mcpServers"].(map[string]any)
+	if servers["other"] == nil {
+		t.Errorf("merge clobbered the existing 'other' server: %v", servers)
+	}
+	if servers[MCPServerName] == nil {
+		t.Errorf("merge didn't register %q: %v", MCPServerName, servers)
 	}
 }
 
@@ -104,11 +157,12 @@ func TestInstall_NoForce_RefusesOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if len(res.Files) != 0 {
-		t.Errorf("Files = %v, want empty (refused overwrite)", res.Files)
+	// The skill must be refused (preserved), regardless of the .mcp.json write.
+	if contains(res.Files, skillPath) {
+		t.Errorf("skill should not be overwritten without --force; Files=%v", res.Files)
 	}
-	if len(res.Skipped) != 1 || res.Skipped[0] != skillPath {
-		t.Errorf("Skipped = %v, want [%s]", res.Skipped, skillPath)
+	if !contains(res.Skipped, skillPath) {
+		t.Errorf("skill should be reported skipped; Skipped=%v", res.Skipped)
 	}
 	// Existing content must be preserved byte-for-byte.
 	got, _ := os.ReadFile(skillPath)
@@ -132,8 +186,8 @@ func TestInstall_Force_Overwrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if len(res.Files) != 1 {
-		t.Fatalf("Files = %v, want one file", res.Files)
+	if !contains(res.Files, skillPath) {
+		t.Fatalf("force install should rewrite the skill; Files=%v", res.Files)
 	}
 	got, _ := os.ReadFile(skillPath)
 	if !strings.Contains(string(got), "agent-memory") {
@@ -187,7 +241,8 @@ func TestInstall_IdempotentWithoutForce(t *testing.T) {
 	if len(res.Files) != 0 {
 		t.Errorf("second install wrote files: %v (should have skipped)", res.Files)
 	}
-	if len(res.Skipped) != 1 {
-		t.Errorf("Skipped = %v, want one entry", res.Skipped)
+	// Both artifacts (skill + .mcp.json) are now present, so both are skipped.
+	if len(res.Skipped) != 2 {
+		t.Errorf("Skipped = %v, want two entries (skill + .mcp.json)", res.Skipped)
 	}
 }

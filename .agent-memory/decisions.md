@@ -221,3 +221,30 @@ pipeline (merge + priority + dedup + budget + provenance), not a stand-in. The
 provenance-complete pack (deterministic included_files, Omitted.Origin) makes
 the eval assertions clean.
 **Sources:** internal/eval/federation_test.go, docs/design/federated-memory.md
+
+**Date:** 2026-06-09
+**Status:** active
+**Confidence:** confirmed
+
+**Context:** A user ran `agent-memory init` + `install claude` in a NEW repo, but
+the agent's staged proposals all landed in a DIFFERENT repo's .agent-memory/
+(the tool's own repo). Root cause: `install claude` only wrote SKILL.md and
+never registered an MCP server, so the agent fell back to a pre-existing
+USER-scoped server registered as `agent-memory mcp --root <fixed-repo>`. A
+user-scoped server is shared across ALL projects and was pinned to one repo, so
+every project's writes routed there. Confirmed against Claude Code docs: a
+project stdio server does NOT get cwd=project — Claude Code sets
+$CLAUDE_PROJECT_DIR instead; scope precedence is local > project > user.
+**Decision:** (1) The MCP server resolves its root from --root, then
+$CLAUDE_PROJECT_DIR, then cwd (was --root else cwd). (2) `install claude` now
+merges a project-scoped .mcp.json registering
+`agent-memory mcp --root ${CLAUDE_PROJECT_DIR:-.}` — portable across clones,
+correct per-repo, and overriding any stray user-scoped server by precedence.
+Merge is non-destructive. User-global install stays skill-only (a user-scoped
+fixed --root is the footgun). (3) `agent-memory doctor` flags a project
+.mcp.json whose agent-memory --root is pinned to a different repo. (4) README no
+longer recommends a hardcoded user-scoped --root.
+**Consequences:** Each repo's agent writes to its own .agent-memory/; a stray
+global server can no longer hijack other projects; misconfig is detectable
+(doctor) and visible. Shipped as 0.5.1.
+**Sources:** internal/cli/mcp.go, internal/adapters/claude/claude.go, internal/cli/doctor.go
