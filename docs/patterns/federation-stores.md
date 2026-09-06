@@ -7,12 +7,21 @@ and multi-store fetch (PR5, [multi-store-fetch pattern](multi-store-fetch.md))
 build on it and have landed; the retrieval eval (PR6) is still to come. Full
 design: [docs/design/federated-memory.md](../design/federated-memory.md).
 
-## Problem
+## Problem & Paradigm Shift: Beyond Static Wikis
 
-A repo's `.agent-memory/` knows only itself. An agent designing a cross-service
-feature needs the surrounding system map. Federation lets a repo **reference**
-shared "landscape" stores (a platform/architecture-memory repo). This pattern
-covers how a reference is declared and pinned — not yet how it is fetched.
+A repository's local `.agent-memory/` knows only its own code and history. But in modern distributed systems, no microservice or autonomous agent exists in isolation.
+
+Federating stores is **fundamentally different from pulling in a static documentation wiki**:
+1. **Operational Context Sharing vs. Passive Documentation:** A wiki is detached, often stale, and provides abstract guidelines. Connecting another project's `.agent-memory/` brings *living operational memory* into the agent's context pack: real architecture decisions (`decisions.md`), established code conventions (`conventions.md`), hard-won production traps (`pitfalls.md`), and domain modules.
+2. **Peer Solution Discovery (Zero-Waste Engineering):** When an agent is assigned a complex new task (e.g. transactional outbox, distributed rate-limiting, two-phase idempotency), it should not reinvent the wheel from scratch ("не городить с нуля сложное решение"). By querying federated stores, the agent instantly retrieves proven solutions and architectural trade-offs already battle-tested by peer agents or adjacent teams.
+3. **Context Beyond the Public API:** API specifications (OpenAPI, GraphQL, gRPC Protobuf) define structural syntax and wire formats, but hide critical behavioral invariants:
+   - What transactional consistency guarantees are upheld behind the endpoint?
+   - What are the concurrency traps, retry deduplication windows, and backpressure thresholds?
+   - How does the service behave during network partitions or database failover?
+   Federated memory establishes the operational boundaries and principles of operation *beyond* the API boundary.
+4. **Safe Cross-Service Contributions:** When an agent must propose a change or implement a cross-cutting feature in another service, having that service's memory linked allows the agent to act not as a blind external contributor, but as an informed insider who respects local invariants and avoids known pitfalls.
+
+This pattern covers how referenced stores are declared and pinned — not yet how they are fetched (see [multi-store-fetch.md](multi-store-fetch.md)).
 
 ## The manifest `stores` block
 

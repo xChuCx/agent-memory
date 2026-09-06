@@ -39,6 +39,14 @@ owner")`. With a referenced `platform` landscape store, the pack contains the
 `payments` component, its `POST /refunds` contract, the owning team, and an
 idempotency pitfall — none of which live in `orders`.
 
+Beyond static system maps, this unlocks **cross-project operational context sharing**:
+instead of engineering a new complex mechanism from scratch, an agent discovers how
+a peer service or agent already solved it. The external store exposes operational
+boundaries, failure modes, and hidden invariants that lie *beyond* API signatures (e.g.
+concurrency traps, transaction models, retry deduplication windows). Furthermore, when
+an agent must propose or apply modifications to an upstream or adjacent service, it does
+so with full awareness of that service's local conventions, decisions, and pitfalls.
+
 ## 3. Goals / Non-goals
 
 **Goals**
