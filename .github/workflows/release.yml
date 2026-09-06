@@ -83,7 +83,13 @@ jobs:
           '
 
       - name: Publish npm launcher
-        run: npm publish --access public
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if npm view "@xchucx/agent-memory@$VERSION" version >/dev/null 2>&1; then
+            echo "@xchucx/agent-memory@$VERSION is already published on npm; skipping publish"
+          else
+            npm publish --access public
+          fi
         working-directory: npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

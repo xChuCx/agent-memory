@@ -5,6 +5,14 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] — 2026-09-06
+
+### Fixed
+
+- **CI/CD Test Errcheck & NPM Idempotency.**
+  - Wrapped test file writes in `internal/cli/vtp_test.go` with `mustWriteTestFile` and checked `json.Marshal` errors for full `golangci-lint` `errcheck` compliance.
+  - Added idempotency detection to `.github/workflows/release.yml` for npm publishing, skipping re-publishing cleanly if the package version is already registered.
+
 ## [0.5.3] — 2026-09-06
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "@xchucx/agent-memory",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Git-native project memory for AI coding agents (MCP server + CLI). Thin launcher that fetches the prebuilt agent-memory binary.",
   "mcpName": "io.github.xChuCx/agent-memory",
   "bin": {

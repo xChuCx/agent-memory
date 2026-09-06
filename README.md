@@ -60,7 +60,7 @@ agent-memory is the *durable, searchable, reviewed knowledge* behind it.
 
 ## Status
 
-**Release 0.5.3** — the **Verifiable Task Protocol (VTP-1) & Swarm Consensus** release:
+**Release 0.5.4** — the **Verifiable Task Protocol (VTP-1) & Swarm Consensus** release:
 bridges durable memory with verifiable autonomous multi-agent execution. Agents in a swarm
 no longer rely on unverified claims; work is proven by machine-executable receipts,
 CRLF-invariant SHA-256 Merkle roots, and independent dual-oracle verification.
