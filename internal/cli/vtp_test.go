@@ -11,12 +11,17 @@ import (
 	"github.com/xChuCx/agent-memory/internal/vtp"
 )
 
+func mustWriteTestFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write test file %s: %v", path, err)
+	}
+}
+
 func TestCLIVTP_Digest(t *testing.T) {
 	tmpDir := t.TempDir()
 	sampleFile := filepath.Join(tmpDir, "sample.txt")
-	if err := os.WriteFile(sampleFile, []byte("hello world\r\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustWriteTestFile(t, sampleFile, []byte("hello world\r\n"))
 
 	root := NewRootCmd()
 	var out bytes.Buffer
@@ -48,9 +53,12 @@ func TestCLIVTP_VerifyAndSettle(t *testing.T) {
 		Bounty:   vtp.BountySpec{Currency: "GRN", Amount: 1},
 		Oracle:   vtp.OracleSpec{Type: "execution@1"},
 	}
-	specBytes, _ := json.Marshal(spec)
+	specBytes, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
 	specFile := filepath.Join(tmpDir, "spec.json")
-	os.WriteFile(specFile, specBytes, 0o644)
+	mustWriteTestFile(t, specFile, specBytes)
 
 	stdoutData := []byte("PASS: all tests ok\n")
 	diffData := []byte("diff --git a/test b/test\n")
@@ -67,15 +75,18 @@ func TestCLIVTP_VerifyAndSettle(t *testing.T) {
 		},
 		IdempotencyKey: "test-idem-001",
 	}
-	receiptBytes, _ := json.Marshal(receipt)
+	receiptBytes, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatalf("marshal receipt: %v", err)
+	}
 	receiptFile := filepath.Join(tmpDir, "receipt.json")
-	os.WriteFile(receiptFile, receiptBytes, 0o644)
+	mustWriteTestFile(t, receiptFile, receiptBytes)
 
 	stdoutFile := filepath.Join(tmpDir, "stdout.txt")
-	os.WriteFile(stdoutFile, stdoutData, 0o644)
+	mustWriteTestFile(t, stdoutFile, stdoutData)
 
 	diffFile := filepath.Join(tmpDir, "diff.patch")
-	os.WriteFile(diffFile, diffData, 0o644)
+	mustWriteTestFile(t, diffFile, diffData)
 
 	// 1. Verify with disjoint=true
 	rootVerify := NewRootCmd()
@@ -108,7 +119,7 @@ func TestCLIVTP_VerifyAndSettle(t *testing.T) {
 	}
 
 	verifyFile := filepath.Join(tmpDir, "verify.json")
-	os.WriteFile(verifyFile, verifyOut.Bytes(), 0o644)
+	mustWriteTestFile(t, verifyFile, verifyOut.Bytes())
 
 	// 2. Settle
 	rootSettle := NewRootCmd()
@@ -146,9 +157,12 @@ func TestCLIVTP_ClauseBFailure(t *testing.T) {
 		Bounty:   vtp.BountySpec{Currency: "GRN", Amount: 1},
 		Oracle:   vtp.OracleSpec{Type: "execution@1"},
 	}
-	specBytes, _ := json.Marshal(spec)
+	specBytes, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
 	specFile := filepath.Join(tmpDir, "spec.json")
-	os.WriteFile(specFile, specBytes, 0o644)
+	mustWriteTestFile(t, specFile, specBytes)
 
 	receipt := vtp.TaskReceipt{
 		Protocol:       vtp.ProtocolVersion,
@@ -157,9 +171,12 @@ func TestCLIVTP_ClauseBFailure(t *testing.T) {
 		Worker:         "@worker",
 		IdempotencyKey: "idem-b",
 	}
-	receiptBytes, _ := json.Marshal(receipt)
+	receiptBytes, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatalf("marshal receipt: %v", err)
+	}
 	receiptFile := filepath.Join(tmpDir, "receipt.json")
-	os.WriteFile(receiptFile, receiptBytes, 0o644)
+	mustWriteTestFile(t, receiptFile, receiptBytes)
 
 	// Verify WITHOUT --disjoint
 	rootVerify := NewRootCmd()
@@ -178,7 +195,7 @@ func TestCLIVTP_ClauseBFailure(t *testing.T) {
 	}
 
 	verifyFile := filepath.Join(tmpDir, "verify_same_seat.json")
-	os.WriteFile(verifyFile, verifyOut.Bytes(), 0o644)
+	mustWriteTestFile(t, verifyFile, verifyOut.Bytes())
 
 	// Attempt settle -> must fail due to Clause B
 	rootSettle := NewRootCmd()
@@ -193,7 +210,7 @@ func TestCLIVTP_ClauseBFailure(t *testing.T) {
 		"--seq", "14551",
 	})
 
-	err := rootSettle.Execute()
+	err = rootSettle.Execute()
 	if err == nil {
 		t.Fatalf("expected settle error for non-disjoint seat, got nil")
 	}
