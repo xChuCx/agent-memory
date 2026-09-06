@@ -106,6 +106,7 @@ README and ROADMAP.md for the bigger picture.`,
 	root.AddCommand(NewMergeDriverCmd())
 	root.AddCommand(NewStoreCmd())
 	root.AddCommand(NewSyncCmd())
+	root.AddCommand(NewDigestCmd())
 
 	return root
 }
