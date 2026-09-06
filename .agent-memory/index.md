@@ -3,7 +3,6 @@
 
 ## Always include
 - local/current.<branch>.md — current local task state
-- local/current.shared.md — cross-branch shared state
 - conventions.md — build, test, style, workflow rules
 
 ## Topic map

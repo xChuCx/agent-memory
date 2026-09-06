@@ -1,0 +1,7 @@
+version: 1
+stores:
+    arch-wiki:
+        source: i:/TestProj/arch-wiki
+        resolved_commit: 3ee14ab47e309999dc618851620908fa86b199eb
+        resolved_at: "2026-09-06T13:50:58Z"
+        store_path: .agent-memory
