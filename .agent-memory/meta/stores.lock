@@ -1,7 +1,7 @@
 version: 1
 stores:
     arch-wiki:
-        source: i:/TestProj/arch-wiki
+        source: https://github.com/xChuCx/arch-wiki
         resolved_commit: f4c6b145e8b6c679e6ad6df5cfded8cb2c3d5445
-        resolved_at: "2026-09-06T14:05:29Z"
+        resolved_at: "2026-09-06T14:08:35Z"
         store_path: .agent-memory

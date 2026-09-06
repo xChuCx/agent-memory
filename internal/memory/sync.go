@@ -140,8 +140,9 @@ func syncOneStore(ctx context.Context, deps SyncDeps, st config.Store, cacheRoot
 	staging := filepath.Join(cacheRoot, st.Name+".tmp")
 	_ = os.RemoveAll(staging)
 
-	localExists := agentfs.PathExists(st.Source)
-	useGit := !localExists || git.IsWorkTree(st.Source)
+	isRemote := strings.Contains(st.Source, "://") || strings.HasPrefix(st.Source, "git@")
+	localExists := !isRemote && agentfs.PathExists(st.Source)
+	useGit := isRemote || !localExists || git.IsWorkTree(st.Source)
 
 	if !useGit && st.Revision != "" {
 		res.Err = fmt.Errorf("revision %q is set but source %q is a local non-git path (unlocked; pin a git source instead)",

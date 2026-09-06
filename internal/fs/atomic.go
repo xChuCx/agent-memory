@@ -11,7 +11,6 @@ package fs
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -120,8 +119,5 @@ func syncDir(dir string) {
 // PathExists is a small convenience used by callers and tests.
 func PathExists(path string) bool {
 	_, err := os.Stat(path)
-	if err == nil {
-		return true
-	}
-	return !errors.Is(err, os.ErrNotExist)
+	return err == nil
 }

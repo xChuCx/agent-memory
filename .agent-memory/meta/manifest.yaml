@@ -49,4 +49,4 @@ sessions:
     per_branch: false
 stores:
     - name: arch-wiki
-      source: i:/TestProj/arch-wiki
+      source: https://github.com/xChuCx/arch-wiki
