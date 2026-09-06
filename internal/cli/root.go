@@ -107,6 +107,7 @@ README and ROADMAP.md for the bigger picture.`,
 	root.AddCommand(NewStoreCmd())
 	root.AddCommand(NewSyncCmd())
 	root.AddCommand(NewDigestCmd())
+	root.AddCommand(NewVTPCmd())
 
 	return root
 }
