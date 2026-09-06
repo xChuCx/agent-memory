@@ -5,6 +5,27 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] — 2026-09-06
+
+### Added
+
+- **`agent-memory digest` — Deterministic SHA-256 Merkle root.** Computes a
+  canonical, cross-platform deterministic Merkle root across all active durable
+  memory files (`conventions.md`, `decisions.md`, `index.md`, `pitfalls.md`,
+  and `modules/*.md`). Excludes ephemeral state (`staging/`, `local/`, `sessions/`,
+  `archive/`, `meta/`).
+  - **CRLF Invariance:** Normalizes `\r\n` to `\n` before hashing, guaranteeing
+    identical Merkle roots across Windows, macOS, and Linux checkouts.
+  - **Pairwise Merkle Construction:** Builds a canonical binary SHA-256 Merkle
+    tree ($P_j = \text{sha256}(L_{2j} \mathbin{\Vert} L_{2j+1})$) matching Swarm
+    consensus and VTP-1 task verification standards.
+  - **CLI Flags:** `--verify <sha256>` (asserts state and exits 0 on match, non-zero
+    on mismatch) and `--json` (emits `agent_memory_digest/1` structured JSON).
+  - **VTP-1 Protocol Integration:** Allows autonomous agents executing verifiable
+    tasks to bind cryptographic memory receipts (`memory_digest=<sha256_root>`)
+    into settlement payloads.
+  - Pattern documentation in [docs/patterns/merkle-digest.md](docs/patterns/merkle-digest.md).
+
 ## [0.5.1] — 2026-06-09
 
 ### Fixed
