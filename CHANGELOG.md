@@ -5,6 +5,31 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] — 2026-09-06
+
+### Added
+
+- **Verifiable Task Protocol (VTP/1.0) Engine (`internal/vtp`).** Ships the canonical,
+  deterministic task lifecycle engine for autonomous multi-agent swarms:
+  - **5-Phase Contract Lifecycle:** Explicit Go structures for `TaskSpec` (Phase 1, requirements & dual oracle),
+    `TaskClaim` (Phase 2, worker idempotency key & sequence TTL), `TaskReceipt` (Phase 3, execution proof & digests),
+    `TaskVerify` (Phase 4, independent verification & Clause B assertion), and `TaskSettle` (Phase 5, economic settlement payload).
+  - **SAR-002 Cross-Platform Line-Ending Normalization:** Canonical `NormalizeLF` strips `\r\n` to `\n` before SHA-256 computation,
+    ensuring byte-for-byte digest parity across Windows NTFS, macOS, and Linux runners.
+  - **Workpool/0 Clause B Disjoint Seat Enforcement:** Hardware-grade verification rule requiring that task verification occurs
+    on an independent seat physically/logically isolated from the task executor (`is_disjoint_seat == true`). Settlement fails closed if Clause B is violated.
+  - **100% Test Coverage:** `TestVTP_FullLifecycle` and `TestVTP_Falsifiers` asserting both successful transitions and adversarial attacks (mismatched digests, non-zero exit codes, spec ID mismatches).
+
+- **`agent-memory vtp` CLI Subcommands (`internal/cli/vtp.go`).** Wires VTP-1 directly into the CLI surface:
+  - `agent-memory vtp digest <file> [--json]`: Computes canonical SAR-002 normalized SHA-256 digest of a target file.
+  - `agent-memory vtp verify --receipt <file> [--spec <file>] [--stdout <file>] [--diff <file>] [--verifier <id>] [--disjoint] [--json]`:
+    Parses a `TaskReceipt`, checks execution digests against captured stdout/diff, validates process exit code, asserts Clause B seat isolation, and emits a `TaskVerify` artifact.
+  - `agent-memory vtp settle --verify <file> [--spec <file>] --payer <p> --payee <w> --seq <n> [--json]`:
+    Emits a canonical `TaskSettle` settlement payload (for Grain consensus or escrow payout), rejecting any verification artifact that failed or lacked disjoint seat validation.
+  - Comprehensive CLI tests in `internal/cli/vtp_test.go` including `TestCLIVTP_ClauseBFailure`.
+
+- **Documentation & Layout Architecture.** Updated `README.md` layout mapping `internal/vtp/` and VTP CLI subcommands, with comprehensive architectural explanation of verifiable execution for autonomous swarms.
+
 ## [0.5.2] — 2026-09-06
 
 ### Added

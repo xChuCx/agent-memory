@@ -50,6 +50,7 @@ git-native, reviewable, secret-safe. The clip is reproducible:
 | Secret / PII scan on write | ✗ | ✗ | ~ varies | **✓** |
 | Team merge for concurrent edits | ✗ text conflicts | ✗ | ✗ | **✓ section merge driver** |
 | Runs fully local (no cloud) | ✓ | ✗ | ~ varies | **✓** |
+| Verifiable Task Protocol (VTP-1) & Machine Receipts | ✗ | ✗ | ✗ | **✓ 5-phase cryptographic lifecycle + Clause B disjoint seat** |
 
 These are general characterizations and the tools evolve fast — see something
 inaccurate? [Open an issue](https://github.com/xChuCx/agent-memory/issues) and
@@ -59,34 +60,25 @@ agent-memory is the *durable, searchable, reviewed knowledge* behind it.
 
 ## Status
 
-**Release 0.5** — the **federation** release: a repo can now reference shared,
-git-pinned, read-only "landscape" stores, so an agent designing a cross-service
-feature sees the surrounding system map — blended into `fetch_context` with
-per-store-fair ranking, provenance, and a trust boundary. Built behind an
-**opt-in invariant**: with no stores declared, behaviour is byte-for-byte the
-single-repo path.
+**Release 0.5.3** — the **Verifiable Task Protocol (VTP-1) & Swarm Consensus** release:
+bridges durable memory with verifiable autonomous multi-agent execution. Agents in a swarm
+no longer rely on unverified claims; work is proven by machine-executable receipts,
+CRLF-invariant SHA-256 Merkle roots, and independent dual-oracle verification.
 
-Federation (PR1–PR6):
+- **VTP-1 Protocol Engine (`internal/vtp`)** — 5-phase contract lifecycle (`TASK-SPEC`,
+  `TASK-CLAIM`, `TASK-RECEIPT`, `TASK-VERIFY`, `TASK-SETTLE`).
+- **SAR-002 LF Normalization** — Cross-platform byte-level digest parity across Windows NTFS,
+  macOS, and Linux runners (`\r\n` stripped before hashing).
+- **Workpool/0 Clause B Disjoint Seat Enforcement** — Verifications fail closed unless
+  executed on an isolated seat physically or logically distinct from the task worker.
+- **`agent-memory vtp` CLI** — `digest`, `verify`, and `settle` subcommands built into
+  the main binary.
+- **`agent-memory digest` (0.5.2)** — Deterministic SHA-256 Merkle root of active memory
+  for cryptographic state attestation.
 
-- **Store-format versioning** — a `store_format_version` with a fail-closed load
-  guard, so a too-new store is never misread.
-- **Referenced stores** — a manifest `stores` block + a committed, go.sum-style
-  `meta/stores.lock` pinning each store to an exact commit.
-- **`agent-memory sync`** — clone → validate → sandbox-copy (symlink-safe) →
-  secret/PII scan → atomic swap into the gitignored cache.
-- **Store-keyed index** — one FTS5 index holds local + every cached store
-  (`SearchPerStore`), migrated by rebuild-on-version-bump.
-- **Multi-store fetch** — per-store-fair merge + `priority_multiplier` +
-  cross-store dedup + provenance / trust-boundary rendering.
-- **Federation eval** — a deterministic, CI-guarded multi-store retrieval eval
-  (recall@5 with store-origin correctness; ranking + starvation guards).
-
-It builds on **0.4** (the team-and-launch release: section-aware git merge
-driver, an offline retrieval-quality eval at recall@5 0.98, Apache-2.0
-open-source packaging) and the unchanged Core Contract from v0.1.0 (MCP server,
-structured operations, drift-checked staging, secret scanning) — every release
-since has been additive. The behavioural eval harness remains the main deferred
-item — see [ROADMAP.md](ROADMAP.md).
+It builds on **0.5.0** (the **federation** release: referenced landscape stores, `meta/stores.lock`,
+`agent-memory sync`, multi-store FTS5 search) and **0.4** (team-and-launch release: section-aware git merge
+driver, offline retrieval-quality eval at recall@5 0.98, Apache-2.0 open-source packaging).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full changelist.
 
@@ -327,6 +319,20 @@ agent-memory sweep [--root DIR] [--ttl DURATION] [--dry-run] [--json]
         # Remove staged proposals past the manifest's staging.ttl_seconds.
         # Each removal also writes a ttl_expired entry to meta/rejection-log.jsonl.
 
+agent-memory vtp digest <file> [--json]
+        # Compute canonical SAR-002 LF-normalized SHA-256 digest of a target file.
+
+agent-memory vtp verify --receipt FILE [--spec FILE] [--stdout FILE]
+                        [--diff FILE] [--exit-code N] [--verifier ID]
+                        [--disjoint] [--json]
+        # Verify a TaskReceipt execution proof against stdout/diff digests, exit code,
+        # and enforce Workpool/0 Clause B (disjoint seat isolation).
+
+agent-memory vtp settle --verify FILE [--spec FILE] --payer ID --payee ID
+                        --seq N [--json]
+        # Emit a canonical TaskSettle artifact from a passed verification, enforcing
+        # that Clause B disjoint verification was satisfied.
+
 agent-memory version
         # Print binary version and exit.
 ```
@@ -374,6 +380,46 @@ read-only from a consuming repo in this release — edits happen in the landscap
 repo via its own `propose` → review. Patterns:
 [federation-stores.md](docs/patterns/federation-stores.md),
 [multi-store-fetch.md](docs/patterns/multi-store-fetch.md).
+
+## Verifiable Task Protocol (VTP-1) & Swarm Consensus
+
+Autonomous AI agents operating in multi-agent swarms or executing economic tasks cannot rely on unverified natural language claims ("I fixed the bug", "the tests pass"). In an open network, conversational claims suffer from **compaction amnesia**, **courtesy loops**, and **adversarial framing**.
+
+**VTP-1 (Verifiable Task Protocol)** transforms task execution into an end-to-end, machine-verifiable 5-phase cryptographic lifecycle:
+
+```
+[TASK-SPEC] ──> [TASK-CLAIM] ──> [TASK-RECEIPT] ──> [TASK-VERIFY] ──> [TASK-SETTLE]
+ Creator         Worker           Worker             Independent      Dual-Oracle
+ Bounty/Oracle   TTL/IdemKey      Stdout/Diff SHA    Disjoint Seat    Payout / Mint
+```
+
+| Phase | Structure | Role & Machine Invariants |
+|---|---|---|
+| **Phase 1: SPEC** | `TaskSpec` | Declarative requirements, oracle type (`execution@1`, `rule_kb@1`), target repo/commit, and bounty. |
+| **Phase 2: CLAIM** | `TaskClaim` | Worker stakes an idempotency key and sequence-based TTL preventing concurrent race conditions. |
+| **Phase 3: RECEIPT** | `TaskReceipt` | Deterministic execution proof capturing CRLF-normalized (SAR-002) SHA-256 digests of stdout, diff hunks, and process exit code. |
+| **Phase 4: VERIFY** | `TaskVerify` | Independent evaluation enforcing **Workpool/0 Clause B** (`is_disjoint_seat == true`): verification **must** execute on an isolated machine/seat (e.g. keyless sandbox vs host with secrets). |
+| **Phase 5: SETTLE** | `TaskSettle` | Deterministic settlement payload bound to the verified receipt reference for ledger minting (e.g. Grain consensus) or escrow release. |
+
+### Cross-Platform Line Ending Parity (SAR-002)
+
+Git checkouts across Windows (CRLF) and Linux/macOS (LF) can produce divergent hashes for identical textual content. The VTP-1 engine applies canonical LF normalization (`NormalizeLF`) before computing SHA-256 digests across stdout, patch hunks, and memory Merkle leaves, ensuring byte-level consensus across heterogeneous platforms.
+
+### CLI Workflow for Autonomous Agents
+
+```bash
+# 1. Compute canonical normalized digest for an output log or diff patch
+agent-memory vtp digest ./artifacts/stdout.log --json
+
+# 2. Verify a worker's TaskReceipt against live execution output
+agent-memory vtp verify --receipt receipt.json --spec spec.json \
+                        --stdout stdout.log --diff patch.diff \
+                        --verifier @orca-agent --disjoint --json > verify.json
+
+# 3. Settle verified task into a settlement artifact (fails closed if Clause B violated)
+agent-memory vtp settle --verify verify.json --spec spec.json \
+                        --payer @creator --payee @worker --seq 14500 --json > settle.json
+```
 
 ## Evidence (measured)
 
@@ -453,27 +499,32 @@ each adapter just wraps it in the runtime's native format.
 ## Layout
 
 ```
-cmd/agent-memory/                       CLI entry point
+cmd/agent-memory/                       CLI and MCP binary entry point
 internal/
-  adapters/claude/                      embedded SKILL.md + Install()
-  cli/                                  cobra subcommands
-  config/ schema/                       YAML loaders (manifest + schema)
-  e2e/                                  release-0.1 smoke test (-tags=e2e)
-  fs/                                   atomic writes, path validation
-  git/                                  branch resolver
-  index/                                FTS5 incremental index
-  lock/                                 flock-based advisory lock
-  markdown/                             byte-preserving Markdown engine
-  mcp/                                  stdio MCP server
-  memory/                               operations, security, orchestrator, staging
-spikes/                                 pre-M1 spike investigations (S1-S4)
+  adapters/                             agent runtime adapters (Claude, Cursor, Codex, Gemini)
+  bench/                                retrieval & FTS5 benchmark harness
+  cli/                                  cobra subcommands (init, fetch, propose, digest, vtp, etc.)
+  config/ schema/                       YAML loaders (manifest.yaml + schema.yaml)
+  e2e/                                  release smoke test suite (-tags=e2e)
+  eval/                                 offline retrieval and continuity benchmarks
+  fs/                                   atomic file swap and path sanitization
+  git/                                  branch resolution and repo inspection
+  index/                                FTS5 incremental shadow index
+  lock/                                 flock-based cross-process advisory lock
+  logging/                              structured slog logging with level filtering
+  markdown/                             byte-preserving section-level Markdown engine
+  mcp/                                  stdio JSON-RPC 2.0 Model Context Protocol server
+  memory/                               operations, staging pipeline, security scanner, Merkle tree
+  vtp/                                  Verifiable Task Protocol (VTP-1) engine & Clause B verifier
+spikes/                                 pre-M1 architectural spikes (S1-S4)
 docs/
-  patterns/                             design patterns
-  spikes/                               spike outcome docs
-.github/workflows/ci.yml                CI: tests + e2e + lint
-agent-memory-design-doc-v0.4.1.md       canonical design
-agent-memory-implementation-plan.md     build plan
-CHANGELOG.md                            per-release feature list
+  patterns/                             reusable architecture patterns (SAR, Merkle, federation)
+  eval/                                 retrieval and continuity benchmark methods and logs
+  spikes/                               spike outcome write-ups
+.github/workflows/                      CI & CD release workflows (goreleaser)
+agent-memory-design-doc-v0.4.1.md       canonical design specification
+agent-memory-implementation-plan.md     MVP and federation build log
+CHANGELOG.md                            per-release feature list and upgrade notes
 ```
 
 ## Releases
