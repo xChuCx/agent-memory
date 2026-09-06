@@ -258,6 +258,10 @@ agent-memory status [--root DIR] [--json]
 agent-memory doctor [--root DIR]
         # Diagnostic layout checks. Advisory; exits 0 even with findings.
 
+agent-memory digest [--root DIR] [--verify SHA256] [--json]
+        # Compute or verify deterministic SHA-256 Merkle root of active memory.
+        # CRLF-normalized; cryptographic receipt for VTP-1 or swarm audit.
+
 agent-memory fetch [QUERY] [--scope X,Y] [--budget N]
                    [--exclude-archive] [--json] [--root DIR]
         # Return a budgeted Markdown context pack.
