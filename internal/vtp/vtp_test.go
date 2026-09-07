@@ -291,7 +291,15 @@ func TestVTP_HermeticityFastPathGating(t *testing.T) {
 		Oracle:   OracleSpec{Type: "execution@1", Hermetic: true},
 	}
 
-	// 1. Verified Hermetic execution (worker claims hermetic + provides valid sandbox attestation)
+	trustedIssuer := "runner-enclave-v1"
+	approvedPolicy := "sha256:hermetic-sandbox-policy-v1"
+	validImage := "docker.io/library/alpine@sha256:e1c0d"
+	validInput := "sha256:input-files-v1"
+	allowedCaps := []string{"CAP_SYS_RESOURCE"}
+
+	validSig := ComputeAttestationDigest(spec.TaskID, approvedPolicy, validImage, validInput, allowedCaps)
+
+	// Case (c): Valid attestation + allowlisted policy + trusted issuer over exact bound tuple -> VERIFIED_HERMETIC
 	recVerified := &TaskReceipt{
 		Protocol: ProtocolVersion,
 		TaskID:   spec.TaskID,
@@ -300,8 +308,12 @@ func TestVTP_HermeticityFastPathGating(t *testing.T) {
 			ExitCode: 0,
 			Hermetic: true,
 			Sandbox: &SandboxAttestation{
-				PolicyDigest: "sha256:hermetic-sandbox-policy-v1",
-				RuntimeImage: "docker.io/library/alpine@sha256:e1c0d",
+				Issuer:       trustedIssuer,
+				PolicyDigest: approvedPolicy,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				Signature:    validSig,
 			},
 		},
 	}
@@ -316,25 +328,67 @@ func TestVTP_HermeticityFastPathGating(t *testing.T) {
 		t.Fatalf("expected CanFastPathCache=true for VERIFIED_HERMETIC PASS")
 	}
 
-	// 2. Unattested Hermetic claim (second-thought audit #22345: worker self-declares hermetic=true without attestation)
-	recUnattested := &TaskReceipt{
+	// Case (a): Hermetic=true + arbitrary unapproved policy digest -> UNKNOWN (second-thought audit #22398)
+	bogusSig := ComputeAttestationDigest(spec.TaskID, "sha256:arbitrary-bogus-policy", validImage, validInput, allowedCaps)
+	recBogusPolicy := &TaskReceipt{
 		Protocol:  ProtocolVersion,
 		TaskID:    spec.TaskID,
 		Worker:    "worker-node",
-		Execution: ExecutionReceipt{ExitCode: 0, Hermetic: true}, // No sandbox attestation
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				PolicyDigest: "sha256:arbitrary-bogus-policy", // Not on verifier allowlist
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				Signature:    bogusSig,
+			},
+		},
 	}
-	vUnattested, err := VerifyReceipt(spec, recUnattested, []byte(""), []byte(""), 0, "verifier-node")
+	vBogus, err := VerifyReceipt(spec, recBogusPolicy, []byte(""), []byte(""), 0, "verifier-node")
 	if err != nil {
 		t.Fatalf("unexpected verify error: %v", err)
 	}
-	if vUnattested.HermeticityStatus != HermeticStatusUnknown || vUnattested.IsHermetic {
-		t.Fatalf("expected UNKNOWN for unattested claim, got %s (is_hermetic=%v)", vUnattested.HermeticityStatus, vUnattested.IsHermetic)
+	if vBogus.HermeticityStatus != HermeticStatusUnknown || vBogus.IsHermetic {
+		t.Fatalf("expected UNKNOWN for unapproved policy, got %s", vBogus.HermeticityStatus)
 	}
-	if CanFastPathCache(vUnattested) {
-		t.Fatalf("expected CanFastPathCache=FALSE for unattested UNKNOWN hermeticity")
+	if CanFastPathCache(vBogus) {
+		t.Fatalf("expected CanFastPathCache=FALSE for unapproved policy")
 	}
 
-	// 3. Declared Non-hermetic execution receipt
+	// Case (b): Valid signature but for mismatched image/input -> UNKNOWN
+	tamperedSig := ComputeAttestationDigest("other-task-id", approvedPolicy, validImage, validInput, allowedCaps)
+	recMismatched := &TaskReceipt{
+		Protocol:  ProtocolVersion,
+		TaskID:    spec.TaskID,
+		Worker:    "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				PolicyDigest: approvedPolicy,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				Signature:    tamperedSig, // Bound to other-task-id!
+			},
+		},
+	}
+	vMismatched, err := VerifyReceipt(spec, recMismatched, []byte(""), []byte(""), 0, "verifier-node")
+	if err != nil {
+		t.Fatalf("unexpected verify error: %v", err)
+	}
+	if vMismatched.HermeticityStatus != HermeticStatusUnknown || vMismatched.IsHermetic {
+		t.Fatalf("expected UNKNOWN for mismatched attestation signature, got %s", vMismatched.HermeticityStatus)
+	}
+	if CanFastPathCache(vMismatched) {
+		t.Fatalf("expected CanFastPathCache=FALSE for mismatched attestation signature")
+	}
+
+	// Case (d): Declared Non-hermetic execution receipt -> DECLARED_NON_HERMETIC
 	recNonHermetic := &TaskReceipt{
 		Protocol:  ProtocolVersion,
 		TaskID:    spec.TaskID,

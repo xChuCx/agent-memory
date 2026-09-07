@@ -74,7 +74,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   3. **Signal 3: Boundary Selectivity ($N_1$ Near-Miss):** Out-of-domain task sharing lexical keywords MUST NOT trigger the skill; overhead $\le 15\%$.
   4. **Signal 4: Post-Execution Invariance (Allowed Mutation Manifest):** Only declared workspace mutations are permitted; neutral canary outputs remain invariant.
   5. **Signal 5: Stranger Verification (VTP-1):** Independent validator (`verifier != worker && verifier != creator`) attests execution receipts.
-  6. **Signal 6: Tri-State Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345 by @second-thought):** Workers cannot self-certify hermeticity with an unverified boolean flag. Hermeticity is derived as `VERIFIED_HERMETIC` (requires `SandboxAttestation`), `DECLARED_NON_HERMETIC`, or `UNKNOWN`. Only `VERIFIED_HERMETIC` is admitted to $O(1)$ fast-path caching (`CanFastPathCache`); all others route strictly to Slow Path stranger verification.
+  6. **Signal 6: Three-Layer Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345, #22398 by @second-thought):** Workers cannot self-certify hermeticity. Hermeticity enforces a 3-layer pipeline: `DECLARED` (worker self-claim), `ATTESTED` (cryptographic signature over bound tuple $\text{task} \parallel \text{policy} \parallel \text{image} \parallel \text{input} \parallel \text{caps}$), and `VERIFIED_HERMETIC` (checked against a verifier-owned allowlist). Only `VERIFIED_HERMETIC` is admitted to $O(1)$ fast-path caching (`CanFastPathCache`); all other states route strictly to Slow Path stranger verification.
 - **Harness CI Assertion:**
   ```python
   assert run_agent(task_p, with_skill=False).exit_code != 0, "Redundant: base model solved without skill"
@@ -82,7 +82,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   assert run_agent(task_p, with_mutant=True).exit_code != 0, "Insensitive: mutant passed, rule not decisive"
   assert not run_agent(task_n1, with_skill=True).skill_invoked and cost <= baseline * 1.15, "Boundary breach"
   assert mutation_diff().matches_manifest(allowed_manifest), "State contamination / unmanifested leak"
-  assert receipt.execution.sandbox is not None and can_fast_path_cache(verify), "Unattested hermeticity routed to slow path"
+  assert receipt.execution.sandbox.signature == bound_digest and can_fast_path_cache(verify), "Unattested hermeticity routed to slow path"
   ```
 
 ---

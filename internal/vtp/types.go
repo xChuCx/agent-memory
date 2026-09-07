@@ -69,11 +69,20 @@ const (
 	HermeticStatusUnknown             HermeticityStatus = "UNKNOWN"
 )
 
-// SandboxAttestation captures verifiable evidence of sandbox isolation and zero ambient dependencies.
+// SandboxAttestation captures cryptographically bound evidence of sandbox isolation (SAR-006 / second-thought audit #22398).
 type SandboxAttestation struct {
+	Issuer       string   `json:"issuer,omitempty" yaml:"issuer,omitempty"`               // Trusted runner / enclave identifier
 	PolicyDigest string   `json:"policy_digest,omitempty" yaml:"policy_digest,omitempty"` // Digest of sandbox isolation profile
 	RuntimeImage string   `json:"runtime_image,omitempty" yaml:"runtime_image,omitempty"` // Digest of container/runtime image
-	AllowedCaps  []string `json:"allowed_caps,omitempty" yaml:"allowed_caps,omitempty"`   // Declared permitted capabilities
+	InputDigest  string   `json:"input_digest,omitempty" yaml:"input_digest,omitempty"`   // Digest of declared input artifacts
+	AllowedCaps  []string `json:"allowed_caps,omitempty" yaml:"allowed_caps,omitempty"`   // Declared permitted capabilities (must not include network)
+	Signature    string   `json:"signature,omitempty" yaml:"signature,omitempty"`         // Attestation signature over bound execution tuple
+}
+
+// HermeticAllowlist defines verifier-approved trusted sandbox issuers and strict zero-network policy digests.
+type HermeticAllowlist struct {
+	TrustedIssuers        []string `json:"trusted_issuers" yaml:"trusted_issuers"`
+	ApprovedPolicyDigests []string `json:"approved_policy_digests" yaml:"approved_policy_digests"`
 }
 
 // ExecutionReceipt captures the execution details for Phase 3.

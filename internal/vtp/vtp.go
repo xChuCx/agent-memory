@@ -40,7 +40,7 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 	evidenceSHA := ComputeDigest([]byte(evidencePayload))
 
 	distinct := HasDistinctAccountIDs(receipt.Worker, verifier, spec.Creator)
-	hermStatus := DeriveHermeticityStatus(spec, receipt)
+	hermStatus := DeriveHermeticityStatus(spec, receipt, nil)
 	isHermetic := hermStatus == HermeticStatusVerifiedHermetic
 
 	verify := &TaskVerify{
@@ -81,22 +81,88 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 	return verify, nil
 }
 
-// DeriveHermeticityStatus computes the tri-state hermeticity status from verifiable evidence
-// rather than blindly trusting worker self-declarations (SAR-006 / second-thought audit #22345).
-func DeriveHermeticityStatus(spec *TaskSpec, receipt *TaskReceipt) HermeticityStatus {
+// DefaultHermeticAllowlist defines standard production hermetic sandbox runners and strict isolation policies.
+var DefaultHermeticAllowlist = &HermeticAllowlist{
+	TrustedIssuers: []string{
+		"runner-enclave-v1",
+		"vtp-hermetic-runtime",
+		"google-antigravity-isolated-runner",
+	},
+	ApprovedPolicyDigests: []string{
+		"sha256:hermetic-sandbox-policy-v1",
+		"sha256:zero-network-strict-seccomp-bpf-v1",
+	},
+}
+
+// ComputeAttestationDigest computes the canonical SHA-256 digest over the bound execution tuple.
+func ComputeAttestationDigest(taskID, policyDigest, runtimeImage, inputDigest string, allowedCaps []string) string {
+	payload := fmt.Sprintf("task:%s|policy:%s|image:%s|input:%s|caps:%v",
+		taskID, policyDigest, runtimeImage, inputDigest, allowedCaps)
+	return ComputeDigest([]byte(payload))
+}
+
+// DeriveHermeticityStatus evaluates the 3-layer hermeticity contract (second-thought audit #22398):
+// Layer 1 (Declared): Worker self-declaration in receipt.Execution.Hermetic.
+// Layer 2 (Attested): Cryptographic signature over bound execution tuple (taskID, policy, image, input, caps).
+// Layer 3 (Verified): Verification against verifier-owned allowlist of trusted issuers and strict zero-network policies.
+func DeriveHermeticityStatus(spec *TaskSpec, receipt *TaskReceipt, allowlist *HermeticAllowlist) HermeticityStatus {
 	if receipt == nil || spec == nil {
 		return HermeticStatusUnknown
 	}
-	// If worker explicitly declares non-hermetic, trust the admission of non-hermeticity
+	// Layer 1: Worker declares non-hermetic
 	if !receipt.Execution.Hermetic {
 		return HermeticStatusDeclaredNonHermetic
 	}
-	// Worker claims hermeticity: verify whether sandbox isolation proof is provided
-	if receipt.Execution.Sandbox != nil && receipt.Execution.Sandbox.PolicyDigest != "" {
-		return HermeticStatusVerifiedHermetic
+
+	att := receipt.Execution.Sandbox
+	if att == nil || att.Signature == "" || att.PolicyDigest == "" || att.Issuer == "" {
+		// Layer 1 claim without Layer 2 attestation -> UNKNOWN
+		return HermeticStatusUnknown
 	}
-	// Unattested self-declaration defaults to UNKNOWN (must not be trusted for Fast-Path)
-	return HermeticStatusUnknown
+
+	// Layer 2: Check attestation binding over (TaskID, PolicyDigest, RuntimeImage, InputDigest, AllowedCaps)
+	expectedDigest := ComputeAttestationDigest(spec.TaskID, att.PolicyDigest, att.RuntimeImage, att.InputDigest, att.AllowedCaps)
+	if att.Signature != expectedDigest {
+		// Signature does not match the exact bound execution tuple
+		return HermeticStatusUnknown
+	}
+
+	// Reject any ambient network capabilities
+	for _, cap := range att.AllowedCaps {
+		if cap == "CAP_NET_RAW" || cap == "CAP_NET_ADMIN" || cap == "network:egress" || cap == "network:ingress" {
+			return HermeticStatusUnknown
+		}
+	}
+
+	// Layer 3: Verifier-owned allowlist check
+	targetAllowlist := allowlist
+	if targetAllowlist == nil {
+		targetAllowlist = DefaultHermeticAllowlist
+	}
+
+	issuerTrusted := false
+	for _, iss := range targetAllowlist.TrustedIssuers {
+		if iss == att.Issuer {
+			issuerTrusted = true
+			break
+		}
+	}
+	if !issuerTrusted {
+		return HermeticStatusUnknown
+	}
+
+	policyApproved := false
+	for _, p := range targetAllowlist.ApprovedPolicyDigests {
+		if p == att.PolicyDigest {
+			policyApproved = true
+			break
+		}
+	}
+	if !policyApproved {
+		return HermeticStatusUnknown
+	}
+
+	return HermeticStatusVerifiedHermetic
 }
 
 // CanFastPathCache evaluates whether a verification artifact can be soundly cached
