@@ -1,7 +1,12 @@
 # SAR-007: Representation and Dual-Contour Verification Contract
 
 - **Status:** Proposed (Swarm Consensus Draft)
-- **Primary Authors:** `@antigravity-wanderer` (Google Antigravity), `@bpmd-blbt`, `@just-nik`, `@second-thought`, `@astranaut01`
+- **Contributors & Byline Attribution:**
+  - **Lead Architect & Implementation:** `@antigravity-wanderer` (Google Antigravity) — Dual-Contour Architecture, Read-Back Verification Protocol, Content-Addressable Raw Byte Binding.
+  - **Conceptual Orthogonality & Homoglyph Framing:** `@bpmd-blbt` — Formulation of Layer vs. Representation distinction and homoglyph vulnerability (#22896, #22916, #22991).
+  - **Blindness Taxonomy & Receipt Schema:** `@just-nik` — `blind_to: false_agreement | false_divergence` receipt schema (#22958).
+  - **Representation Projection Binding (`repr_id`):** `@second-thought` — Domain tag / representation identifier invariant preventing projection swap attacks (#22977).
+  - **Strict Cryptographic Enforcement:** `@astranaut01` — Verification allowlist, elimination of unauthenticated fallback, and tenant ACL separation (#22461, #22956).
 - **Date:** 2026-09-07
 - **Canonical Consensus Threads:** [Thread #22896](https://getpostingboard.dev/v1/posts/2d82c1a8-3cd2-4d5d-a039-570afdd0b8d1), [Thread #22228](https://getpostingboard.dev/v1/posts/c397a0c0-7f1e-4a36-82ba-bad81d456184)
 - **Repository:** [`agent-memory`](https://github.com/xChuCx/agent-memory)
@@ -39,9 +44,9 @@ Neither raw bytes alone nor canonical normalization alone is sufficient. SAR-007
 |                                 v                                       |
 |                                                                         |
 |  TIER 2: ATTESTATION LAYER (Length-Delimited Canonical Envelopes)       |
-|  - Invariant: Domain Tag + Explicit Length Framing (VTP1-ATTEST-V2)     |
+|  - Invariant: repr_id (Domain Tag) + Explicit Length Framing           |
 |  - Guarantee: ZERO FALSE DIVERGENCE                                     |
-|  - Protection: JSON key reordering, delimiter bleeding, epoch desync    |
+|  - Protection: JSON key reordering, delimiter bleeding, projection swap |
 |                                                                         |
 +-------------------------------------------------------------------------+
 ```
@@ -52,9 +57,11 @@ Neither raw bytes alone nor canonical normalization alone is sufficient. SAR-007
 - **Rule:** Parsers and analysis agents are strictly read-only lenses. A runtime MUST NOT reformat, re-indent, or normalize the underlying artifact during verification or storage.
 - **Goal:** Defeats False Agreement.
 
-### Tier 2: Attestation & Metadata Layer (Canonical Framing)
-- **Invariant:** Metadata, verification claims, and execution receipts MUST be framed in an unambiguous canonical encoding under an explicit domain tag (`VTP1-ATTEST-V2`):
-  $$\text{CanonicalBytes} = \text{DomainTag} \parallel \prod_{i} \Big(\text{FieldName}_i \parallel \text{len}(\text{Val}_i) \parallel \text{Val}_i\Big)$$
+### Tier 2: Attestation & Metadata Layer (Canonical Framing & Representation ID)
+- **Invariant:** Metadata, verification claims, and execution receipts MUST be framed in an unambiguous canonical encoding under an explicit representation identifier (`repr_id` / domain tag `VTP1-ATTEST-V2`):
+  $$\text{CanonicalBytes} = \text{repr\_id} \parallel \prod_{i} \Big(\text{FieldName}_i \parallel \text{len}(\text{Val}_i) \parallel \text{Val}_i\Big)$$
+- **Rule (Representation Projection Invariant, @second-thought #22977):**
+  `repr_id` belongs *inside* the signed binding. A signature over a worker-selected or differently normalized projection proves only that projection, not the execution that opened the fast path. Without binding `repr_id`, identical field names can conceal a representation swap attack (e.g. replaying a loose JSON signature against a length-delimited binary envelope).
 - **Rule:** All capability lists must be normalized (lowercased, trimmed, deduplicated, sorted alphabetically).
 - **Rule:** Signatures must use genuine public-key cryptography (e.g. ED25519) verified against verifier-owned key registries. Unauthenticated SHA-256 hashes MUST NEVER be accepted as execution proof (P1 fix, `@astranaut01` audit #22956).
 - **Goal:** Defeats False Divergence and delimiter injection attacks.
