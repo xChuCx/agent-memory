@@ -21,8 +21,9 @@ func ComputeDigest(b []byte) string {
 }
 
 // VerifyReceipt verifies a worker's TaskReceipt against live execution output and diffs.
-// It implements Workpool/0 Clause B (disjoint execution check) and SAR-002.
-func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDiff []byte, actualExitCode int, verifier string, isDisjoint bool) (*TaskVerify, error) {
+// It automatically derives account distinctness (HasDistinctAccountIDs) from authenticated IDs
+// and records operator independence as UNKNOWN unless backed by separate topological attestations.
+func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDiff []byte, actualExitCode int, verifier string) (*TaskVerify, error) {
 	if spec == nil || receipt == nil {
 		return nil, errors.New("spec and receipt must not be nil")
 	}
@@ -38,14 +39,22 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 		spec.TaskID, receipt.IdempotencyKey, actualStdoutSHA, actualDiffSHA, actualExitCode)
 	evidenceSHA := ComputeDigest([]byte(evidencePayload))
 
+	creator := ""
+	if spec != nil {
+		creator = spec.Creator
+	}
+	distinct := HasDistinctAccountIDs(receipt.Worker, verifier, creator)
+
 	verify := &TaskVerify{
-		Protocol:       ProtocolVersion,
-		Type:           "VERIFY",
-		TaskID:         spec.TaskID,
-		Verifier:       verifier,
-		OracleType:     spec.Oracle.Type,
-		EvidenceSHA256: evidenceSHA,
-		IsDisjointSeat: isDisjoint,
+		Protocol:             ProtocolVersion,
+		Type:                 "VERIFY",
+		TaskID:               spec.TaskID,
+		Verifier:             verifier,
+		OracleType:           spec.Oracle.Type,
+		EvidenceSHA256:       evidenceSHA,
+		DistinctAccountIDs:   distinct,
+		IsDisjointSeat:       distinct,
+		OperatorIndependence: "UNKNOWN",
 	}
 
 	// Exit code check
@@ -83,8 +92,8 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 	if verify.Verdict != "PASS" && verify.Verdict != "PARTIAL" {
 		return nil, fmt.Errorf("cannot settle unverified task, verdict was %s (%s)", verify.Verdict, verify.Basis)
 	}
-	if !verify.IsDisjointSeat {
-		return nil, errors.New("cannot settle without disjoint seat verification (Clause B)")
+	if !verify.DistinctAccountIDs && !verify.IsDisjointSeat {
+		return nil, errors.New("cannot settle without distinct authenticated accounts (Clause B)")
 	}
 
 	amount := spec.Bounty.Amount
@@ -108,12 +117,16 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 	}, nil
 }
 
-// DeriveDisjointSeat enforces Workpool/0 Clause B:
-// A seat is cryptographically disjoint if and only if the verifier's authenticated identity
-// is non-empty and distinct from both the worker who executed the task and the task creator.
-func DeriveDisjointSeat(workerID, verifierID, creatorID string) bool {
+// HasDistinctAccountIDs enforces anti-self-check by verifying that the verifier's authenticated
+// account ID is non-empty and strictly distinct from both the worker account and task creator.
+func HasDistinctAccountIDs(workerID, verifierID, creatorID string) bool {
 	if verifierID == "" || workerID == "" {
 		return false
 	}
 	return verifierID != workerID && (creatorID == "" || verifierID != creatorID)
+}
+
+// DeriveDisjointSeat is retained as an alias for HasDistinctAccountIDs for backwards compatibility.
+func DeriveDisjointSeat(workerID, verifierID, creatorID string) bool {
+	return HasDistinctAccountIDs(workerID, verifierID, creatorID)
 }

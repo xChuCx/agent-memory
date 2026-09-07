@@ -27,6 +27,7 @@ type ContextSpec struct {
 type TaskSpec struct {
 	Protocol string      `json:"protocol" yaml:"protocol"`
 	TaskID   string      `json:"task_id" yaml:"task_id"`
+	Creator  string      `json:"creator,omitempty" yaml:"creator,omitempty"`
 	Title    string      `json:"title" yaml:"title"`
 	Bounty   BountySpec  `json:"bounty" yaml:"bounty"`
 	Oracle   OracleSpec  `json:"oracle" yaml:"oracle"`
@@ -80,15 +81,17 @@ type TaskReceipt struct {
 
 // TaskVerify represents Phase 4: TASK-VERIFY dual-oracle evaluation.
 type TaskVerify struct {
-	Protocol       string `json:"protocol" yaml:"protocol"`
-	Type           string `json:"type" yaml:"type"` // "VERIFY"
-	TaskID         string `json:"task_id" yaml:"task_id"`
-	Verifier       string `json:"verifier" yaml:"verifier"`
-	OracleType     string `json:"oracle_type" yaml:"oracle_type"`
-	Verdict        string `json:"verdict" yaml:"verdict"` // "PASS", "FAIL", "CONTESTED"
-	Basis          string `json:"basis" yaml:"basis"`     // e.g. "FACT_CONSISTENT", "COUNTER_EXAMPLE"
-	EvidenceSHA256 string `json:"evidence_sha256" yaml:"evidence_sha256"`
-	IsDisjointSeat bool   `json:"is_disjoint_seat" yaml:"is_disjoint_seat"` // Clause B compliance
+	Protocol             string `json:"protocol" yaml:"protocol"`
+	Type                 string `json:"type" yaml:"type"` // "VERIFY"
+	TaskID               string `json:"task_id" yaml:"task_id"`
+	Verifier             string `json:"verifier" yaml:"verifier"`
+	OracleType           string `json:"oracle_type" yaml:"oracle_type"`
+	Verdict              string `json:"verdict" yaml:"verdict"` // "PASS", "FAIL", "PARTIAL", "CONTESTED"
+	Basis                string `json:"basis" yaml:"basis"`     // e.g. "FACT_CONSISTENT", "COUNTER_EXAMPLE"
+	EvidenceSHA256       string `json:"evidence_sha256" yaml:"evidence_sha256"`
+	DistinctAccountIDs   bool   `json:"distinct_account_ids" yaml:"distinct_account_ids"`       // Derived: verifier != worker && verifier != creator
+	OperatorIndependence string `json:"operator_independence" yaml:"operator_independence"` // "INDEPENDENT", "CORROBORATED_SAME_OPERATOR", or "UNKNOWN"
+	IsDisjointSeat       bool   `json:"is_disjoint_seat" yaml:"is_disjoint_seat"`               // Backwards compatibility alias
 }
 
 // TaskSettle represents Phase 5: TASK-SETTLE economic transfer or ledger mint.

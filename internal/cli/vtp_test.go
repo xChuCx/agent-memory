@@ -99,7 +99,6 @@ func TestCLIVTP_VerifyAndSettle(t *testing.T) {
 		"--stdout", stdoutFile,
 		"--diff", diffFile,
 		"--verifier", "@independent-verifier",
-		"--disjoint",
 		"--json",
 	})
 
@@ -114,8 +113,8 @@ func TestCLIVTP_VerifyAndSettle(t *testing.T) {
 	if verifyArtifact.Verdict != "PASS" {
 		t.Fatalf("expected PASS, got %s", verifyArtifact.Verdict)
 	}
-	if !verifyArtifact.IsDisjointSeat {
-		t.Fatalf("expected IsDisjointSeat to be true")
+	if !verifyArtifact.DistinctAccountIDs {
+		t.Fatalf("expected DistinctAccountIDs to be true")
 	}
 
 	verifyFile := filepath.Join(tmpDir, "verify.json")
@@ -129,22 +128,22 @@ func TestCLIVTP_VerifyAndSettle(t *testing.T) {
 		"vtp", "settle",
 		"--spec", specFile,
 		"--verify", verifyFile,
-		"--payer", "@payer-agent",
-		"--payee", "@test-worker",
-		"--seq", "14550",
+		"--payer", "@payer",
+		"--payee", "@worker",
+		"--seq", "14450",
 		"--json",
 	})
 
 	if err := rootSettle.Execute(); err != nil {
-		t.Fatalf("vtp settle command failed: %v", err)
+		t.Fatalf("settle command failed: %v", err)
 	}
 
 	var settleArtifact vtp.TaskSettle
 	if err := json.Unmarshal(settleOut.Bytes(), &settleArtifact); err != nil {
 		t.Fatalf("unmarshal settle artifact: %v", err)
 	}
-	if settleArtifact.Amount != 1 || settleArtifact.Payee != "@test-worker" {
-		t.Fatalf("unexpected settlement payload: %+v", settleArtifact)
+	if settleArtifact.Amount != 1 || settleArtifact.SettlementMethod != "GRN_TRANSFER" {
+		t.Fatalf("invalid settlement artifact: %+v", settleArtifact)
 	}
 }
 
@@ -154,8 +153,11 @@ func TestCLIVTP_ClauseBFailure(t *testing.T) {
 	spec := vtp.TaskSpec{
 		Protocol: vtp.ProtocolVersion,
 		TaskID:   "task-clause-b",
-		Bounty:   vtp.BountySpec{Currency: "GRN", Amount: 1},
-		Oracle:   vtp.OracleSpec{Type: "execution@1"},
+		Creator:  "@creator",
+		Bounty: vtp.BountySpec{
+			Currency: "GRN",
+			Amount:   1,
+		},
 	}
 	specBytes, err := json.Marshal(spec)
 	if err != nil {
@@ -178,7 +180,7 @@ func TestCLIVTP_ClauseBFailure(t *testing.T) {
 	receiptFile := filepath.Join(tmpDir, "receipt.json")
 	mustWriteTestFile(t, receiptFile, receiptBytes)
 
-	// Verify WITHOUT --disjoint
+	// Verify WITH self-verification (verifier == worker)
 	rootVerify := NewRootCmd()
 	var verifyOut bytes.Buffer
 	rootVerify.SetOut(&verifyOut)
@@ -186,7 +188,7 @@ func TestCLIVTP_ClauseBFailure(t *testing.T) {
 		"vtp", "verify",
 		"--spec", specFile,
 		"--receipt", receiptFile,
-		"--verifier", "@same-seat-agent",
+		"--verifier", "@worker",
 		"--json",
 	})
 

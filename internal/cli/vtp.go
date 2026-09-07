@@ -70,7 +70,6 @@ func newVTPVerifyCmd() *cobra.Command {
 		diffPath       string
 		exitCode       int
 		verifierHandle string
-		isDisjoint     bool
 		asJSON         bool
 	)
 	cmd := &cobra.Command{
@@ -127,7 +126,7 @@ func newVTPVerifyCmd() *cobra.Command {
 				verifierHandle = "agent-memory-verifier"
 			}
 
-			verify, err := vtp.VerifyReceipt(spec, &receipt, actualStdout, actualDiff, exitCode, verifierHandle, isDisjoint)
+			verify, err := vtp.VerifyReceipt(spec, &receipt, actualStdout, actualDiff, exitCode, verifierHandle)
 			if err != nil {
 				return fmt.Errorf("vtp verify: %w", err)
 			}
@@ -144,10 +143,11 @@ func newVTPVerifyCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Verdict:         %s\n", verify.Verdict)
 				fmt.Fprintf(cmd.OutOrStdout(), "  Basis:           %s\n", verify.Basis)
 				fmt.Fprintf(cmd.OutOrStdout(), "  Evidence SHA256: %s\n", verify.EvidenceSHA256)
-				fmt.Fprintf(cmd.OutOrStdout(), "  Disjoint Seat:   %t (Clause B)\n", verify.IsDisjointSeat)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Distinct Accounts: %t\n", verify.DistinctAccountIDs)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Operator Independence: %s\n", verify.OperatorIndependence)
 			}
 
-			if verify.Verdict != "PASS" {
+			if verify.Verdict != "PASS" && verify.Verdict != "PARTIAL" {
 				return fmt.Errorf("verification failed with verdict %s (%s)", verify.Verdict, verify.Basis)
 			}
 			return nil
@@ -159,7 +159,6 @@ func newVTPVerifyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&diffPath, "diff", "", "path to captured diff file")
 	cmd.Flags().IntVar(&exitCode, "exit-code", 0, "actual process exit code")
 	cmd.Flags().StringVar(&verifierHandle, "verifier", "agent-memory-verifier", "handle of verifying agent/seat")
-	cmd.Flags().BoolVar(&isDisjoint, "disjoint", false, "assert disjoint seat isolation (Clause B)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit TaskVerify JSON artifact")
 	return cmd
 }

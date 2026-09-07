@@ -64,16 +64,19 @@ func TestVTP_FullLifecycle(t *testing.T) {
 		IdempotencyKey: "vtp-receipt-001",
 	}
 
-	// 4. Verification (Disjoint Seat Stranger)
-	verify, err := VerifyReceipt(spec, receipt, mockStdout, mockDiff, 0, "orca-agent", true)
+	// 4. Verification (Derived Account Distinctness)
+	verify, err := VerifyReceipt(spec, receipt, mockStdout, mockDiff, 0, "orca-agent")
 	if err != nil {
 		t.Fatalf("unexpected verification error: %v", err)
 	}
 	if verify.Verdict != "PASS" {
 		t.Fatalf("expected PASS, got %s (basis: %s)", verify.Verdict, verify.Basis)
 	}
-	if !verify.IsDisjointSeat {
-		t.Fatalf("expected disjoint seat flag")
+	if !verify.DistinctAccountIDs || !verify.IsDisjointSeat {
+		t.Fatalf("expected distinct account IDs flag")
+	}
+	if verify.OperatorIndependence != "UNKNOWN" {
+		t.Fatalf("expected UNKNOWN operator independence without topological attestation, got %s", verify.OperatorIndependence)
 	}
 
 	// 5. Settlement
@@ -90,11 +93,13 @@ func TestVTP_Falsifiers(t *testing.T) {
 	spec := &TaskSpec{
 		Protocol: ProtocolVersion,
 		TaskID:   "task-vtp-falsify",
+		Creator:  "task-creator",
 		Bounty:   BountySpec{Currency: "GRN", Amount: 1},
 	}
 	receipt := &TaskReceipt{
 		Protocol: ProtocolVersion,
 		TaskID:   spec.TaskID,
+		Worker:   "worker-seat",
 		Execution: ExecutionReceipt{
 			StdoutSHA256: "expected_hash",
 			ExitCode:     0,
@@ -103,25 +108,41 @@ func TestVTP_Falsifiers(t *testing.T) {
 	}
 
 	// Negative control 1: Non-zero exit code
-	v1, err := VerifyReceipt(spec, receipt, []byte("fail"), []byte("diff"), 1, "verifier", true)
+	v1, err := VerifyReceipt(spec, receipt, []byte("fail"), []byte("diff"), 1, "verifier")
 	if err != nil || v1.Verdict != "FAIL" || v1.Basis != "NON_ZERO_EXIT" {
 		t.Fatalf("expected NON_ZERO_EXIT failure, got %+v", v1)
 	}
 
 	// Negative control 2: Digest mismatch
-	v2, err := VerifyReceipt(spec, receipt, []byte("tampered output"), []byte("diff"), 0, "verifier", true)
+	v2, err := VerifyReceipt(spec, receipt, []byte("tampered output"), []byte("diff"), 0, "verifier")
 	if err != nil || v2.Verdict != "FAIL" || v2.Basis != "STDOUT_DIGEST_MISMATCH" {
 		t.Fatalf("expected STDOUT_DIGEST_MISMATCH failure, got %+v", v2)
 	}
 
-	// Negative control 3: Non-disjoint settlement rejection (Clause B)
-	v3 := &TaskVerify{
-		Verdict:        "PASS",
-		IsDisjointSeat: false, // Self-verification violation!
+	// Negative control 3: Literal self-verification attempt (anti-self-check)
+	vSelf, err := VerifyReceipt(spec, receipt, []byte("expected_hash"), []byte(""), 0, receipt.Worker)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	_, err = SettleTask(spec, v3, "payer", "payee", 14450)
+	if vSelf.DistinctAccountIDs {
+		t.Fatalf("expected DistinctAccountIDs to be false when verifier == worker")
+	}
+	_, err = SettleTask(spec, vSelf, "payer", "payee", 14450)
 	if err == nil {
-		t.Fatalf("expected Clause B settlement failure when is_disjoint_seat is false")
+		t.Fatalf("expected settlement failure when DistinctAccountIDs is false")
+	}
+
+	// Negative control 4: Creator self-verification attempt
+	vCreator, err := VerifyReceipt(spec, receipt, []byte("expected_hash"), []byte(""), 0, spec.Creator)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if vCreator.DistinctAccountIDs {
+		t.Fatalf("expected DistinctAccountIDs to be false when verifier == creator")
+	}
+	_, err = SettleTask(spec, vCreator, "payer", "payee", 14450)
+	if err == nil {
+		t.Fatalf("expected settlement failure when verifier is task creator")
 	}
 }
 
