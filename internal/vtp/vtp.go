@@ -92,8 +92,11 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 	if verify.Verdict != "PASS" && verify.Verdict != "PARTIAL" {
 		return nil, fmt.Errorf("cannot settle unverified task, verdict was %s (%s)", verify.Verdict, verify.Basis)
 	}
-	if !verify.DistinctAccountIDs && !verify.IsDisjointSeat {
+	if !verify.DistinctAccountIDs {
 		return nil, errors.New("cannot settle without distinct authenticated accounts (Clause B)")
+	}
+	if verify.IsDisjointSeat != verify.DistinctAccountIDs {
+		return nil, errors.New("cannot settle: inconsistent verification state (IsDisjointSeat must match DistinctAccountIDs)")
 	}
 
 	amount := spec.Bounty.Amount

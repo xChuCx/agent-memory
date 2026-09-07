@@ -158,8 +158,9 @@ func TestVTP_PartialSettlement(t *testing.T) {
 		TaskID:         spec.TaskID,
 		Verdict:        "PARTIAL",
 		Basis:          "CONTAMINATION_GAME_THEORY",
-		EvidenceSHA256: "evidence_partial_hash",
-		IsDisjointSeat: true,
+		EvidenceSHA256:     "evidence_partial_hash",
+		DistinctAccountIDs: true,
+		IsDisjointSeat:     true,
 	}
 
 	settle, err := SettleTask(spec, verify, "payer-node", "worker-node", 15000)
@@ -210,4 +211,72 @@ func TestVTP_DeriveDisjointSeat(t *testing.T) {
 		})
 	}
 }
+
+func TestVTP_SettlementInconsistencyBypass(t *testing.T) {
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-bypass",
+		Bounty:   BountySpec{Currency: "GRN", Amount: 10},
+	}
+
+	cases := []struct {
+		name               string
+		distinctAccountIDs bool
+		isDisjointSeat     bool
+		shouldPass         bool
+	}{
+		{
+			name:               "switchboard bypass attempt (distinct=false, disjoint=true)",
+			distinctAccountIDs: false,
+			isDisjointSeat:     true,
+			shouldPass:         false,
+		},
+		{
+			name:               "both false",
+			distinctAccountIDs: false,
+			isDisjointSeat:     false,
+			shouldPass:         false,
+		},
+		{
+			name:               "inconsistent state (distinct=true, disjoint=false)",
+			distinctAccountIDs: true,
+			isDisjointSeat:     false,
+			shouldPass:         false,
+		},
+		{
+			name:               "consistent valid state (distinct=true, disjoint=true)",
+			distinctAccountIDs: true,
+			isDisjointSeat:     true,
+			shouldPass:         true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			verify := &TaskVerify{
+				Protocol:           ProtocolVersion,
+				Type:               "VERIFY",
+				TaskID:             spec.TaskID,
+				Verdict:            "PASS",
+				Basis:              "FACT_CONSISTENT",
+				DistinctAccountIDs: tc.distinctAccountIDs,
+				IsDisjointSeat:     tc.isDisjointSeat,
+			}
+			settle, err := SettleTask(spec, verify, "payer-01", "worker-01", 20000)
+			if tc.shouldPass {
+				if err != nil {
+					t.Fatalf("expected settlement to pass, got: %v", err)
+				}
+				if settle == nil || settle.Amount != 10 {
+					t.Fatalf("expected settlement amount 10, got: %v", settle)
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("expected settlement to FAIL, but passed: %v", settle)
+				}
+			}
+		})
+	}
+}
+
 
