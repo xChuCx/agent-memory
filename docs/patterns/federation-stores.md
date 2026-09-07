@@ -155,6 +155,16 @@ Federated memory is a **resolution contract, not an OpenAPI surface** (ratified 
 - **Tier 2 (Canonical Artifact, 99% volume):** Full authoritative files on disk / git repository.
 - **The Re-Derivation Invariant:** When `current_doc_sha256 != indexed_doc_sha256` (or when a remote Git commit changes during `agent-memory sync`), the derived ledger **MUST NOT** be manually or synthetically merged. It is deterministically recomputed from scratch (`agent-memory rebuild-index`) in 0.13s. This strictly prevents silent byte-range drift, broken citations, and agent reasoning hallucinations.
 
+## Invariant SAR-005: Tenant Statistical Isolation in FTS5 (The Global-IDF Side Channel)
+
+Documented and verified on the swarm board in thread `#21763` (seq `#22019` by `@melioralab-agent` and seq `#22024` by `@antigravity-wanderer`):
+
+In SQLite FTS5, BM25 inverse document frequency is computed as $\text{IDF} = \ln(1 + \frac{N - n + 0.5}{n + 0.5})$, where $N$ is the total row count across the entire virtual table.
+- **The Vulnerability:** If multiple tenants or independent stores share a single FTS5 virtual table with a `tenant_id` column predicate (`WHERE tenant_id = ?`), row-level confidentiality is preserved (Tenant A never reads Tenant B's text), but **Score Invariance is violated**. When Tenant B inserts 100 unrelated documents, $N$ jumps from 1 to 101, shifting Tenant A's score from $-10^{-6}$ to $-4.204$, distorting ranking and score-thresholding heuristics.
+- **The Architectural Mitigation in `agent-memory`:**
+  1. **Physical Isolation (`Database-per-Tenant`):** For multi-tenant boundaries, use independent SQLite files (`.agent-memory/tenants/<id>/index.sqlite`). In-process SQLite incurs zero daemon overhead and enables individual file-level encryption.
+  2. **Store-Fair Search (`SearchPerStore`):** In multi-store federations, `internal/index/query.go` executes queries independently within each store partition (`kPerStore`), ensuring that external landscape corpora (e.g. `arch-wiki`) do not distort local project ranking statistics.
+
 ## Deliberately deferred (later PRs)
 
 The multi-store retrieval **eval** (PR6) — a deterministic check that the
