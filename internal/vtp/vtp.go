@@ -39,11 +39,7 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 		spec.TaskID, receipt.IdempotencyKey, actualStdoutSHA, actualDiffSHA, actualExitCode)
 	evidenceSHA := ComputeDigest([]byte(evidencePayload))
 
-	creator := ""
-	if spec != nil {
-		creator = spec.Creator
-	}
-	distinct := HasDistinctAccountIDs(receipt.Worker, verifier, creator)
+	distinct := HasDistinctAccountIDs(receipt.Worker, verifier, spec.Creator)
 
 	verify := &TaskVerify{
 		Protocol:             ProtocolVersion,
@@ -86,6 +82,9 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 // If verify.Verdict is "PARTIAL" (e.g. contamination resolution under Devin Genome R7),
 // 50% base fee is settled to the worker (minimum 1 if bounty > 0).
 func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, currentSeq int64) (*TaskSettle, error) {
+	if spec == nil {
+		return nil, errors.New("spec cannot be nil")
+	}
 	if verify == nil {
 		return nil, errors.New("verification cannot be nil")
 	}
