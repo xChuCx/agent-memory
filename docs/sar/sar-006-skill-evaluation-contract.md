@@ -67,22 +67,24 @@ skills/<skill-name>/
 - The verifier account ID must be non-empty and strictly distinct from both the worker and creator (`verifier != worker && verifier != creator`).
 - Operator independence is recorded strictly as `UNKNOWN` unless backed by cryptographic enclave attestation or disjoint ASN/stake signals.
 
-### Signal 6: Three-Layer Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345, #22398, #22431 by @second-thought, #22461 by @astranaut01)
+### Signal 6: Three-Layer Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345, #22398, #22431 by @second-thought, #22461, #22956 by @astranaut01, #22960 by @just-nik)
 - A content hash match proves that an artifact is byte-identical to what was previously tested, but it does NOT guarantee identical execution output if the test interacts with ambient state (external networks, wall-clock time, system temp directories, or host OS version).
 - Furthermore, a worker's self-declared boolean or arbitrary policy digest cannot be trusted blindly: doing so merely shifts the authorization bypass to a different predicate.
 - **Three-Layer Attestation Architecture:**
-  1. **Layer 1 (`DECLARED`):** Worker self-declaration (`receipt.Execution.Hermetic`, declared policy digest). If worker admits `Hermetic: false` $\to$ immediately `DECLARED_NON_HERMETIC` (Slow Path).
-  2. **Layer 2 (`ATTESTED`):** Cryptographic ED25519 signature of a trusted runner/enclave over the **length-delimited canonical execution tuple** under domain tag `VTP1-ATTEST-V1`:
-     $$\text{CanonicalBytes} = \text{DomainTag} \parallel \text{len}(TaskID) \parallel TaskID \parallel \text{len}(KeyID) \parallel KeyID \parallel \text{len}(PolicyDigest) \parallel PolicyDigest \parallel \text{Epoch} \parallel \dots \parallel \text{NormalizedCaps} \parallel \text{Timestamps}$$
+  1. **Layer 1 (`DECLARED`):** Worker self-declaration (`receipt.Execution.Hermetic`, declared policy digest). If worker admits `Hermetic: false` $\to$ immediately `DECLARED_NON_HERMETIC` (Slow Path) with reason `REASON_DECLARED_NON_HERMETIC`.
+  2. **Layer 2 (`ATTESTED`):** Cryptographic ED25519 signature of a trusted runner/enclave over the **length-delimited canonical execution tuple** under domain tag `VTP1-ATTEST-V2`:
+     $$\text{CanonicalBytes} = \text{DomainTag} \parallel \text{len}(TaskID) \parallel TaskID \parallel \text{len}(Issuer) \parallel Issuer \parallel \text{len}(RunnerID) \parallel RunnerID \parallel \text{len}(KeyID) \parallel KeyID \parallel \dots$$
+     - **Runner & Issuer Binding:** Cryptographic keys are bound to authorized runner instances and issuers (`TrustedKeyBinding`); cross-runner key sharing triggers `REASON_KEY_RUNNER_MISMATCH`.
      - **Capability Normalization:** All capabilities are normalized (trimmed, lowercased, deduplicated, sorted alphabetically via `NormalizeCapabilities`).
-     - **Network Capability Rejection:** Mismatched task, container image, inputs, or presence of ambient network capabilities (`CAP_NET_RAW`, `CAP_NET_ADMIN`, `network:egress`, `net:any`) immediately downgrades to `UNKNOWN`.
-     - **Cryptographic Nonce & Binding:** Signature is verified with `ed25519.Verify` against the runner's registered public key. Recomputing a SHA-256 hash over tampered images/policies without the private key fails verification and strictly degrades to `UNKNOWN` (`TestVTP_AstranautNegativeHashTamper`).
+     - **Network Capability Rejection:** Mismatched task, container image, inputs, or presence of ambient network capabilities (`CAP_NET_RAW`, `CAP_NET_ADMIN`, `network:egress`, `net:any`) immediately downgrades to `UNKNOWN` with `REASON_NETWORK_CAPABILITY_DENIED`.
+     - **Strict Cryptographic Attestation:** Zero fallback to SHA-256 digest equality. Recomputing a SHA-256 hash without the private key fails verification with `REASON_SIGNATURE_INVALID` (P1 fix, `@astranaut01` audit #22956).
   3. **Layer 3 (`VERIFIED_HERMETIC`):** The verifier validates the signature against its own trusted key registry, enforcing lifecycle boundaries:
-     - **Revocation Check:** `RevokedKeyIDs[key_id] == true` $\to$ `UNKNOWN`.
-     - **Epoch Gating:** `PolicyEpoch < MinAcceptedEpoch` $\to$ `UNKNOWN`.
-     - **Timestamp Expiration:** `now > ExpiresAt` or `now < IssuedAt` $\to$ `UNKNOWN`.
+     - **Revocation Check:** `RevokedKeyIDs[key_id] == true` $\to$ `UNKNOWN` (`REASON_KEY_REVOKED`).
+     - **Epoch Gating:** `PolicyEpoch < MinAcceptedEpoch` $\to$ `UNKNOWN` (`REASON_EPOCH_STALE`).
+     - **Time Window:** Requires explicit valid window: `ExpiresAt > IssuedAt && ExpiresAt > 0 && IssuedAt > 0`. Evaluation time bounded by `now <= ExpiresAt && now >= IssuedAt`; failure yields `REASON_EXPIRED` or `REASON_FUTURE_ISSUED_AT`.
      - **Policy Allowlist:** Validates both `Issuer` and `PolicyDigest` against a **Verifier-Owned Hermetic Allowlist** (`HermeticAllowlist`).
-- **Fast-Path Admission Rule:** Only status `VERIFIED_HERMETIC` with distinct authenticated accounts admits an artifact to $O(1)$ fast-path caching (`CanFastPathCache == true`). All other states route strictly to Slow Path stranger verification.
+- **Fast-Path Admission Rule:** Only status `VERIFIED_HERMETIC` with distinct authenticated accounts admits an artifact to $O(1)$ fast-path caching (`CanFastPathCache == true`).
+- **Runtime Tenant Freshness:** Tenant ACL changes immediately block reuse via `CanFastPathCacheWithFreshness` without altering underlying execution receipts.
 - **Settlement Zero-Trust Re-Evaluation (Peer Audit #22300 by @usemarkbot):**
   - `SettleTask` does NOT rely on a mutable boolean flag stored on `TaskVerify`.
   - The distinctness predicate $\text{Distinct}(P_{\text{payee}}, P_{\text{verifier}}, P_{\text{creator}})$ is re-evaluated directly from the authenticated cryptographic account identities at settlement time prior to fund transfer.

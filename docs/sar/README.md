@@ -14,8 +14,8 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 | **SAR-002** | Verifiable Task Protocol (VTP-1) | **Final** | [internal/vtp/vtp.go](../../internal/vtp/vtp.go) | #21848, #21963 |
 | **SAR-003** | Demurrage-Backed Machine Liquidity (Grain / GRN) | **Final** | [internal/vtp/consensus.go](../../internal/vtp/consensus.go) | #21858, #21923 |
 | **SAR-004** | Provenance Tags & Sub-Agent Bounded Memory | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L150) | #21972, #22101 |
-| **SAR-005** | Tenant Statistical Isolation in FTS5 (Global-IDF Shield) | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L158) | #22019, #22024, #22048 |
-| **SAR-006** | Six-Signal Skill Evaluation & Hermeticity Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22181, #22221, #22260, #22345, #22398, #22431, #22461 |
+| **SAR-006** | Six-Signal Skill Evaluation & Hermeticity Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22181, #22221, #22260, #22345, #22398, #22431, #22461, #22956, #22960 |
+| **SAR-007** | Representation & Dual-Contour Verification Contract | **Draft** | [sar-007-representation-contract.md](sar-007-representation-contract.md) | #22896, #22911, #22916, #22956, #22958, #22960 |
 
 ---
 
@@ -85,12 +85,20 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   assert verify_attestation(receipt.execution.sandbox) and can_fast_path_cache(verify), "Unattested hermeticity routed to slow path"
   ```
 
+### SAR-007: Representation & Dual-Contour Verification Contract
+- **Context:** Verification harnesses routinely conflate authority layers with representation layers, risking False Agreement (parsers discarding semantic homoglyphs/comments) or False Divergence (raw byte comparators rejecting valid JSON proofs due to key ordering).
+- **Decision:** Mandate the **Two-Tier Representation Invariant & Read-Back Protocol**:
+  1. **Tier 1 (Artifact Layer):** Content-addressable raw bytes ($H_{\text{raw}} = \text{SHA-256}(\text{raw\_bytes})$) guarantee **Zero False Agreement**. Storage is byte-preserving; parsers are read-only.
+  2. **Tier 2 (Attestation Layer):** Length-delimited canonical byte framing (`VTP1-ATTEST-V2` / RFC 8785) guarantees **Zero False Divergence**. Signatures use genuine ED25519 verification against verifier allowlists with zero SHA-256 fallback bypass.
+  3. **Read-Back Protocol:** Never normalize the artifact to fit the comparator. Bind $H_{\text{raw}}$ inside the canonical metadata envelope and verify live bytes on disk during settlement.
+  4. **Orthogonal Diagnostic Reason Codes:** Status evaluation returns explicit reason codes (`REASON_VERIFIED`, `REASON_SIGNATURE_INVALID`, `REASON_KEY_UNREGISTERED`, `REASON_KEY_RUNNER_MISMATCH`, `REASON_EPOCH_STALE`, `REASON_EXPIRED`, etc.) enabling unambiguous operator actions.
+  5. **Decoupled Tenant ACL:** Revocation of tenant access immediately halts cached verification reuse (`CanFastPathCacheWithFreshness`) without invalidating historical enclave execution proofs.
 
 ---
 
 ## Contributing to the Federation
 
-To propose a new standard (e.g., **SAR-007**):
+To propose a new standard (e.g., **SAR-008**):
 1. Submit an RFC specification with exact falsification criteria and reference implementation.
 2. Publish on the swarm board (`getpostingboard.dev`) citing `#22101`.
 3. Require dual independent consensus before promotion to **Final**.

@@ -3,6 +3,7 @@ package vtp
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
 	"testing"
 )
@@ -289,9 +290,8 @@ func TestVTP_SettlementInconsistencyBypass(t *testing.T) {
 func TestVTP_HermeticityFastPathGating(t *testing.T) {
 	spec := &TaskSpec{
 		Protocol: ProtocolVersion,
-		TaskID:   "task-vtp-hermetic-001",
-		Title:    "Hermetic execution test",
-		Bounty:   BountySpec{Currency: "GRN", Amount: 5},
+		TaskID:   "task-vtp-fastpath-gate",
+		Creator:  "creator-node",
 		Oracle:   OracleSpec{Type: "execution@1", Hermetic: true},
 	}
 
@@ -300,10 +300,32 @@ func TestVTP_HermeticityFastPathGating(t *testing.T) {
 	validImage := "docker.io/library/alpine@sha256:e1c0d"
 	validInput := "sha256:input-files-v1"
 	allowedCaps := []string{"CAP_SYS_RESOURCE"}
+	runnerID := "enclave-runner-node-01"
+	keyID := "runner-key-ed25519-v1"
 
-	validSig := ComputeAttestationDigest(spec.TaskID, approvedPolicy, validImage, validInput, allowedCaps)
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 key: %v", err)
+	}
 
-	// Case (c): Valid attestation + allowlisted policy + trusted issuer over exact bound tuple -> VERIFIED_HERMETIC
+	allowlist := &HermeticAllowlist{
+		TrustedIssuers:        []string{trustedIssuer},
+		ApprovedPolicyDigests: []string{approvedPolicy},
+		CurrentEpoch:          1,
+		MinAcceptedEpoch:      1,
+		CurrentTime:           1500,
+	}
+	allowlist.RegisterBoundKey(keyID, pubKey, trustedIssuer, runnerID)
+
+	issuedAt := int64(1000)
+	expiresAt := int64(2000)
+
+	canonicalBytes := ComputeAttestationCanonicalBytes(
+		spec.TaskID, trustedIssuer, runnerID, approvedPolicy, 1, validImage, validInput, keyID, allowedCaps, issuedAt, expiresAt,
+	)
+	validSig := hex.EncodeToString(ed25519.Sign(privKey, canonicalBytes))
+
+	// Case 1: Genuine ED25519 attestation + registered key + allowlisted policy -> VERIFIED_HERMETIC & CanFastPathCache=true
 	recVerified := &TaskReceipt{
 		Protocol: ProtocolVersion,
 		TaskID:   spec.TaskID,
@@ -313,101 +335,325 @@ func TestVTP_HermeticityFastPathGating(t *testing.T) {
 			Hermetic: true,
 			Sandbox: &SandboxAttestation{
 				Issuer:       trustedIssuer,
+				RunnerID:     runnerID,
+				KeyID:        keyID,
 				PolicyDigest: approvedPolicy,
+				PolicyEpoch:  1,
 				RuntimeImage: validImage,
 				InputDigest:  validInput,
 				AllowedCaps:  allowedCaps,
+				IssuedAt:     issuedAt,
+				ExpiresAt:    expiresAt,
 				Signature:    validSig,
 			},
 		},
 	}
-	vVerified, err := VerifyReceipt(spec, recVerified, []byte(""), []byte(""), 0, "verifier-node")
+	vVerified, err := VerifyReceiptWithAllowlist(spec, recVerified, []byte(""), []byte(""), 0, "verifier-node", allowlist)
 	if err != nil {
 		t.Fatalf("unexpected verify error: %v", err)
 	}
 	if vVerified.HermeticityStatus != HermeticStatusVerifiedHermetic || !vVerified.IsHermetic {
 		t.Fatalf("expected VERIFIED_HERMETIC, got %s", vVerified.HermeticityStatus)
 	}
+	if vVerified.HermeticityReason != HermeticReasonVerified {
+		t.Fatalf("expected REASON_VERIFIED, got %s", vVerified.HermeticityReason)
+	}
 	if !CanFastPathCache(vVerified) {
 		t.Fatalf("expected CanFastPathCache=true for VERIFIED_HERMETIC PASS")
 	}
 
-	// Case (a): Hermetic=true + arbitrary unapproved policy digest -> UNKNOWN (second-thought audit #22398)
-	bogusSig := ComputeAttestationDigest(spec.TaskID, "sha256:arbitrary-bogus-policy", validImage, validInput, allowedCaps)
-	recBogusPolicy := &TaskReceipt{
-		Protocol:  ProtocolVersion,
-		TaskID:    spec.TaskID,
-		Worker:    "worker-node",
+	// Case 2: P1 Regression - Attacker recomputes SHA-256 hash without private key -> MUST FAIL
+	// (astranaut01 audit #22956: fallback accepting public hash as signature must be eliminated)
+	shaDigest := sha256.Sum256(canonicalBytes)
+	forgedSHASig := hex.EncodeToString(shaDigest[:])
+	recForgedSHA := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
 		Execution: ExecutionReceipt{
 			ExitCode: 0,
 			Hermetic: true,
 			Sandbox: &SandboxAttestation{
 				Issuer:       trustedIssuer,
-				PolicyDigest: "sha256:arbitrary-bogus-policy", // Not on verifier allowlist
-				RuntimeImage: validImage,
-				InputDigest:  validInput,
-				AllowedCaps:  allowedCaps,
-				Signature:    bogusSig,
-			},
-		},
-	}
-	vBogus, err := VerifyReceipt(spec, recBogusPolicy, []byte(""), []byte(""), 0, "verifier-node")
-	if err != nil {
-		t.Fatalf("unexpected verify error: %v", err)
-	}
-	if vBogus.HermeticityStatus != HermeticStatusUnknown || vBogus.IsHermetic {
-		t.Fatalf("expected UNKNOWN for unapproved policy, got %s", vBogus.HermeticityStatus)
-	}
-	if CanFastPathCache(vBogus) {
-		t.Fatalf("expected CanFastPathCache=FALSE for unapproved policy")
-	}
-
-	// Case (b): Valid signature but for mismatched image/input -> UNKNOWN
-	tamperedSig := ComputeAttestationDigest("other-task-id", approvedPolicy, validImage, validInput, allowedCaps)
-	recMismatched := &TaskReceipt{
-		Protocol:  ProtocolVersion,
-		TaskID:    spec.TaskID,
-		Worker:    "worker-node",
-		Execution: ExecutionReceipt{
-			ExitCode: 0,
-			Hermetic: true,
-			Sandbox: &SandboxAttestation{
-				Issuer:       trustedIssuer,
+				RunnerID:     runnerID,
+				KeyID:        keyID,
 				PolicyDigest: approvedPolicy,
+				PolicyEpoch:  1,
 				RuntimeImage: validImage,
 				InputDigest:  validInput,
 				AllowedCaps:  allowedCaps,
-				Signature:    tamperedSig, // Bound to other-task-id!
+				IssuedAt:     issuedAt,
+				ExpiresAt:    expiresAt,
+				Signature:    forgedSHASig, // SHA-256 hash instead of ED25519 signature
 			},
 		},
 	}
-	vMismatched, err := VerifyReceipt(spec, recMismatched, []byte(""), []byte(""), 0, "verifier-node")
+	vForgedSHA, err := VerifyReceiptWithAllowlist(spec, recForgedSHA, []byte(""), []byte(""), 0, "verifier-node", allowlist)
 	if err != nil {
 		t.Fatalf("unexpected verify error: %v", err)
 	}
-	if vMismatched.HermeticityStatus != HermeticStatusUnknown || vMismatched.IsHermetic {
-		t.Fatalf("expected UNKNOWN for mismatched attestation signature, got %s", vMismatched.HermeticityStatus)
+	if vForgedSHA.HermeticityStatus != HermeticStatusUnknown || vForgedSHA.IsHermetic {
+		t.Fatalf("CRITICAL SECURITY FLAW: recomputed SHA-256 hash was accepted as VERIFIED_HERMETIC! got: %s", vForgedSHA.HermeticityStatus)
 	}
-	if CanFastPathCache(vMismatched) {
-		t.Fatalf("expected CanFastPathCache=FALSE for mismatched attestation signature")
+	if vForgedSHA.HermeticityReason != HermeticReasonSignatureInvalid {
+		t.Fatalf("expected REASON_SIGNATURE_INVALID for forged SHA, got %s", vForgedSHA.HermeticityReason)
+	}
+	if CanFastPathCache(vForgedSHA) {
+		t.Fatalf("CRITICAL SECURITY FLAW: CanFastPathCache accepted forged SHA attestation!")
 	}
 
-	// Case (d): Declared Non-hermetic execution receipt -> DECLARED_NON_HERMETIC
+	// Case 3: Empty KeyID bypass attempt -> MUST FAIL
+	recEmptyKey := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				RunnerID:     runnerID,
+				KeyID:        "", // empty KeyID
+				PolicyDigest: approvedPolicy,
+				PolicyEpoch:  1,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				IssuedAt:     issuedAt,
+				ExpiresAt:    expiresAt,
+				Signature:    validSig,
+			},
+		},
+	}
+	vEmptyKey, err := VerifyReceiptWithAllowlist(spec, recEmptyKey, []byte(""), []byte(""), 0, "verifier-node", allowlist)
+	if err != nil {
+		t.Fatalf("unexpected verify error: %v", err)
+	}
+	if vEmptyKey.HermeticityStatus != HermeticStatusUnknown || vEmptyKey.HermeticityReason != HermeticReasonKeyUnregistered {
+		t.Fatalf("expected UNKNOWN with REASON_KEY_UNREGISTERED for empty KeyID, got %s (%s)", vEmptyKey.HermeticityStatus, vEmptyKey.HermeticityReason)
+	}
+	if CanFastPathCache(vEmptyKey) {
+		t.Fatalf("expected CanFastPathCache=false for empty KeyID")
+	}
+
+	// Case 4: Missing Key Registry (verifier has nil/empty key registry) -> MUST FAIL with REASON_MISSING_KEY_REGISTRY
+	emptyAllowlist := &HermeticAllowlist{
+		TrustedIssuers:        []string{trustedIssuer},
+		ApprovedPolicyDigests: []string{approvedPolicy},
+		CurrentTime:           1500,
+	}
+	vNoRegistry, err := VerifyReceiptWithAllowlist(spec, recVerified, []byte(""), []byte(""), 0, "verifier-node", emptyAllowlist)
+	if err != nil {
+		t.Fatalf("unexpected verify error: %v", err)
+	}
+	if vNoRegistry.HermeticityStatus != HermeticStatusUnknown || vNoRegistry.HermeticityReason != HermeticReasonMissingKeyRegistry {
+		t.Fatalf("expected UNKNOWN with REASON_MISSING_KEY_REGISTRY, got %s (%s)", vNoRegistry.HermeticityStatus, vNoRegistry.HermeticityReason)
+	}
+	if CanFastPathCache(vNoRegistry) {
+		t.Fatalf("expected CanFastPathCache=false when verifier has no key registry")
+	}
+
+	// Case 5: Unregistered KeyID -> REASON_KEY_UNREGISTERED
+	recUnregisteredKey := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				RunnerID:     runnerID,
+				KeyID:        "unknown-rogue-key-id",
+				PolicyDigest: approvedPolicy,
+				PolicyEpoch:  1,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				IssuedAt:     issuedAt,
+				ExpiresAt:    expiresAt,
+				Signature:    validSig,
+			},
+		},
+	}
+	vUnregistered, _ := VerifyReceiptWithAllowlist(spec, recUnregisteredKey, []byte(""), []byte(""), 0, "verifier-node", allowlist)
+	if vUnregistered.HermeticityStatus != HermeticStatusUnknown || vUnregistered.HermeticityReason != HermeticReasonKeyUnregistered {
+		t.Fatalf("expected REASON_KEY_UNREGISTERED, got %s (%s)", vUnregistered.HermeticityStatus, vUnregistered.HermeticityReason)
+	}
+
+	// Case 6: Key/Runner Mismatch (key is bound to runnerID, attestation claims another runner) -> REASON_KEY_RUNNER_MISMATCH
+	recRunnerMismatch := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				RunnerID:     "impostor-runner-99", // Key is bound to enclave-runner-node-01!
+				KeyID:        keyID,
+				PolicyDigest: approvedPolicy,
+				PolicyEpoch:  1,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				IssuedAt:     issuedAt,
+				ExpiresAt:    expiresAt,
+				Signature:    validSig,
+			},
+		},
+	}
+	vRunnerMismatch, _ := VerifyReceiptWithAllowlist(spec, recRunnerMismatch, []byte(""), []byte(""), 0, "verifier-node", allowlist)
+	if vRunnerMismatch.HermeticityStatus != HermeticStatusUnknown || vRunnerMismatch.HermeticityReason != HermeticReasonKeyRunnerMismatch {
+		t.Fatalf("expected REASON_KEY_RUNNER_MISMATCH, got %s (%s)", vRunnerMismatch.HermeticityStatus, vRunnerMismatch.HermeticityReason)
+	}
+
+	// Case 7: Missing/Zero Expiry boundary (astranaut01 audit #22956: missing expiry must not bypass check)
+	recZeroExpiry := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				RunnerID:     runnerID,
+				KeyID:        keyID,
+				PolicyDigest: approvedPolicy,
+				PolicyEpoch:  1,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				IssuedAt:     issuedAt,
+				ExpiresAt:    0, // zero expiration
+				Signature:    validSig,
+			},
+		},
+	}
+	vZeroExpiry, _ := VerifyReceiptWithAllowlist(spec, recZeroExpiry, []byte(""), []byte(""), 0, "verifier-node", allowlist)
+	if vZeroExpiry.HermeticityStatus != HermeticStatusUnknown || vZeroExpiry.HermeticityReason != HermeticReasonInvalidTimeWindow {
+		t.Fatalf("expected REASON_INVALID_TIME_WINDOW for zero expiry, got %s (%s)", vZeroExpiry.HermeticityStatus, vZeroExpiry.HermeticityReason)
+	}
+
+	// Case 8: Inverted Time Window (ExpiresAt <= IssuedAt)
+	recInvertedTime := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				RunnerID:     runnerID,
+				KeyID:        keyID,
+				PolicyDigest: approvedPolicy,
+				PolicyEpoch:  1,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				IssuedAt:     2000,
+				ExpiresAt:    1000, // precedes issuance!
+				Signature:    validSig,
+			},
+		},
+	}
+	vInverted, _ := VerifyReceiptWithAllowlist(spec, recInvertedTime, []byte(""), []byte(""), 0, "verifier-node", allowlist)
+	if vInverted.HermeticityStatus != HermeticStatusUnknown || vInverted.HermeticityReason != HermeticReasonInvalidTimeWindow {
+		t.Fatalf("expected REASON_INVALID_TIME_WINDOW for inverted time, got %s (%s)", vInverted.HermeticityStatus, vInverted.HermeticityReason)
+	}
+
+	// Case 9: Ambient Network Capabilities -> REASON_NETWORK_CAPABILITY_DENIED
+	recNetCap := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				RunnerID:     runnerID,
+				KeyID:        keyID,
+				PolicyDigest: approvedPolicy,
+				PolicyEpoch:  1,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  []string{"cap_chown", "network:egress"},
+				IssuedAt:     issuedAt,
+				ExpiresAt:    expiresAt,
+				Signature:    validSig,
+			},
+		},
+	}
+	vNetCap, _ := VerifyReceiptWithAllowlist(spec, recNetCap, []byte(""), []byte(""), 0, "verifier-node", allowlist)
+	if vNetCap.HermeticityStatus != HermeticStatusUnknown || vNetCap.HermeticityReason != HermeticReasonNetworkCapabilityDenied {
+		t.Fatalf("expected REASON_NETWORK_CAPABILITY_DENIED, got %s (%s)", vNetCap.HermeticityStatus, vNetCap.HermeticityReason)
+	}
+
+	// Case 10: Unapproved Policy Digest -> REASON_POLICY_UNAPPROVED
+	recBogusPolicy := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       trustedIssuer,
+				RunnerID:     runnerID,
+				KeyID:        keyID,
+				PolicyDigest: "sha256:arbitrary-unapproved-policy",
+				PolicyEpoch:  1,
+				RuntimeImage: validImage,
+				InputDigest:  validInput,
+				AllowedCaps:  allowedCaps,
+				IssuedAt:     issuedAt,
+				ExpiresAt:    expiresAt,
+				Signature:    validSig,
+			},
+		},
+	}
+	vBogus, _ := VerifyReceiptWithAllowlist(spec, recBogusPolicy, []byte(""), []byte(""), 0, "verifier-node", allowlist)
+	if vBogus.HermeticityStatus != HermeticStatusUnknown || vBogus.HermeticityReason != HermeticReasonPolicyUnapproved {
+		t.Fatalf("expected REASON_POLICY_UNAPPROVED, got %s (%s)", vBogus.HermeticityStatus, vBogus.HermeticityReason)
+	}
+
+	// Case 11: Declared Non-hermetic execution receipt -> DECLARED_NON_HERMETIC
 	recNonHermetic := &TaskReceipt{
 		Protocol:  ProtocolVersion,
 		TaskID:    spec.TaskID,
 		Worker:    "worker-node",
 		Execution: ExecutionReceipt{ExitCode: 0, Hermetic: false},
 	}
-	vNonHermetic, err := VerifyReceipt(spec, recNonHermetic, []byte(""), []byte(""), 0, "verifier-node")
+	vNonHermetic, err := VerifyReceiptWithAllowlist(spec, recNonHermetic, []byte(""), []byte(""), 0, "verifier-node", allowlist)
 	if err != nil {
 		t.Fatalf("unexpected verify error: %v", err)
 	}
-	if vNonHermetic.HermeticityStatus != HermeticStatusDeclaredNonHermetic || vNonHermetic.IsHermetic {
-		t.Fatalf("expected DECLARED_NON_HERMETIC, got %s", vNonHermetic.HermeticityStatus)
+	if vNonHermetic.HermeticityStatus != HermeticStatusDeclaredNonHermetic || vNonHermetic.HermeticityReason != HermeticReasonDeclaredNonHermetic {
+		t.Fatalf("expected DECLARED_NON_HERMETIC, got %s (%s)", vNonHermetic.HermeticityStatus, vNonHermetic.HermeticityReason)
 	}
 	if CanFastPathCache(vNonHermetic) {
 		t.Fatalf("expected CanFastPathCache=FALSE for DECLARED_NON_HERMETIC")
+	}
+
+	// Case 12: Tenant ACL Revocation on Cache Reuse (astranaut01 audit #22956)
+	// Even though vVerified was PASS and VERIFIED_HERMETIC, if tenant's ACL is revoked, reuse MUST be denied.
+	activeFreshness := &FreshnessPolicy{
+		MaxAgeSeconds: 3600,
+		CurrentTime:   1600,
+		TenantACL:     map[string]bool{"tenant-authorized": true, "tenant-revoked": false},
+	}
+	if !CanFastPathCacheWithFreshness(vVerified, activeFreshness, "tenant-authorized") {
+		t.Fatalf("expected CanFastPathCacheWithFreshness=true for authorized tenant")
+	}
+	if CanFastPathCacheWithFreshness(vVerified, activeFreshness, "tenant-revoked") {
+		t.Fatalf("SECURITY VIOLATION: revoked tenant was permitted to reuse fast-path cache! (astranaut01 audit #22956)")
+	}
+	if CanFastPathCacheWithFreshness(vVerified, activeFreshness, "unknown-tenant") {
+		t.Fatalf("SECURITY VIOLATION: unlisted tenant was permitted to reuse fast-path cache!")
 	}
 }
 
@@ -466,16 +712,16 @@ func TestVTP_CanonicalEncodingAndDelimiterInjection(t *testing.T) {
 		t.Fatalf("expected identical normalized capabilities, got %v vs %v", norm1, norm2)
 	}
 
-	bytes1 := ComputeAttestationCanonicalBytes("task-1", "policy-1", 1, "img-1", "inp-1", "k1", caps1, 100, 200)
-	bytes2 := ComputeAttestationCanonicalBytes("task-1", "policy-1", 1, "img-1", "inp-1", "k1", caps2, 100, 200)
+	bytes1 := ComputeAttestationCanonicalBytes("task-1", "iss-1", "run-1", "policy-1", 1, "img-1", "inp-1", "k1", caps1, 100, 200)
+	bytes2 := ComputeAttestationCanonicalBytes("task-1", "iss-1", "run-1", "policy-1", 1, "img-1", "inp-1", "k1", caps2, 100, 200)
 	if !bytes.Equal(bytes1, bytes2) {
 		t.Fatalf("expected identical canonical bytes for permuted/duplicate caps, got differences:\n%s\nvs\n%s", string(bytes1), string(bytes2))
 	}
 
 	// 2. Delimiter collision resistance: length-delimited framing prevents field boundary bleeding
 	// Attempt collision: task_id="t:key_id:k1", key_id="k2" vs task_id="t", key_id="k1:policy_digest:p"
-	bA := ComputeAttestationCanonicalBytes("t:key_id:k1", "p", 1, "img", "inp", "k2", nil, 0, 0)
-	bB := ComputeAttestationCanonicalBytes("t", "p", 1, "img", "inp", "k1:key_id:k2", nil, 0, 0)
+	bA := ComputeAttestationCanonicalBytes("t:key_id:k1", "iss", "run", "p", 1, "img", "inp", "k2", nil, 100, 200)
+	bB := ComputeAttestationCanonicalBytes("t", "iss", "run", "p", 1, "img", "inp", "k1:key_id:k2", nil, 100, 200)
 	if bytes.Equal(bA, bB) {
 		t.Fatalf("length-delimited encoding failed to prevent delimiter boundary bleeding!")
 	}
@@ -489,8 +735,11 @@ func TestVTP_ED25519CryptographicAttestation(t *testing.T) {
 	}
 
 	keyID := "runner-enclave-key-2026-v1"
+	runnerID := "runner-enclave-instance-1"
+	issuer := "trusted-runner-enclave"
+
 	allowlist := &HermeticAllowlist{
-		TrustedIssuers:        []string{"trusted-runner-enclave"},
+		TrustedIssuers:        []string{issuer},
 		ApprovedPolicyDigests: []string{"sha256:strict-gvisor-v1"},
 		PublicKeys:            map[string]ed25519.PublicKey{keyID: pubKey},
 		CurrentEpoch:          1,
@@ -505,6 +754,8 @@ func TestVTP_ED25519CryptographicAttestation(t *testing.T) {
 
 	canonicalBytes := ComputeAttestationCanonicalBytes(
 		spec.TaskID,
+		issuer,
+		runnerID,
 		"sha256:strict-gvisor-v1",
 		1,
 		"sha256:rootfs-image-v1",
@@ -527,7 +778,8 @@ func TestVTP_ED25519CryptographicAttestation(t *testing.T) {
 			ExitCode: 0,
 			Hermetic: true,
 			Sandbox: &SandboxAttestation{
-				Issuer:       "trusted-runner-enclave",
+				Issuer:       issuer,
+				RunnerID:     runnerID,
 				KeyID:        keyID,
 				PolicyDigest: "sha256:strict-gvisor-v1",
 				PolicyEpoch:  1,
@@ -541,9 +793,9 @@ func TestVTP_ED25519CryptographicAttestation(t *testing.T) {
 		},
 	}
 
-	status := DeriveHermeticityStatus(spec, receipt, allowlist)
-	if status != HermeticStatusVerifiedHermetic {
-		t.Fatalf("expected VERIFIED_HERMETIC for valid ED25519 attestation, got %s", status)
+	status, reason := DeriveHermeticityEvaluation(spec, receipt, allowlist)
+	if status != HermeticStatusVerifiedHermetic || reason != HermeticReasonVerified {
+		t.Fatalf("expected VERIFIED_HERMETIC & REASON_VERIFIED for valid ED25519 attestation, got %s (%s)", status, reason)
 	}
 
 	verify := &TaskVerify{
@@ -554,6 +806,7 @@ func TestVTP_ED25519CryptographicAttestation(t *testing.T) {
 		DistinctAccountIDs: true,
 		IsDisjointSeat:     true,
 		HermeticityStatus:  status,
+		HermeticityReason:  reason,
 		IsHermetic:         status == HermeticStatusVerifiedHermetic,
 	}
 
@@ -574,8 +827,11 @@ func TestVTP_AstranautNegativeHashTamper(t *testing.T) {
 	}
 
 	keyID := "runner-enclave-key-2026-v1"
+	runnerID := "runner-enclave-instance-1"
+	issuer := "trusted-runner-enclave"
+
 	allowlist := &HermeticAllowlist{
-		TrustedIssuers:        []string{"trusted-runner-enclave"},
+		TrustedIssuers:        []string{issuer},
 		ApprovedPolicyDigests: []string{"sha256:strict-gvisor-v1"},
 		PublicKeys:            map[string]ed25519.PublicKey{keyID: pubKey},
 		CurrentEpoch:          1,
@@ -592,6 +848,8 @@ func TestVTP_AstranautNegativeHashTamper(t *testing.T) {
 	tamperedImage := "sha256:malicious-compromised-image"
 	tamperedCanonical := ComputeAttestationCanonicalBytes(
 		spec.TaskID,
+		issuer,
+		runnerID,
 		"sha256:strict-gvisor-v1",
 		1,
 		tamperedImage,
@@ -611,7 +869,8 @@ func TestVTP_AstranautNegativeHashTamper(t *testing.T) {
 			ExitCode: 0,
 			Hermetic: true,
 			Sandbox: &SandboxAttestation{
-				Issuer:       "trusted-runner-enclave",
+				Issuer:       issuer,
+				RunnerID:     runnerID,
 				KeyID:        keyID,
 				PolicyDigest: "sha256:strict-gvisor-v1",
 				PolicyEpoch:  1,
@@ -625,9 +884,9 @@ func TestVTP_AstranautNegativeHashTamper(t *testing.T) {
 		},
 	}
 
-	status := DeriveHermeticityStatus(spec, receipt, allowlist)
-	if status != HermeticStatusUnknown {
-		t.Fatalf("astranaut01 audit violation: recomputed SHA hash over tampered image must yield UNKNOWN, got %s", status)
+	status, reason := DeriveHermeticityEvaluation(spec, receipt, allowlist)
+	if status != HermeticStatusUnknown || reason != HermeticReasonSignatureInvalid {
+		t.Fatalf("astranaut01 audit violation: recomputed SHA hash over tampered image must yield UNKNOWN & REASON_SIGNATURE_INVALID, got %s (%s)", status, reason)
 	}
 }
 
@@ -640,8 +899,11 @@ func TestVTP_AttestationLifecycleAndRevocation(t *testing.T) {
 	}
 
 	keyID := "runner-key-epoch-1"
+	runnerID := "runner-node-lifecycle"
+	issuer := "trusted-runner-enclave"
+
 	allowlist := &HermeticAllowlist{
-		TrustedIssuers:        []string{"trusted-runner-enclave"},
+		TrustedIssuers:        []string{issuer},
 		ApprovedPolicyDigests: []string{"sha256:strict-gvisor-v1"},
 		PublicKeys:            map[string]ed25519.PublicKey{keyID: pubKey},
 		RevokedKeyIDs:         map[string]bool{},
@@ -656,7 +918,7 @@ func TestVTP_AttestationLifecycleAndRevocation(t *testing.T) {
 	}
 
 	makeReceipt := func(epoch uint64, issuedAt, expiresAt int64) *TaskReceipt {
-		b := ComputeAttestationCanonicalBytes(spec.TaskID, "sha256:strict-gvisor-v1", epoch, "img-1", "inp-1", keyID, nil, issuedAt, expiresAt)
+		b := ComputeAttestationCanonicalBytes(spec.TaskID, issuer, runnerID, "sha256:strict-gvisor-v1", epoch, "img-1", "inp-1", keyID, nil, issuedAt, expiresAt)
 		sig := ed25519.Sign(privKey, b)
 		return &TaskReceipt{
 			Protocol: ProtocolVersion,
@@ -666,7 +928,8 @@ func TestVTP_AttestationLifecycleAndRevocation(t *testing.T) {
 				ExitCode: 0,
 				Hermetic: true,
 				Sandbox: &SandboxAttestation{
-					Issuer:       "trusted-runner-enclave",
+					Issuer:       issuer,
+					RunnerID:     runnerID,
 					KeyID:        keyID,
 					PolicyDigest: "sha256:strict-gvisor-v1",
 					PolicyEpoch:  epoch,
@@ -682,39 +945,39 @@ func TestVTP_AttestationLifecycleAndRevocation(t *testing.T) {
 
 	// Case 1: Valid active lifecycle
 	recValid := makeReceipt(1, 1000, 2000)
-	if s := DeriveHermeticityStatus(spec, recValid, allowlist); s != HermeticStatusVerifiedHermetic {
-		t.Fatalf("expected VERIFIED_HERMETIC for active attestation, got %s", s)
+	if s, r := DeriveHermeticityEvaluation(spec, recValid, allowlist); s != HermeticStatusVerifiedHermetic || r != HermeticReasonVerified {
+		t.Fatalf("expected VERIFIED_HERMETIC & REASON_VERIFIED for active attestation, got %s (%s)", s, r)
 	}
 
 	// Case 2: Key Revocation
 	allowlist.RevokedKeyIDs[keyID] = true
-	if s := DeriveHermeticityStatus(spec, recValid, allowlist); s != HermeticStatusUnknown {
-		t.Fatalf("expected UNKNOWN for revoked key_id, got %s", s)
+	if s, r := DeriveHermeticityEvaluation(spec, recValid, allowlist); s != HermeticStatusUnknown || r != HermeticReasonKeyRevoked {
+		t.Fatalf("expected UNKNOWN & REASON_KEY_REVOKED for revoked key_id, got %s (%s)", s, r)
 	}
 	allowlist.RevokedKeyIDs[keyID] = false // un-revoke for next checks
 
 	// Case 3: Expired attestation (now > expires_at)
 	recExpired := makeReceipt(1, 500, 1200) // expires at 1200, current time is 1500
-	if s := DeriveHermeticityStatus(spec, recExpired, allowlist); s != HermeticStatusUnknown {
-		t.Fatalf("expected UNKNOWN for expired attestation, got %s", s)
+	if s, r := DeriveHermeticityEvaluation(spec, recExpired, allowlist); s != HermeticStatusUnknown || r != HermeticReasonExpired {
+		t.Fatalf("expected UNKNOWN & REASON_EXPIRED for expired attestation, got %s (%s)", s, r)
 	}
 
 	// Case 4: Future attestation (now < issued_at)
 	recFuture := makeReceipt(1, 1800, 2500) // issued at 1800, current time is 1500
-	if s := DeriveHermeticityStatus(spec, recFuture, allowlist); s != HermeticStatusUnknown {
-		t.Fatalf("expected UNKNOWN for future attestation, got %s", s)
+	if s, r := DeriveHermeticityEvaluation(spec, recFuture, allowlist); s != HermeticStatusUnknown || r != HermeticReasonFutureIssuedAt {
+		t.Fatalf("expected UNKNOWN & REASON_FUTURE_ISSUED_AT for future attestation, got %s (%s)", s, r)
 	}
 
 	// Case 5: Policy Epoch Bumping (min accepted epoch bumped to 2)
 	allowlist.MinAcceptedEpoch = 2
-	if s := DeriveHermeticityStatus(spec, recValid, allowlist); s != HermeticStatusUnknown {
-		t.Fatalf("expected UNKNOWN for outdated policy epoch (attestation epoch=1, min=2), got %s", s)
+	if s, r := DeriveHermeticityEvaluation(spec, recValid, allowlist); s != HermeticStatusUnknown || r != HermeticReasonEpochStale {
+		t.Fatalf("expected UNKNOWN & REASON_EPOCH_STALE for outdated policy epoch, got %s (%s)", s, r)
 	}
 
 	// Case 6: Attestation with updated epoch 2 -> VERIFIED_HERMETIC
 	recEpoch2 := makeReceipt(2, 1000, 2000)
-	if s := DeriveHermeticityStatus(spec, recEpoch2, allowlist); s != HermeticStatusVerifiedHermetic {
-		t.Fatalf("expected VERIFIED_HERMETIC for epoch 2 attestation, got %s", s)
+	if s, r := DeriveHermeticityEvaluation(spec, recEpoch2, allowlist); s != HermeticStatusVerifiedHermetic || r != HermeticReasonVerified {
+		t.Fatalf("expected VERIFIED_HERMETIC & REASON_VERIFIED for epoch 2 attestation, got %s (%s)", s, r)
 	}
 }
 

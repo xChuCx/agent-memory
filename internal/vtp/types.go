@@ -73,6 +73,38 @@ const (
 	HermeticStatusUnknown             HermeticityStatus = "UNKNOWN"
 )
 
+// HermeticityReason provides an orthogonal, unambiguous diagnostic code explaining why an attestation
+// succeeded or failed hermetic evaluation (addressing @just-nik audit #22960).
+type HermeticityReason string
+
+const (
+	HermeticReasonVerified                HermeticityReason = "REASON_VERIFIED"
+	HermeticReasonDeclaredNonHermetic     HermeticityReason = "REASON_DECLARED_NON_HERMETIC"
+	HermeticReasonMissingSandbox          HermeticityReason = "REASON_MISSING_SANDBOX"
+	HermeticReasonMissingSignature        HermeticityReason = "REASON_MISSING_SIGNATURE"
+	HermeticReasonMissingPolicyDigest     HermeticityReason = "REASON_MISSING_POLICY_DIGEST"
+	HermeticReasonMissingIssuer           HermeticityReason = "REASON_MISSING_ISSUER"
+	HermeticReasonNetworkCapabilityDenied HermeticityReason = "REASON_NETWORK_CAPABILITY_DENIED"
+	HermeticReasonIssuerUntrusted         HermeticityReason = "REASON_ISSUER_UNTRUSTED"
+	HermeticReasonPolicyUnapproved        HermeticityReason = "REASON_POLICY_UNAPPROVED"
+	HermeticReasonKeyRevoked              HermeticityReason = "REASON_KEY_REVOKED"
+	HermeticReasonEpochStale              HermeticityReason = "REASON_EPOCH_STALE"
+	HermeticReasonExpired                 HermeticityReason = "REASON_EXPIRED"
+	HermeticReasonFutureIssuedAt          HermeticityReason = "REASON_FUTURE_ISSUED_AT"
+	HermeticReasonInvalidTimeWindow       HermeticityReason = "REASON_INVALID_TIME_WINDOW"
+	HermeticReasonMissingKeyRegistry      HermeticityReason = "REASON_MISSING_KEY_REGISTRY"
+	HermeticReasonKeyUnregistered         HermeticityReason = "REASON_KEY_UNREGISTERED"
+	HermeticReasonKeyRunnerMismatch       HermeticityReason = "REASON_KEY_RUNNER_MISMATCH"
+	HermeticReasonSignatureInvalid        HermeticityReason = "REASON_SIGNATURE_INVALID"
+)
+
+// TrustedKeyBinding binds an ED25519 public key to an authorized issuer and runner identity (astranaut01 audit #22956).
+type TrustedKeyBinding struct {
+	PublicKey ed25519.PublicKey `json:"-" yaml:"-"`
+	Issuer    string            `json:"issuer,omitempty" yaml:"issuer,omitempty"`
+	RunnerID  string            `json:"runner_id,omitempty" yaml:"runner_id,omitempty"`
+}
+
 // SandboxAttestation captures cryptographically bound evidence of sandbox isolation (SAR-006 / second-thought audit #22398, #22431).
 type SandboxAttestation struct {
 	RunnerID     string   `json:"runner_id,omitempty" yaml:"runner_id,omitempty"`         // Enclave / runner instance identifier
@@ -90,15 +122,22 @@ type SandboxAttestation struct {
 
 // HermeticAllowlist defines verifier-approved trusted sandbox issuers, isolation policies, and verifier key registry with revocation.
 type HermeticAllowlist struct {
-	TrustedIssuers        []string                    `json:"trusted_issuers" yaml:"trusted_issuers"`
-	ApprovedPolicyDigests []string                    `json:"approved_policy_digests" yaml:"approved_policy_digests"`
+	TrustedIssuers        []string                     `json:"trusted_issuers" yaml:"trusted_issuers"`
+	ApprovedPolicyDigests []string                     `json:"approved_policy_digests" yaml:"approved_policy_digests"`
 	PublicKeys            map[string]ed25519.PublicKey `json:"-" yaml:"-"`
-	RevokedKeyIDs         map[string]bool             `json:"revoked_key_ids,omitempty" yaml:"revoked_key_ids,omitempty"`
-	CurrentEpoch          uint64                      `json:"current_epoch,omitempty" yaml:"current_epoch,omitempty"`
-	MinAcceptedEpoch      uint64                      `json:"min_accepted_epoch,omitempty" yaml:"min_accepted_epoch,omitempty"`
-	CurrentTime           int64                       `json:"current_time,omitempty" yaml:"current_time,omitempty"` // Test injection hook for deterministic evaluation
+	KeyBindings           map[string]TrustedKeyBinding `json:"-" yaml:"-"`
+	RevokedKeyIDs         map[string]bool              `json:"revoked_key_ids,omitempty" yaml:"revoked_key_ids,omitempty"`
+	CurrentEpoch          uint64                       `json:"current_epoch,omitempty" yaml:"current_epoch,omitempty"`
+	MinAcceptedEpoch      uint64                       `json:"min_accepted_epoch,omitempty" yaml:"min_accepted_epoch,omitempty"`
+	CurrentTime           int64                        `json:"current_time,omitempty" yaml:"current_time,omitempty"` // Test injection hook for deterministic evaluation
 }
 
+// FreshnessPolicy enforces tenant-level access control and cache freshness on verification reuse (astranaut01 audit #22956).
+type FreshnessPolicy struct {
+	MaxAgeSeconds int64           `json:"max_age_seconds,omitempty" yaml:"max_age_seconds,omitempty"`
+	CurrentTime   int64           `json:"current_time,omitempty" yaml:"current_time,omitempty"`
+	TenantACL     map[string]bool `json:"tenant_acl,omitempty" yaml:"tenant_acl,omitempty"`
+}
 
 // ExecutionReceipt captures the execution details for Phase 3.
 type ExecutionReceipt struct {
@@ -136,7 +175,9 @@ type TaskVerify struct {
 	OperatorIndependence string            `json:"operator_independence" yaml:"operator_independence"` // "INDEPENDENT", "CORROBORATED_SAME_OPERATOR", or "UNKNOWN"
 	IsDisjointSeat       bool              `json:"is_disjoint_seat" yaml:"is_disjoint_seat"`               // Backwards compatibility alias
 	HermeticityStatus    HermeticityStatus `json:"hermeticity_status" yaml:"hermeticity_status"`           // VERIFIED_HERMETIC, DECLARED_NON_HERMETIC, UNKNOWN
+	HermeticityReason    HermeticityReason `json:"hermeticity_reason,omitempty" yaml:"hermeticity_reason,omitempty"` // Orthogonal diagnostic reason code (@just-nik audit #22960)
 	IsHermetic           bool              `json:"is_hermetic" yaml:"is_hermetic"`                         // Backwards-compatible alias (true ONLY if VERIFIED_HERMETIC)
+	VerifiedAt           int64             `json:"verified_at,omitempty" yaml:"verified_at,omitempty"`     // Unix timestamp when verification was evaluated
 }
 
 // TaskSettle represents Phase 5: TASK-SETTLE economic transfer or ledger mint.
