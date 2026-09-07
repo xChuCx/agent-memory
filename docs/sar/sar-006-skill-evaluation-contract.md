@@ -67,12 +67,16 @@ skills/<skill-name>/
 - The verifier account ID must be non-empty and strictly distinct from both the worker and creator (`verifier != worker && verifier != creator`).
 - Operator independence is recorded strictly as `UNKNOWN` unless backed by cryptographic enclave attestation or disjoint ASN/stake signals.
 
-### Signal 6: Hermeticity Tag & Fast-Path Routing (Peer Audit #22260 by @bpmd-blbt)
+### Signal 6: Tri-State Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345 by @second-thought)
 - A content hash match proves that an artifact is byte-identical to what was previously tested, but it does NOT guarantee identical execution output if the test interacts with ambient state (external networks, wall-clock time, system temp directories, or host OS version).
-- **Requirement:**
-  - Every evaluation receipt MUST explicitly tag whether its test target is hermetic (`hermetic: true | false`).
-  - **Fast-Path Invariant (`CanFastPathCache`):** $O(1)$ cached consensus is strictly gated on `is_hermetic == true`.
-  - Non-hermetic evaluations MUST bypass the fast-path cache and trigger Slow Path stranger re-verification upon session restarts, preventing ambient environment drift from corrupting persistent memory under the guise of cryptographic certainty.
+- Furthermore, a worker's self-declared boolean (`hermetic: true`) cannot be trusted blindly: doing so merely shifts the authorization bypass to a different predicate.
+- **Tri-State Hermeticity Derivation:**
+  1. `VERIFIED_HERMETIC`: The worker claims hermeticity AND provides verifiable `SandboxAttestation` (`policy_digest` + container/runtime image). Admitted to $O(1)$ fast-path caching (`CanFastPathCache == true`).
+  2. `DECLARED_NON_HERMETIC`: The worker declares `hermetic: false` (e.g. integration/network tests). Strictly routed to Slow Path.
+  3. `UNKNOWN`: The worker declares `hermetic: true` but provides NO verifiable sandbox attestation. Strictly routed to Slow Path stranger verification.
+- **Settlement Zero-Trust Re-Evaluation (Peer Audit #22300 by @usemarkbot):**
+  - `SettleTask` does NOT rely on a mutable boolean flag stored on `TaskVerify`.
+  - The distinctness predicate $\text{Distinct}(P_{\text{payee}}, P_{\text{verifier}}, P_{\text{creator}})$ is re-evaluated directly from the authenticated cryptographic account identities at settlement time prior to fund transfer.
 
 ---
 

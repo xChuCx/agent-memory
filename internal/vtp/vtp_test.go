@@ -153,11 +153,12 @@ func TestVTP_PartialSettlement(t *testing.T) {
 		Bounty:   BountySpec{Currency: "GRN", Amount: 10},
 	}
 	verify := &TaskVerify{
-		Protocol:       ProtocolVersion,
-		Type:           "VERIFY",
-		TaskID:         spec.TaskID,
-		Verdict:        "PARTIAL",
-		Basis:          "CONTAMINATION_GAME_THEORY",
+		Protocol:           ProtocolVersion,
+		Type:               "VERIFY",
+		TaskID:             spec.TaskID,
+		Verifier:           "verifier-node",
+		Verdict:            "PARTIAL",
+		Basis:              "CONTAMINATION_GAME_THEORY",
 		EvidenceSHA256:     "evidence_partial_hash",
 		DistinctAccountIDs: true,
 		IsDisjointSeat:     true,
@@ -179,7 +180,7 @@ func TestVTP_PartialSettlement(t *testing.T) {
 	}
 	settleMin, err := SettleTask(specMin, verify, "payer-node", "worker-node", 15001)
 	if err != nil {
-		t.Fatalf("unexpected error on min partial settlement: %v", err)
+		t.Fatalf("unexpected error on minimum partial settlement: %v", err)
 	}
 	if settleMin.Amount != 1 {
 		t.Fatalf("expected minimum 1 GRN payout, got %d", settleMin.Amount)
@@ -188,15 +189,16 @@ func TestVTP_PartialSettlement(t *testing.T) {
 
 func TestVTP_DeriveDisjointSeat(t *testing.T) {
 	cases := []struct {
-		name      string
-		worker    string
-		verifier  string
-		creator   string
-		expected  bool
+		name     string
+		worker   string
+		verifier string
+		creator  string
+		expected bool
 	}{
 		{"disjoint valid", "worker-01", "verifier-02", "creator-00", true},
 		{"self-verification forbidden", "worker-01", "worker-01", "creator-00", false},
 		{"creator cannot self-verify", "worker-01", "creator-00", "creator-00", false},
+		{"worker cannot be creator", "creator-00", "verifier-02", "creator-00", false},
 		{"empty verifier invalid", "worker-01", "", "creator-00", false},
 		{"empty worker invalid", "", "verifier-02", "creator-00", false},
 		{"creator optional but distinct", "worker-01", "verifier-02", "", true},
@@ -257,6 +259,7 @@ func TestVTP_SettlementInconsistencyBypass(t *testing.T) {
 				Protocol:           ProtocolVersion,
 				Type:               "VERIFY",
 				TaskID:             spec.TaskID,
+				Verifier:           "verifier-01",
 				Verdict:            "PASS",
 				Basis:              "FACT_CONSISTENT",
 				DistinctAccountIDs: tc.distinctAccountIDs,
@@ -288,25 +291,50 @@ func TestVTP_HermeticityFastPathGating(t *testing.T) {
 		Oracle:   OracleSpec{Type: "execution@1", Hermetic: true},
 	}
 
-	// 1. Hermetic execution receipt
-	recHermetic := &TaskReceipt{
-		Protocol:  ProtocolVersion,
-		TaskID:    spec.TaskID,
-		Worker:    "worker-node",
-		Execution: ExecutionReceipt{ExitCode: 0, Hermetic: true},
+	// 1. Verified Hermetic execution (worker claims hermetic + provides valid sandbox attestation)
+	recVerified := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				PolicyDigest: "sha256:hermetic-sandbox-policy-v1",
+				RuntimeImage: "docker.io/library/alpine@sha256:e1c0d",
+			},
+		},
 	}
-	vHermetic, err := VerifyReceipt(spec, recHermetic, []byte(""), []byte(""), 0, "verifier-node")
+	vVerified, err := VerifyReceipt(spec, recVerified, []byte(""), []byte(""), 0, "verifier-node")
 	if err != nil {
 		t.Fatalf("unexpected verify error: %v", err)
 	}
-	if !vHermetic.IsHermetic {
-		t.Fatalf("expected IsHermetic=true")
+	if vVerified.HermeticityStatus != HermeticStatusVerifiedHermetic || !vVerified.IsHermetic {
+		t.Fatalf("expected VERIFIED_HERMETIC, got %s", vVerified.HermeticityStatus)
 	}
-	if !CanFastPathCache(vHermetic) {
-		t.Fatalf("expected CanFastPathCache=true for hermetic PASS")
+	if !CanFastPathCache(vVerified) {
+		t.Fatalf("expected CanFastPathCache=true for VERIFIED_HERMETIC PASS")
 	}
 
-	// 2. Non-hermetic execution receipt (e.g., depends on network/ambient clock)
+	// 2. Unattested Hermetic claim (second-thought audit #22345: worker self-declares hermetic=true without attestation)
+	recUnattested := &TaskReceipt{
+		Protocol:  ProtocolVersion,
+		TaskID:    spec.TaskID,
+		Worker:    "worker-node",
+		Execution: ExecutionReceipt{ExitCode: 0, Hermetic: true}, // No sandbox attestation
+	}
+	vUnattested, err := VerifyReceipt(spec, recUnattested, []byte(""), []byte(""), 0, "verifier-node")
+	if err != nil {
+		t.Fatalf("unexpected verify error: %v", err)
+	}
+	if vUnattested.HermeticityStatus != HermeticStatusUnknown || vUnattested.IsHermetic {
+		t.Fatalf("expected UNKNOWN for unattested claim, got %s (is_hermetic=%v)", vUnattested.HermeticityStatus, vUnattested.IsHermetic)
+	}
+	if CanFastPathCache(vUnattested) {
+		t.Fatalf("expected CanFastPathCache=FALSE for unattested UNKNOWN hermeticity")
+	}
+
+	// 3. Declared Non-hermetic execution receipt
 	recNonHermetic := &TaskReceipt{
 		Protocol:  ProtocolVersion,
 		TaskID:    spec.TaskID,
@@ -317,11 +345,53 @@ func TestVTP_HermeticityFastPathGating(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected verify error: %v", err)
 	}
-	if vNonHermetic.IsHermetic {
-		t.Fatalf("expected IsHermetic=false")
+	if vNonHermetic.HermeticityStatus != HermeticStatusDeclaredNonHermetic || vNonHermetic.IsHermetic {
+		t.Fatalf("expected DECLARED_NON_HERMETIC, got %s", vNonHermetic.HermeticityStatus)
 	}
 	if CanFastPathCache(vNonHermetic) {
-		t.Fatalf("expected CanFastPathCache=FALSE for non-hermetic execution per SAR-006 audit")
+		t.Fatalf("expected CanFastPathCache=FALSE for DECLARED_NON_HERMETIC")
+	}
+}
+
+func TestVTP_SettlementZeroTrustReevaluation(t *testing.T) {
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-settle-zt",
+		Creator:  "creator-account",
+		Bounty:   BountySpec{Currency: "GRN", Amount: 10},
+	}
+
+	// Verification was done by verifier-account
+	verify := &TaskVerify{
+		Protocol:           ProtocolVersion,
+		Type:               "VERIFY",
+		TaskID:             spec.TaskID,
+		Verifier:           "verifier-account",
+		Verdict:            "PASS",
+		Basis:              "FACT_CONSISTENT",
+		DistinctAccountIDs: true,
+		IsDisjointSeat:     true,
+	}
+
+	// Attack 1: Attempt to settle with payee == verifier (payee stealing validation bounty)
+	_, err := SettleTask(spec, verify, "payer-account", "verifier-account", 15000)
+	if err == nil {
+		t.Fatalf("expected settlement failure when payee == verifier (usemarkbot audit #22300)")
+	}
+
+	// Attack 2: Attempt to settle with payee == creator
+	_, err = SettleTask(spec, verify, "payer-account", "creator-account", 15000)
+	if err == nil {
+		t.Fatalf("expected settlement failure when payee == creator")
+	}
+
+	// Valid settlement: payer != payee != verifier != creator
+	settle, err := SettleTask(spec, verify, "payer-account", "worker-account", 15000)
+	if err != nil {
+		t.Fatalf("unexpected settlement error on valid distinct accounts: %v", err)
+	}
+	if settle.Amount != 10 {
+		t.Fatalf("expected amount 10, got %d", settle.Amount)
 	}
 }
 

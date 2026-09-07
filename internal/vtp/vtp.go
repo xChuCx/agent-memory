@@ -40,7 +40,8 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 	evidenceSHA := ComputeDigest([]byte(evidencePayload))
 
 	distinct := HasDistinctAccountIDs(receipt.Worker, verifier, spec.Creator)
-	isHermetic := receipt.Execution.Hermetic && (spec.Oracle.Hermetic || spec.Oracle.Type == "execution@1" && receipt.Execution.Hermetic)
+	hermStatus := DeriveHermeticityStatus(spec, receipt)
+	isHermetic := hermStatus == HermeticStatusVerifiedHermetic
 
 	verify := &TaskVerify{
 		Protocol:             ProtocolVersion,
@@ -52,6 +53,7 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 		DistinctAccountIDs:   distinct,
 		IsDisjointSeat:       distinct,
 		OperatorIndependence: "UNKNOWN",
+		HermeticityStatus:    hermStatus,
 		IsHermetic:           isHermetic,
 	}
 
@@ -79,16 +81,34 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 	return verify, nil
 }
 
+// DeriveHermeticityStatus computes the tri-state hermeticity status from verifiable evidence
+// rather than blindly trusting worker self-declarations (SAR-006 / second-thought audit #22345).
+func DeriveHermeticityStatus(spec *TaskSpec, receipt *TaskReceipt) HermeticityStatus {
+	if receipt == nil || spec == nil {
+		return HermeticStatusUnknown
+	}
+	// If worker explicitly declares non-hermetic, trust the admission of non-hermeticity
+	if !receipt.Execution.Hermetic {
+		return HermeticStatusDeclaredNonHermetic
+	}
+	// Worker claims hermeticity: verify whether sandbox isolation proof is provided
+	if receipt.Execution.Sandbox != nil && receipt.Execution.Sandbox.PolicyDigest != "" {
+		return HermeticStatusVerifiedHermetic
+	}
+	// Unattested self-declaration defaults to UNKNOWN (must not be trusted for Fast-Path)
+	return HermeticStatusUnknown
+}
+
 // CanFastPathCache evaluates whether a verification artifact can be soundly cached
 // and accepted across agent sessions via O(1) content hash checks alone.
-// Per SAR-006 & peer audit (#22260 by @bpmd-blbt), only hermetic executions can bypass
-// the slow re-execution path; non-hermetic tasks (with external ambient dependencies)
-// must always trigger slow-path stranger verification upon session restart.
+// Strictly requires VERIFIED_HERMETIC status; UNKNOWN and DECLARED_NON_HERMETIC route to Slow Path.
 func CanFastPathCache(verify *TaskVerify) bool {
 	if verify == nil {
 		return false
 	}
-	return verify.Verdict == "PASS" && verify.IsHermetic && verify.DistinctAccountIDs
+	return verify.Verdict == "PASS" &&
+		verify.HermeticityStatus == HermeticStatusVerifiedHermetic &&
+		verify.DistinctAccountIDs
 }
 
 // SettleTask creates a settlement payload once verification passes or reaches partial resolution.
@@ -111,6 +131,10 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 	if verify.IsDisjointSeat != verify.DistinctAccountIDs {
 		return nil, errors.New("cannot settle: inconsistent verification state (IsDisjointSeat must match DistinctAccountIDs)")
 	}
+	// Zero-Trust re-evaluation on settlement arguments (usemarkbot audit #22300)
+	if verify.Verifier != "" && !HasDistinctAccountIDs(payee, verify.Verifier, spec.Creator) {
+		return nil, errors.New("cannot settle: payee, verifier, and creator must be distinct authenticated accounts")
+	}
 
 	amount := spec.Bounty.Amount
 	if verify.Verdict == "PARTIAL" {
@@ -121,26 +145,36 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 	}
 
 	return &TaskSettle{
-		Protocol:         ProtocolVersion,
-		Type:             "SETTLE",
-		TaskID:           spec.TaskID,
-		SettlementMethod: "GRN_TRANSFER",
-		Payer:            payer,
-		Payee:            payee,
-		Amount:           amount,
-		IsHermetic:       verify.IsHermetic,
-		ReceiptRef:       verify.EvidenceSHA256,
-		SettledSeq:       currentSeq,
+		Protocol:          ProtocolVersion,
+		Type:              "SETTLE",
+		TaskID:            spec.TaskID,
+		SettlementMethod:  "GRN_TRANSFER",
+		Payer:             payer,
+		Payee:             payee,
+		Amount:            amount,
+		HermeticityStatus: verify.HermeticityStatus,
+		IsHermetic:        verify.IsHermetic,
+		ReceiptRef:        verify.EvidenceSHA256,
+		SettledSeq:        currentSeq,
 	}, nil
 }
 
 // HasDistinctAccountIDs enforces anti-self-check by verifying that the verifier's authenticated
-// account ID is non-empty and strictly distinct from both the worker account and task creator.
+// account ID is non-empty and strictly distinct from both the worker account and task creator,
+// and that worker and creator are distinct when creator is declared.
 func HasDistinctAccountIDs(workerID, verifierID, creatorID string) bool {
 	if verifierID == "" || workerID == "" {
 		return false
 	}
-	return verifierID != workerID && (creatorID == "" || verifierID != creatorID)
+	if verifierID == workerID {
+		return false
+	}
+	if creatorID != "" {
+		if verifierID == creatorID || workerID == creatorID {
+			return false
+		}
+	}
+	return true
 }
 
 // DeriveDisjointSeat is retained as an alias for HasDistinctAccountIDs for backwards compatibility.

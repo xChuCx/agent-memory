@@ -60,13 +60,30 @@ type ArtifactSpec struct {
 	SHA256 string `json:"sha256" yaml:"sha256"`
 }
 
+// HermeticityStatus defines the tri-state evaluation of execution hermeticity (SAR-006 / second-thought audit #22345).
+type HermeticityStatus string
+
+const (
+	HermeticStatusVerifiedHermetic    HermeticityStatus = "VERIFIED_HERMETIC"
+	HermeticStatusDeclaredNonHermetic HermeticityStatus = "DECLARED_NON_HERMETIC"
+	HermeticStatusUnknown             HermeticityStatus = "UNKNOWN"
+)
+
+// SandboxAttestation captures verifiable evidence of sandbox isolation and zero ambient dependencies.
+type SandboxAttestation struct {
+	PolicyDigest string   `json:"policy_digest,omitempty" yaml:"policy_digest,omitempty"` // Digest of sandbox isolation profile
+	RuntimeImage string   `json:"runtime_image,omitempty" yaml:"runtime_image,omitempty"` // Digest of container/runtime image
+	AllowedCaps  []string `json:"allowed_caps,omitempty" yaml:"allowed_caps,omitempty"`   // Declared permitted capabilities
+}
+
 // ExecutionReceipt captures the execution details for Phase 3.
 type ExecutionReceipt struct {
-	StdoutSHA256       string `json:"stdout_sha256" yaml:"stdout_sha256"`
-	DiffHunksSHA256    string `json:"diff_hunks_sha256" yaml:"diff_hunks_sha256"`
-	ExecutedAssertions int    `json:"executed_assertions" yaml:"executed_assertions"`
-	ExitCode           int    `json:"exit_code" yaml:"exit_code"`
-	Hermetic           bool   `json:"hermetic,omitempty" yaml:"hermetic,omitempty"` // Verified zero external/ambient environment dependencies
+	StdoutSHA256       string              `json:"stdout_sha256" yaml:"stdout_sha256"`
+	DiffHunksSHA256    string              `json:"diff_hunks_sha256" yaml:"diff_hunks_sha256"`
+	ExecutedAssertions int                 `json:"executed_assertions" yaml:"executed_assertions"`
+	ExitCode           int                 `json:"exit_code" yaml:"exit_code"`
+	Hermetic           bool                `json:"hermetic,omitempty" yaml:"hermetic,omitempty"` // Self-declared worker flag
+	Sandbox            *SandboxAttestation `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`   // Verifiable isolation evidence
 }
 
 // TaskReceipt represents Phase 3: TASK-RECEIPT published upon task completion.
@@ -83,30 +100,32 @@ type TaskReceipt struct {
 
 // TaskVerify represents Phase 4: TASK-VERIFY dual-oracle evaluation.
 type TaskVerify struct {
-	Protocol             string `json:"protocol" yaml:"protocol"`
-	Type                 string `json:"type" yaml:"type"` // "VERIFY"
-	TaskID               string `json:"task_id" yaml:"task_id"`
-	Verifier             string `json:"verifier" yaml:"verifier"`
-	OracleType           string `json:"oracle_type" yaml:"oracle_type"`
-	Verdict              string `json:"verdict" yaml:"verdict"` // "PASS", "FAIL", "PARTIAL", "CONTESTED"
-	Basis                string `json:"basis" yaml:"basis"`     // e.g. "FACT_CONSISTENT", "COUNTER_EXAMPLE"
-	EvidenceSHA256       string `json:"evidence_sha256" yaml:"evidence_sha256"`
-	DistinctAccountIDs   bool   `json:"distinct_account_ids" yaml:"distinct_account_ids"`       // Derived: verifier != worker && verifier != creator
-	OperatorIndependence string `json:"operator_independence" yaml:"operator_independence"` // "INDEPENDENT", "CORROBORATED_SAME_OPERATOR", or "UNKNOWN"
-	IsDisjointSeat       bool   `json:"is_disjoint_seat" yaml:"is_disjoint_seat"`               // Backwards compatibility alias
-	IsHermetic           bool   `json:"is_hermetic" yaml:"is_hermetic"`                         // True if execution is hermetic (gating Fast-Path cacheability)
+	Protocol             string            `json:"protocol" yaml:"protocol"`
+	Type                 string            `json:"type" yaml:"type"` // "VERIFY"
+	TaskID               string            `json:"task_id" yaml:"task_id"`
+	Verifier             string            `json:"verifier" yaml:"verifier"`
+	OracleType           string            `json:"oracle_type" yaml:"oracle_type"`
+	Verdict              string            `json:"verdict" yaml:"verdict"` // "PASS", "FAIL", "PARTIAL", "CONTESTED"
+	Basis                string            `json:"basis" yaml:"basis"`     // e.g. "FACT_CONSISTENT", "COUNTER_EXAMPLE"
+	EvidenceSHA256       string            `json:"evidence_sha256" yaml:"evidence_sha256"`
+	DistinctAccountIDs   bool              `json:"distinct_account_ids" yaml:"distinct_account_ids"`       // Derived: verifier != worker && verifier != creator
+	OperatorIndependence string            `json:"operator_independence" yaml:"operator_independence"` // "INDEPENDENT", "CORROBORATED_SAME_OPERATOR", or "UNKNOWN"
+	IsDisjointSeat       bool              `json:"is_disjoint_seat" yaml:"is_disjoint_seat"`               // Backwards compatibility alias
+	HermeticityStatus    HermeticityStatus `json:"hermeticity_status" yaml:"hermeticity_status"`           // VERIFIED_HERMETIC, DECLARED_NON_HERMETIC, UNKNOWN
+	IsHermetic           bool              `json:"is_hermetic" yaml:"is_hermetic"`                         // Backwards-compatible alias (true ONLY if VERIFIED_HERMETIC)
 }
 
 // TaskSettle represents Phase 5: TASK-SETTLE economic transfer or ledger mint.
 type TaskSettle struct {
-	Protocol         string `json:"protocol" yaml:"protocol"`
-	Type             string `json:"type" yaml:"type"` // "SETTLE"
-	TaskID           string `json:"task_id" yaml:"task_id"`
-	SettlementMethod string `json:"settlement_method" yaml:"settlement_method"` // "GRN_TRANSFER", "ESCROW_RELEASE"
-	Payer            string `json:"payer" yaml:"payer"`
-	Payee            string `json:"payee" yaml:"payee"`
-	Amount           int    `json:"amount" yaml:"amount"`
-	IsHermetic       bool   `json:"is_hermetic,omitempty" yaml:"is_hermetic,omitempty"`
-	ReceiptRef       string `json:"receipt_ref" yaml:"receipt_ref"`
-	SettledSeq       int64  `json:"settled_seq" yaml:"settled_seq"`
+	Protocol          string            `json:"protocol" yaml:"protocol"`
+	Type              string            `json:"type" yaml:"type"` // "SETTLE"
+	TaskID            string            `json:"task_id" yaml:"task_id"`
+	SettlementMethod  string            `json:"settlement_method" yaml:"settlement_method"` // "GRN_TRANSFER", "ESCROW_RELEASE"
+	Payer             string            `json:"payer" yaml:"payer"`
+	Payee             string            `json:"payee" yaml:"payee"`
+	Amount            int               `json:"amount" yaml:"amount"`
+	HermeticityStatus HermeticityStatus `json:"hermeticity_status,omitempty" yaml:"hermeticity_status,omitempty"`
+	IsHermetic        bool              `json:"is_hermetic,omitempty" yaml:"is_hermetic,omitempty"`
+	ReceiptRef        string            `json:"receipt_ref" yaml:"receipt_ref"`
+	SettledSeq        int64             `json:"settled_seq" yaml:"settled_seq"`
 }
