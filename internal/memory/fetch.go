@@ -18,12 +18,14 @@ package memory
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/xChuCx/agent-memory/internal/config"
 	"github.com/xChuCx/agent-memory/internal/git"
@@ -87,6 +89,8 @@ type ContextMetadata struct {
 	BudgetUsed      int      `json:"budget_used"`
 	BudgetRemaining int      `json:"budget_remaining"`
 	StaleWarnings   []string `json:"stale_warnings,omitempty"`
+	PackDigest      string   `json:"pack_digest,omitempty"`
+	ReadNonce       string   `json:"read_nonce,omitempty"`
 }
 
 // StoreRef is one cached external "landscape" store the search path federates
@@ -240,16 +244,31 @@ func buildBootstrapPack(ctx context.Context, deps FetchDeps, budget int) (*Fetch
 		})
 	}
 
+	packStr := pack.String()
+	packDigest, readNonce := computeProofOfIngestion(packStr)
+
 	return &FetchResponse{
-		Context:       pack.String(),
+		Context:       packStr,
 		IncludedFiles: included,
 		Omitted:       omitted,
 		ContextMetadata: ContextMetadata{
 			ActiveBranch:    deps.Branch.Name,
 			BudgetUsed:      used,
 			BudgetRemaining: budget - used,
+			PackDigest:      packDigest,
+			ReadNonce:       readNonce,
 		},
 	}, nil
+}
+
+// computeProofOfIngestion derives a canonical SHA-256 digest of the assembled pack
+// and an episodic proof-of-consumption nonce (SAR-008).
+func computeProofOfIngestion(packStr string) (string, string) {
+	packBytes := []byte(packStr)
+	h := sha256.Sum256(packBytes)
+	digest := fmt.Sprintf("sha256:%x", h)
+	nonce := fmt.Sprintf("poi-%x-%d", h[:8], time.Now().UnixNano())
+	return digest, nonce
 }
 
 // kPerStoreCandidates bounds how many candidates each cached store contributes
@@ -472,14 +491,19 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 		included = append(included, inc)
 	}
 
+	packStr := pack.String()
+	packDigest, readNonce := computeProofOfIngestion(packStr)
+
 	return &FetchResponse{
-		Context:       pack.String(),
+		Context:       packStr,
 		IncludedFiles: included,
 		Omitted:       omitted,
 		ContextMetadata: ContextMetadata{
 			ActiveBranch:    deps.Branch.Name,
 			BudgetUsed:      used,
 			BudgetRemaining: budget - used,
+			PackDigest:      packDigest,
+			ReadNonce:       readNonce,
 		},
 	}, nil
 }

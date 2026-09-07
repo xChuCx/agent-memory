@@ -287,3 +287,83 @@ func TestDoctor_HumanOutput_ListsFindings(t *testing.T) {
 		t.Errorf("expected ERROR prefix for missing .agent-memory, got: %s", output)
 	}
 }
+
+func TestDoctor_PromptWiring_DetectsUnwiredInstructionFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "p"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an instruction file without agent-memory reference.
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte("# My Project\nRun `npm start` to run."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := runDoctor(dir)
+	if err != nil {
+		t.Fatalf("runDoctor: %v", err)
+	}
+
+	found := false
+	for _, f := range findings {
+		if strings.Contains(f.Message, "CLAUDE.md exists but does not reference agent-memory") {
+			found = true
+			if f.Severity != SeverityWarning {
+				t.Errorf("expected warning severity, got %s", f.Severity)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning for unwired CLAUDE.md, got findings: %+v", findings)
+	}
+
+	// Update CLAUDE.md to mention agent-memory.
+	if err := os.WriteFile(claudePath, []byte("# My Project\nUse `agent-memory fetch` before tasks."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	findingsAfter, err := runDoctor(dir)
+	if err != nil {
+		t.Fatalf("runDoctor: %v", err)
+	}
+	for _, f := range findingsAfter {
+		if strings.Contains(f.Message, "CLAUDE.md") {
+			t.Errorf("unexpected finding after wiring CLAUDE.md: %+v", f)
+		}
+	}
+}
+
+func TestDoctor_PromptWiring_AdapterSkillSuppressesWarning(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "p"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an unwired AGENTS.md.
+	agentsPath := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(agentsPath, []byte("# Autonomous Agent Directives\nAlways test before commit."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate installed adapter skill.
+	skillDir := filepath.Join(dir, ".agents", "skills", "agent-memory")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := runDoctor(dir)
+	if err != nil {
+		t.Fatalf("runDoctor: %v", err)
+	}
+	for _, f := range findings {
+		if strings.Contains(f.Message, "AGENTS.md") {
+			t.Errorf("installed adapter skill should suppress unwired warning, got finding: %+v", f)
+		}
+	}
+}
+

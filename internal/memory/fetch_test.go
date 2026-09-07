@@ -83,6 +83,12 @@ func TestBuildContextPack_BootstrapHasConventionsAndShared(t *testing.T) {
 	if resp.ContextMetadata.BudgetRemaining < 0 {
 		t.Errorf("BudgetRemaining negative: %d", resp.ContextMetadata.BudgetRemaining)
 	}
+	if !strings.HasPrefix(resp.ContextMetadata.PackDigest, "sha256:") {
+		t.Errorf("PackDigest missing sha256 prefix: %q", resp.ContextMetadata.PackDigest)
+	}
+	if !strings.HasPrefix(resp.ContextMetadata.ReadNonce, "poi-") {
+		t.Errorf("ReadNonce missing poi- prefix: %q", resp.ContextMetadata.ReadNonce)
+	}
 }
 
 func TestBuildContextPack_BootstrapOmitsMissingBranchLocal(t *testing.T) {

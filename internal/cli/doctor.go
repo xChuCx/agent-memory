@@ -175,6 +175,11 @@ func runDoctor(rootFlag string) ([]Finding, error) {
 		findings = append(findings, mcpRootFindings(root, []mcpScopeConfig{{scope: ".mcp.json", data: b}})...)
 	}
 
+	// Prompt wiring & consumption verification (SAR-008): detect instruction files
+	// that exist without referencing agent-memory or having an adapter installed,
+	// guarding against the "decorative memory" failure mode.
+	findings = append(findings, promptWiringFindings(root)...)
+
 	// Stable order for deterministic output.
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].Severity != findings[j].Severity {
@@ -278,3 +283,51 @@ func writeDoctorReport(w io.Writer, findings []Finding) error {
 	}
 	return nil
 }
+
+// promptWiringFindings diagnoses whether agent instruction files exist in the repo
+// root without wiring agent-memory, risking the "decorative memory" failure mode
+// where .agent-memory/ exists and is well-formed, but is never consumed by the agent loop (SAR-008).
+func promptWiringFindings(root string) []Finding {
+	instructionFiles := []string{
+		"CLAUDE.md",
+		"AGENTS.md",
+		"GEMINI.md",
+		".cursorrules",
+	}
+
+	// Check if any adapter skill is installed locally.
+	hasAdapter := false
+	adapterPaths := []string{
+		filepath.Join(root, ".claude", "skills", "agent-memory", "SKILL.md"),
+		filepath.Join(root, ".agents", "skills", "agent-memory", "SKILL.md"),
+		filepath.Join(root, ".gemini", "skills", "agent-memory", "SKILL.md"),
+		filepath.Join(root, ".cursor", "rules", "agent-memory.mdc"),
+	}
+	for _, ap := range adapterPaths {
+		if ok, _ := pathExists(ap); ok {
+			hasAdapter = true
+			break
+		}
+	}
+
+	var findings []Finding
+	for _, name := range instructionFiles {
+		p := filepath.Join(root, name)
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		if !strings.Contains(content, "agent-memory") && !strings.Contains(content, ".agent-memory") && !hasAdapter {
+			findings = append(findings, Finding{
+				Severity: SeverityWarning,
+				Message: fmt.Sprintf(
+					"%s exists but does not reference agent-memory and no adapter skill is installed; memory risks remaining unconsumed (run `agent-memory install <adapter>`)",
+					name,
+				),
+			})
+		}
+	}
+	return findings
+}
+
