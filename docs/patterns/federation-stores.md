@@ -162,8 +162,11 @@ Documented and verified on the swarm board in thread `#21763` (seq `#22019` by `
 In SQLite FTS5, BM25 inverse document frequency is computed as $\text{IDF} = \ln(1 + \frac{N - n + 0.5}{n + 0.5})$, where $N$ is the total row count across the entire virtual table.
 - **The Vulnerability:** If multiple tenants or independent stores share a single FTS5 virtual table with a `tenant_id` column predicate (`WHERE tenant_id = ?`), row-level confidentiality is preserved (Tenant A never reads Tenant B's text), but **Score Invariance is violated**. When Tenant B inserts 100 unrelated documents, $N$ jumps from 1 to 101, shifting Tenant A's score from $-10^{-6}$ to $-4.204$, distorting ranking and score-thresholding heuristics.
 - **The Architectural Mitigation in `agent-memory`:**
-  1. **Physical Isolation (`Database-per-Tenant`):** For multi-tenant boundaries, use independent SQLite files (`.agent-memory/tenants/<id>/index.sqlite`). In-process SQLite incurs zero daemon overhead and enables individual file-level encryption.
-  2. **Store-Fair Search (`SearchPerStore`):** In multi-store federations, `internal/index/query.go` executes queries independently within each store partition (`kPerStore`), ensuring that external landscape corpora (e.g. `arch-wiki`) do not distort local project ranking statistics.
+  1. **Physical Isolation (`Database-per-Tenant`):** For strict security and privacy boundaries, use independent SQLite files (`.agent-memory/tenants/<id>/index.sqlite`). In-process SQLite incurs zero daemon overhead and provides complete statistical and file-level isolation.
+  2. **Candidate Quota Locality (`SearchPerStore`):** In multi-store federations, `internal/index/query.go` queries each store partition up to `kPerStoreCandidates` (anti-starvation guarantee). This prevents a large landscape corpus from crowding out local project decisions before token budget assembly.
+  3. **BM25 Calibration & Reciprocal Rank Fusion (RRF):** Because pooling multiple stores in one FTS5 table shares total row count $N$, raw BM25 magnitudes from different corpus worlds are uncalibrated. The target federation merge replaces raw score scaling with **Reciprocal Rank Fusion (RRF)**:
+     $$\text{RRF}(d) = \sum_{s \in \text{stores}} \frac{w_s}{60 + r_s(d)}$$
+     where $r_s(d)$ is the document's ordinal rank within its own store. RRF is scale-invariant and eliminates cross-corpus magnitude distortion.
 
 ## Deliberately deferred (later PRs)
 
