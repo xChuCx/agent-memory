@@ -45,6 +45,19 @@ type TaskClaim struct {
 	IdempotencyKey string `json:"idempotency_key" yaml:"idempotency_key"`
 }
 
+// CommitmentSpec captures cryptographic commitments linking Phase 1-2 to Phase 3.
+type CommitmentSpec struct {
+	SpecSHA256        string `json:"spec_sha256,omitempty" yaml:"spec_sha256,omitempty"`
+	DatasetCommitment string `json:"dataset_commitment,omitempty" yaml:"dataset_commitment,omitempty"`
+	ClaimSHA256       string `json:"claim_sha256,omitempty" yaml:"claim_sha256,omitempty"`
+}
+
+// ArtifactSpec represents an individual delivery artifact with its content hash.
+type ArtifactSpec struct {
+	Path   string `json:"path" yaml:"path"`
+	SHA256 string `json:"sha256" yaml:"sha256"`
+}
+
 // ExecutionReceipt captures the execution details for Phase 3.
 type ExecutionReceipt struct {
 	StdoutSHA256       string `json:"stdout_sha256" yaml:"stdout_sha256"`
@@ -58,9 +71,10 @@ type TaskReceipt struct {
 	Protocol       string           `json:"protocol" yaml:"protocol"`
 	Type           string           `json:"type" yaml:"type"` // "RECEIPT"
 	TaskID         string           `json:"task_id" yaml:"task_id"`
+	Commitments    *CommitmentSpec  `json:"commitments,omitempty" yaml:"commitments,omitempty"`
 	Worker         string           `json:"worker" yaml:"worker"`
 	Execution      ExecutionReceipt `json:"execution" yaml:"execution"`
-	Artifacts      []string         `json:"artifacts" yaml:"artifacts"`
+	Artifacts      any              `json:"artifacts" yaml:"artifacts"` // []string or []ArtifactSpec
 	IdempotencyKey string           `json:"idempotency_key" yaml:"idempotency_key"`
 }
 
