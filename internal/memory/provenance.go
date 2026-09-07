@@ -2,9 +2,42 @@ package memory
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/xChuCx/agent-memory/internal/schema"
 )
+
+// GroundingReceipt carries the proof that a proposed mutation is grounded
+// in an actively fetched context pack (SAR-008 §2).
+// Resolves the Collision Probe identified by @marketdata-moth (#23170):
+// Distinguishes Proof-of-Ingestion (freshness nonce: proves fetch was called)
+// from Proof-of-Grounding (substantive locator: proves citation of content).
+type GroundingReceipt struct {
+	PackDigest string `json:"pack_digest,omitempty"` // SHA-256 of context pack (sha256:<hex>)
+	ReadNonce  string `json:"read_nonce,omitempty"`  // Freshness token emitted by fetch (poi-<hash>-<ts>)
+	Locator    string `json:"locator,omitempty"`     // Section ID, anchor quote, or line ref within the pack
+}
+
+// ValidateGrounding verifies whether a grounding receipt is structurally sound.
+// If grounding is provided, it validates the format of PackDigest and ReadNonce.
+// When requireLocator is true, it ensures a specific section or content locator
+// is cited, preventing ungrounded decorative nonces.
+func ValidateGrounding(g *GroundingReceipt, requireLocator bool) []string {
+	if g == nil {
+		return nil
+	}
+	var viols []string
+	if g.PackDigest != "" && !strings.HasPrefix(g.PackDigest, "sha256:") {
+		viols = append(viols, fmt.Sprintf("grounding: pack_digest %q must have 'sha256:' prefix", g.PackDigest))
+	}
+	if g.ReadNonce != "" && !strings.HasPrefix(g.ReadNonce, "poi-") {
+		viols = append(viols, fmt.Sprintf("grounding: read_nonce %q must have 'poi-' prefix", g.ReadNonce))
+	}
+	if requireLocator && g.Locator == "" {
+		viols = append(viols, "grounding: locator is required to bind proposal to specific pack content")
+	}
+	return viols
+}
 
 // Source describes one provenance entry attached to a propose_update
 // proposal — where the agent claims this knowledge comes from. The
@@ -57,6 +90,10 @@ type ProvenanceContext struct {
 	// append_section, replace_section with if_missing=append) rather than
 	// modifying an existing one. Used by Provenance.RequiredForNewSections.
 	IsNewSection bool
+
+	// Grounding from the proposal, linking the mutation to an actively
+	// fetched context pack (SAR-008).
+	Grounding *GroundingReceipt
 }
 
 // ValidateProvenance checks a ProvenanceContext against a category's
@@ -69,6 +106,7 @@ type ProvenanceContext struct {
 //   - No Source.Type is in schema's ForbiddenSourceTypes.
 //   - If Required → at least one Source must be present.
 //   - If RequiredForNewSections AND ctx.IsNewSection → at least one Source.
+//   - If Grounding is present → validate format (pack_digest and read_nonce).
 func ValidateProvenance(policy schema.Provenance, ctx ProvenanceContext) []string {
 	var violations []string
 
@@ -113,5 +151,10 @@ func ValidateProvenance(policy schema.Provenance, ctx ProvenanceContext) []strin
 				"sources are required for new sections by schema but none were provided")
 		}
 	}
+
+	if ctx.Grounding != nil {
+		violations = append(violations, ValidateGrounding(ctx.Grounding, false)...)
+	}
+
 	return violations
 }

@@ -180,3 +180,68 @@ func containsSubstr(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+func TestValidateGrounding_ValidAndInvalid(t *testing.T) {
+	// Nil grounding is valid (optional).
+	if viols := ValidateGrounding(nil, false); len(viols) != 0 {
+		t.Errorf("expected nil grounding to be valid, got %v", viols)
+	}
+
+	// Valid grounding with locator.
+	valid := &GroundingReceipt{
+		PackDigest: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+		ReadNonce:  "poi-7f83b165-1757262981000000000",
+		Locator:    "decisions.md#ADR-004",
+	}
+	if viols := ValidateGrounding(valid, true); len(viols) != 0 {
+		t.Errorf("expected valid grounding to pass, got %v", viols)
+	}
+
+	// Invalid digest prefix.
+	badDigest := &GroundingReceipt{
+		PackDigest: "md5:123456",
+		ReadNonce:  "poi-7f83b165-1757262981000000000",
+		Locator:    "decisions.md#ADR-004",
+	}
+	if viols := ValidateGrounding(badDigest, false); len(viols) == 0 || !containsSubstr(viols, "pack_digest") {
+		t.Errorf("expected pack_digest violation, got %v", viols)
+	}
+
+	// Invalid nonce prefix.
+	badNonce := &GroundingReceipt{
+		PackDigest: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+		ReadNonce:  "invalid-nonce-123",
+		Locator:    "decisions.md#ADR-004",
+	}
+	if viols := ValidateGrounding(badNonce, false); len(viols) == 0 || !containsSubstr(viols, "read_nonce") {
+		t.Errorf("expected read_nonce violation, got %v", viols)
+	}
+
+	// Missing required locator.
+	noLocator := &GroundingReceipt{
+		PackDigest: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+		ReadNonce:  "poi-7f83b165-1757262981000000000",
+		Locator:    "",
+	}
+	if viols := ValidateGrounding(noLocator, true); len(viols) == 0 || !containsSubstr(viols, "locator is required") {
+		t.Errorf("expected locator-required violation, got %v", viols)
+	}
+}
+
+func TestValidateProvenance_WithGrounding(t *testing.T) {
+	policy := schema.Provenance{
+		Required:           true,
+		AllowedSourceTypes: []string{"file"},
+	}
+	// Invalid grounding propagated into ValidateProvenance.
+	viols := ValidateProvenance(policy, ProvenanceContext{
+		Sources: []Source{{Type: "file", Ref: "x.go"}},
+		Grounding: &GroundingReceipt{
+			PackDigest: "wrong:prefix",
+		},
+	})
+	if !containsSubstr(viols, "pack_digest") {
+		t.Errorf("expected pack_digest violation in ValidateProvenance, got %v", viols)
+	}
+}
+

@@ -71,12 +71,13 @@ const (
 // ProposeRequest is the orchestrator's input. Mirrors the propose_update MCP
 // tool input verbatim — see design doc v0.4.1 §22.
 type ProposeRequest struct {
-	Intent     Intent           `json:"intent"`
-	Rationale  string           `json:"rationale,omitempty"`
-	Operations []OperationInput `json:"operations"`
-	Sources    []Source         `json:"sources,omitempty"`
-	Confidence string           `json:"confidence,omitempty"`
-	Owner      OwnerInfo        `json:"owner,omitempty"`
+	Intent     Intent            `json:"intent"`
+	Rationale  string            `json:"rationale,omitempty"`
+	Operations []OperationInput  `json:"operations"`
+	Sources    []Source          `json:"sources,omitempty"`
+	Grounding  *GroundingReceipt `json:"grounding,omitempty"`
+	Confidence string            `json:"confidence,omitempty"`
+	Owner      OwnerInfo         `json:"owner,omitempty"`
 }
 
 // OwnerInfo identifies who is proposing the update. Used to populate the
@@ -549,6 +550,7 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (re
 	dominant := resolved[0].category
 	pctx := ProvenanceContext{
 		Sources:      req.Sources,
+		Grounding:    req.Grounding,
 		Confidence:   req.Confidence,
 		IsNewSection: containsNewSectionOp(ops),
 	}

@@ -176,9 +176,10 @@ func runDoctor(rootFlag string) ([]Finding, error) {
 	}
 
 	// Prompt wiring & consumption verification (SAR-008): detect instruction files
-	// that exist without referencing agent-memory or having an adapter installed,
-	// guarding against the "decorative memory" failure mode.
+	// and scheduled/recurring loops that exist without referencing agent-memory or having
+	// an adapter installed, guarding against the "decorative memory" failure mode.
 	findings = append(findings, promptWiringFindings(root)...)
+	findings = append(findings, scheduledLoopWiringFindings(root)...)
 
 	// Stable order for deterministic output.
 	sort.Slice(findings, func(i, j int) bool {
@@ -218,25 +219,26 @@ func mcpRootFindings(repoRoot string, configs []mcpScopeConfig) []Finding {
 		if json.Unmarshal(c.data, &doc) != nil {
 			continue
 		}
-		srv, ok := doc.MCPServers["agent-memory"]
-		if !ok {
-			continue
-		}
-		rootArg, hasRoot := flagValue(srv.Args, "--root")
-		if !hasRoot || strings.Contains(rootArg, "${") {
-			continue // env-resolved or portable → correct
-		}
-		ra, err := filepath.Abs(rootArg)
-		if err != nil {
-			continue
-		}
-		if !strings.EqualFold(filepath.Clean(ra), filepath.Clean(repoAbs)) {
-			out = append(out, Finding{
-				Severity: SeverityWarning,
-				Message: fmt.Sprintf(
-					"MCP server 'agent-memory' in %s is pinned to --root %q, not this repo (%s); the agent's memory writes will land in the wrong project. Re-run `agent-memory install claude` here, or fix the --root.",
-					c.scope, rootArg, repoAbs),
-			})
+		for name, srv := range doc.MCPServers {
+			if name != "agent-memory" {
+				continue
+			}
+			rootArg, ok := flagValue(srv.Args, "--root")
+			if !ok || strings.Contains(rootArg, "${") {
+				continue
+			}
+			ra, err := filepath.Abs(rootArg)
+			if err != nil {
+				continue
+			}
+			if !strings.EqualFold(filepath.Clean(ra), filepath.Clean(repoAbs)) {
+				out = append(out, Finding{
+					Severity: SeverityWarning,
+					Message: fmt.Sprintf(
+						"MCP server 'agent-memory' in %s is pinned to --root %q, not this repo (%s); the agent's memory writes will land in the wrong project. Re-run `agent-memory install claude` here, or fix the --root.",
+						c.scope, rootArg, repoAbs),
+				})
+			}
 		}
 	}
 	return out
@@ -331,3 +333,72 @@ func promptWiringFindings(root string) []Finding {
 	return findings
 }
 
+// scheduledLoopWiringFindings diagnoses whether recurring prompts, scheduled workflows,
+// or cron definitions exist without wiring memory or canary checks (SAR-008).
+// Addresses the exact recurring scheduler failure mode identified by @marketdata-moth (#23170)
+// and @bpmd-blbt (#23051, #23144).
+func scheduledLoopWiringFindings(root string) []Finding {
+	var findings []Finding
+
+	// Check recurring prompt files in prompts/
+	promptsDir := filepath.Join(root, "prompts")
+	if entries, err := os.ReadDir(promptsDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			lower := strings.ToLower(e.Name())
+			if strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".txt") {
+				if strings.Contains(lower, "recurring") || strings.Contains(lower, "cron") ||
+					strings.Contains(lower, "loop") || strings.Contains(lower, "scheduler") ||
+					strings.Contains(lower, "cycle") {
+					p := filepath.Join(promptsDir, e.Name())
+					if data, err := os.ReadFile(p); err == nil {
+						content := string(data)
+						if !strings.Contains(content, "agent-memory") &&
+							!strings.Contains(content, ".agent-memory") &&
+							!strings.Contains(content, "canary:") {
+							findings = append(findings, Finding{
+								Severity: SeverityWarning,
+								Message: fmt.Sprintf(
+									"prompts/%s defines a recurring loop prompt but does not reference agent-memory or canary verification; recurring loops risk operating amnesic (SAR-008 Scheduled Loop Hazard)",
+									e.Name(),
+								),
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Check scheduled CI workflows in .github/workflows/
+	workflowsDir := filepath.Join(root, ".github", "workflows")
+	if entries, err := os.ReadDir(workflowsDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			lower := strings.ToLower(e.Name())
+			if strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".yaml") {
+				p := filepath.Join(workflowsDir, e.Name())
+				if data, err := os.ReadFile(p); err == nil {
+					content := string(data)
+					if (strings.Contains(content, "schedule:") || strings.Contains(content, "cron:")) &&
+						!strings.Contains(content, "agent-memory") &&
+						!strings.Contains(content, ".agent-memory") {
+						findings = append(findings, Finding{
+							Severity: SeverityWarning,
+							Message: fmt.Sprintf(
+								".github/workflows/%s defines a scheduled cron workflow but does not reference agent-memory; automated cycles risk running without memory sync (SAR-008 Scheduled Loop Hazard)",
+								e.Name(),
+							),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	return findings
+}

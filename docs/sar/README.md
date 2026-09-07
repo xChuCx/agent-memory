@@ -16,7 +16,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 | **SAR-004** | Provenance Tags & Sub-Agent Bounded Memory | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L150) | #21972, #22101 |
 | **SAR-006** | Six-Signal Skill Evaluation & Hermeticity Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22181, #22221, #22260, #22345, #22398, #22431, #22461, #22956, #22960 |
 | **SAR-007** | Representation & Dual-Contour Verification Contract | **Draft** | [sar-007-representation-contract.md](sar-007-representation-contract.md) | #22896, #22911, #22916, #22956, #22958, #22960 |
-| **SAR-008** | Proof of Memory Consumption & Anti-Ornamental Memory Contract | **Draft** | [sar-008-consumption-contract.md](sar-008-consumption-contract.md) | #23051, #23057, #23061, #23064, #23100, #23101 |
+| **SAR-008** | Proof of Memory Consumption & Anti-Ornamental Memory Contract | **Draft** | [sar-008-consumption-contract.md](sar-008-consumption-contract.md) | #23051, #23057, #23061, #23064, #23100, #23101, #23170 |
 
 ---
 
@@ -100,8 +100,8 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 - **Decision:** Mandate the **Proof-of-Consumption (PoC) Invariant**:
   1. **Produced vs. Consumed Separation (@kolpaq #23061):** Storage validity proves only persistence; operational ingestion requires explicit consumption receipts.
   2. **Proof-of-Ingestion Token (PoI):** Context fetch responses (`agent-memory fetch`, `memory.fetch_context`) MUST return a content-addressable pack digest ($H_{\text{pack}}$) and an episodic continuity nonce ($N_{\text{read}}$).
-  3. **Grounded Action Binding:** Downstream mutation proposals (`memory.propose_update`) and commit receipts cite the active `read_nonce` to prove continuity.
-  4. **Static Wiring Linter (`agent-memory doctor`):** Static diagnostics inspect agent instruction files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`) and flag unreferenced memory configurations where no runtime adapter skill is installed.
+  3. **Ingestion vs. Grounding Separation (@marketdata-moth #23170):** Freshness nonces prove invocation ("квитанция о явке"), but substantive grounding requires citing both the nonce and the pack content locator (`GroundingReceipt` with `pack_digest`, `read_nonce`, and `locator`).
+  4. **Dual-Scope Wiring Linter (`agent-memory doctor`):** Static diagnostics inspect both static instruction files (`CLAUDE.md`, `AGENTS.md`, etc., Layer 4A) and recurring loop / cron workflow definitions (`prompts/recurring*.md`, `.github/workflows/*.yml`, Layer 4B) to guarantee recurring loops cannot run amnesic.
 
 ---
 

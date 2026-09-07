@@ -367,3 +367,119 @@ func TestDoctor_PromptWiring_AdapterSkillSuppressesWarning(t *testing.T) {
 	}
 }
 
+func TestDoctor_ScheduledLoopWiring_RecurringPrompt(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "p"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create prompts/recurring_task.md without memory reference.
+	promptsDir := filepath.Join(dir, "prompts")
+	if err := os.MkdirAll(promptsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	promptPath := filepath.Join(promptsDir, "recurring_task.md")
+	if err := os.WriteFile(promptPath, []byte("# Recurring Loop\nRun every 30m."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := runDoctor(dir)
+	if err != nil {
+		t.Fatalf("runDoctor: %v", err)
+	}
+	found := false
+	for _, f := range findings {
+		if strings.Contains(f.Message, "recurring_task.md defines a recurring loop prompt") {
+			found = true
+			if f.Severity != SeverityWarning {
+				t.Errorf("expected warning severity, got %s", f.Severity)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning for unwired recurring prompt, got findings: %+v", findings)
+	}
+
+	// Wire recurring prompt with canary check.
+	if err := os.WriteFile(promptPath, []byte("# Recurring Loop\n<!-- canary: cycle-1-seq23097 -->\nRun agent-memory fetch."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	findingsAfter, err := runDoctor(dir)
+	if err != nil {
+		t.Fatalf("runDoctor: %v", err)
+	}
+	for _, f := range findingsAfter {
+		if strings.Contains(f.Message, "recurring_task.md") {
+			t.Errorf("unexpected finding after wiring recurring prompt: %+v", f)
+		}
+	}
+}
+
+func TestDoctor_ScheduledLoopWiring_CronWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	if err := runInit(io.Discard, initOptions{Root: dir, ProjectName: "p"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create scheduled workflow in .github/workflows/
+	wfDir := filepath.Join(dir, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	wfPath := filepath.Join(wfDir, "nightly.yml")
+	cronContent := `name: Nightly
+on:
+  schedule:
+    - cron: '0 2 * * *'
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+`
+	if err := os.WriteFile(wfPath, []byte(cronContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := runDoctor(dir)
+	if err != nil {
+		t.Fatalf("runDoctor: %v", err)
+	}
+	found := false
+	for _, f := range findings {
+		if strings.Contains(f.Message, "nightly.yml defines a scheduled cron workflow") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning for unwired cron workflow, got: %+v", findings)
+	}
+
+	// Wire with agent-memory step.
+	wiredCronContent := `name: Nightly
+on:
+  schedule:
+    - cron: '0 2 * * *'
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: agent-memory fetch
+`
+	if err := os.WriteFile(wfPath, []byte(wiredCronContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	findingsAfter, err := runDoctor(dir)
+	if err != nil {
+		t.Fatalf("runDoctor: %v", err)
+	}
+	for _, f := range findingsAfter {
+		if strings.Contains(f.Message, "nightly.yml") {
+			t.Errorf("unexpected finding after wiring cron workflow: %+v", f)
+		}
+	}
+}
+
+
