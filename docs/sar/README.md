@@ -66,22 +66,24 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   - Each tenant maintains an independent SQLite file (`.agent-memory/tenants/<id>/index.sqlite`).
   - Search across multiple federated stores (`SearchPerStore`) queries each store index independently and merges results fairly, eliminating cross-corpus statistical contamination.
 
-### SAR-006: Skill Evaluation & State Invariance Loop (Four-Leg Contract)
+### SAR-006: Skill Evaluation & State Invariance Loop (Five-Signal Contract)
 - **Context:** Standard evaluation loops for on-demand procedural agent skills rely either on load-event telemetry (failing to verify if the skill changed the decision) or simple output appearance (failing to verify causation when the base model produces the artifact anyway). Furthermore, stateful skills can cause workspace pollution, toxic directive steering, or memory index drift that silently breaks subsequent tasks.
-- **Decision:** Mandate the **Four-Leg Decisive Evaluation Contract**:
-  1. **Leg 1: Functional Causation ($P_{without} \to P_{with}$):** One decisive task with checkable right answer. The baseline run without the skill MUST fail; the run with the skill MUST succeed with verifiable artifact schema. If $P_{without}$ passes, the skill is redundant.
-  2. **Leg 2: Boundary Selectivity ($N_1$ Near-Miss):** A task sharing lexical keywords with $P$ but out of domain MUST NOT invoke the skill. Token/turn tax must stay $\le \text{baseline} + 15\%$.
-  3. **Leg 3: Post-Execution Invariance (Zero Contamination):** After $P$ execution, runtime state must remain unpolluted:
-     - `git status --porcelain` is clean (no orphaned lockfiles, unmanaged scratch files).
+- **Decision:** Mandate the **Five-Signal Decisive Evaluation Contract**:
+  1. **Signal 1: Functional Causation ($P_{without} \to P_{with}$):** One decisive task with checkable right answer. The baseline run without the skill MUST fail; the run with the skill MUST succeed with verifiable artifact schema. If $P_{without}$ passes, the skill is redundant.
+  2. **Signal 2: Mechanism Sensitivity ($P_{mutant}$ Mutation Check):** A mutated skill variant with the core rule/retry loop removed or inverted MUST fail $P$. If the mutant passes, the evaluation is insensitive to the claimed mechanism.
+  3. **Signal 3: Boundary Selectivity ($N_1$ Near-Miss):** A task sharing lexical keywords with $P$ but out of domain MUST NOT invoke the skill. Token/turn tax must stay $\le \text{baseline} + 15\%$.
+  4. **Signal 4: Post-Execution Invariance (Allowed Mutation Manifest):** Runtime state must strictly adhere to a declared `allowed_mutations` manifest:
+     - All workspace changes outside `allowed_mutations` (e.g. `.tmp_*`, `.lock`) are strictly prohibited.
      - Environment variables and working directory are restored.
      - A neutral post-execution canary task $C_{post}$ produces output identical to $C_{pre}$ (no sticky prompt steering or FTS5 index distortion).
-  4. **Leg 4: Stranger Verification (VTP-1):** Skill receipts must be verified by an authenticated third-party account (`verifier != worker && verifier != creator`), gating economic release with explicit `operator_independence: UNKNOWN` unless cryptographic stake or hardware attestation is provided.
+  5. **Signal 5: Stranger Verification (VTP-1):** Skill receipts must be verified by an authenticated third-party account (`verifier != worker && verifier != creator`), gating economic release with explicit `operator_independence: UNKNOWN` unless cryptographic stake or hardware attestation is provided.
 - **Harness CI Assertion:**
   ```python
   assert run_agent(task_p, with_skill=False).exit_code != 0, "Redundant: base model solved without skill"
   assert run_agent(task_p, with_skill=True).exit_code == 0 and validate_artifact(res.artifact), "Artifact invalid"
+  assert run_agent(task_p, with_mutant=True).exit_code != 0, "Insensitive: mutant passed, rule not decisive"
   assert not run_agent(task_n1, with_skill=True).skill_invoked and cost <= baseline * 1.15, "Boundary breach"
-  assert workspace_diff() == [] and run_agent(canary_task).matches_baseline(), "State contamination detected"
+  assert mutation_diff().matches_manifest(allowed_manifest), "State contamination / unmanifested leak"
   ```
 
 ---
