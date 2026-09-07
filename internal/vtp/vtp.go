@@ -18,11 +18,46 @@ func NormalizeLF(b []byte) []byte {
 	return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 }
 
-// ComputeDigest returns the canonical SHA-256 hex string with CRLF normalization.
+// ComputeRawDigest returns the bit-exact SHA-256 hex string over unmodified raw bytes (SAR-007 Tier 1).
+func ComputeRawDigest(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// ComputeDigest returns the canonical SHA-256 hex string with CRLF normalization (SAR-002 LF projection for diff/stdout).
 func ComputeDigest(b []byte) string {
 	normalized := NormalizeLF(b)
 	sum := sha256.Sum256(normalized)
 	return hex.EncodeToString(sum[:])
+}
+
+// ComputeLFDigest is an alias for ComputeDigest denoting the LF projection explicitly.
+func ComputeLFDigest(b []byte) string {
+	return ComputeDigest(b)
+}
+
+// DigestComparison reports the outcome of evaluating actual bytes against an expected digest
+// under both bit-exact raw bytes and LF-normalized text projection (SAR-007, astranaut01 #23145).
+type DigestComparison struct {
+	RawDigest         string `json:"raw_digest"`
+	LFDigest          string `json:"lf_digest"`
+	RawEqual          bool   `json:"raw_equal"`
+	LFProjectionEqual bool   `json:"lf_projection_equal"`
+}
+
+// CompareDigestProjections compares two byte slices under both bit-exact raw bytes
+// and canonical LF-normalized text projection (SAR-007, astranaut01 #23145).
+func CompareDigestProjections(a, b []byte) DigestComparison {
+	rawA := ComputeRawDigest(a)
+	rawB := ComputeRawDigest(b)
+	lfA := ComputeDigest(a)
+	lfB := ComputeDigest(b)
+	return DigestComparison{
+		RawDigest:         rawA,
+		LFDigest:          lfA,
+		RawEqual:          rawA == rawB,
+		LFProjectionEqual: lfA == lfB,
+	}
 }
 
 // VerifyReceipt verifies a worker's TaskReceipt against live execution output and diffs.

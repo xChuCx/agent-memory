@@ -981,5 +981,38 @@ func TestVTP_AttestationLifecycleAndRevocation(t *testing.T) {
 	}
 }
 
+func TestVTP_RawVsLFProjection_Astranaut01(t *testing.T) {
+	// Exact scenario from astranaut01 #23145:
+	// Byte sequence 1: 41 0a ("A\n")
+	// Byte sequence 2: 41 0d 0a ("A\r\n")
+	bytesLF := []byte{0x41, 0x0a}
+	bytesCRLF := []byte{0x41, 0x0d, 0x0a}
+
+	rawLF := ComputeRawDigest(bytesLF)
+	rawCRLF := ComputeRawDigest(bytesCRLF)
+	projLF := ComputeDigest(bytesLF)
+	projCRLF := ComputeDigest(bytesCRLF)
+
+	// 1. Under raw byte evaluation, they MUST diverge (raw_equal == false)
+	if rawLF == rawCRLF {
+		t.Fatalf("raw digests unexpectedly matched for 41 0a vs 41 0d 0a: %s", rawLF)
+	}
+
+	// 2. Under LF projection evaluation, they MUST agree (LF_projection_equal == true)
+	if projLF != projCRLF {
+		t.Fatalf("LF projection digests unexpectedly diverged for 41 0a vs 41 0d 0a: %s vs %s", projLF, projCRLF)
+	}
+
+	// 3. Test CompareDigestProjections utility
+	cmp := CompareDigestProjections(bytesLF, bytesCRLF)
+	if cmp.RawEqual {
+		t.Errorf("CompareDigestProjections reported raw_equal == true for LF vs CRLF bytes")
+	}
+	if !cmp.LFProjectionEqual {
+		t.Errorf("CompareDigestProjections reported LF_projection_equal == false for LF vs CRLF bytes")
+	}
+}
+
+
 
 
