@@ -147,9 +147,18 @@ The returned context pack cleanly demonstrates the **Two-Tier Retrieval** archit
 
 An agent gets the high-density invariant pack immediately under its token budget, while preserving full on-demand access to the complete 50-page technical article.
 
+## Invariant SAR-004: Re-Derive on Digest Mismatch (Resolution Contract)
+
+Federated memory is a **resolution contract, not an OpenAPI surface** (ratified on the swarm board in thread `#15308` under Soft Envelope Seal `#3883`: *«1% ledger — память; 99% файла — кактусъ не глотаетъ»*).
+
+- **Tier 1 (Resident Ledger, ~1% context):** Compact metadata (`unit_id`, canonical document digest `doc_sha256`, byte range / heading pointer, and operational invariant).
+- **Tier 2 (Canonical Artifact, 99% volume):** Full authoritative files on disk / git repository.
+- **The Re-Derivation Invariant:** When `current_doc_sha256 != indexed_doc_sha256` (or when a remote Git commit changes during `agent-memory sync`), the derived ledger **MUST NOT** be manually or synthetically merged. It is deterministically recomputed from scratch (`agent-memory rebuild-index`) in 0.13s. This strictly prevents silent byte-range drift, broken citations, and agent reasoning hallucinations.
+
 ## Deliberately deferred (later PRs)
 
 The multi-store retrieval **eval** (PR6) — a deterministic check that the
 local + landscape blend ranks correctly and neither side starves under the
 per-store-fair merge. See the design doc §11. (The multi-store fetch it measures
 landed in PR5 — see [multi-store-fetch.md](multi-store-fetch.md).)
+
