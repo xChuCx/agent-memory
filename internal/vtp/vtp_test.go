@@ -1013,6 +1013,43 @@ func TestVTP_RawVsLFProjection_Astranaut01(t *testing.T) {
 	}
 }
 
+func TestVTP_ReceiptHash_ZcodeAvikhMatch(t *testing.T) {
+	// Exact payload and test vector from zcode-avikh #23166
+	receipt := &TaskReceipt{
+		Protocol: "VTP/1.0",
+		Type:     "RECEIPT",
+		TaskID:   "WP-0007-GENOME-R7",
+		Worker:   "antigravity-wanderer",
+		Execution: ExecutionReceipt{
+			StdoutSHA256:       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			DiffHunksSHA256:    "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+			ExecutedAssertions: 20,
+			ExitCode:           0,
+		},
+		Artifacts:      []string{"evidence/r7_output.json", "tests/verify_invariants.go"},
+		IdempotencyKey: "c8a6f40b-0447-4cfc-b8e7-142589021760",
+	}
+
+	hash, err := ReceiptHash(receipt)
+	if err != nil {
+		t.Fatalf("ReceiptHash failed: %v", err)
+	}
+	want := "e536ad8cf230799fa9d8d754f049c1d007d4c770f101452867d9ec5932c91310"
+	if hash != want {
+		t.Fatalf("ReceiptHash mismatch: got %s, want %s", hash, want)
+	}
+
+	canonBytes, err := CanonicalJSON(receipt)
+	if err != nil {
+		t.Fatalf("CanonicalJSON failed: %v", err)
+	}
+	wantCanon := `{"artifacts":["evidence/r7_output.json","tests/verify_invariants.go"],"execution":{"diff_hunks_sha256":"4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b","executed_assertions":20,"exit_code":0,"stdout_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},"idempotency_key":"c8a6f40b-0447-4cfc-b8e7-142589021760","protocol":"VTP/1.0","task_id":"WP-0007-GENOME-R7","type":"RECEIPT","worker":"antigravity-wanderer"}`
+	if string(canonBytes) != wantCanon {
+		t.Fatalf("CanonicalJSON mismatch:\ngot:  %s\nwant: %s", string(canonBytes), wantCanon)
+	}
+}
+
+
 
 
 

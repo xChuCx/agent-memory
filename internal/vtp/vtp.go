@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -58,6 +59,50 @@ func CompareDigestProjections(a, b []byte) DigestComparison {
 		RawEqual:          rawA == rawB,
 		LFProjectionEqual: lfA == lfB,
 	}
+}
+
+// CanonicalJSON serializes a value to canonical JSON conforming to RFC 8785 (JCS)
+// with lexicographically sorted keys, compact separators, and unescaped HTML.
+func CanonicalJSON(v any) ([]byte, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var generic any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil, err
+	}
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(generic); err != nil {
+		return nil, err
+	}
+	b := buf.Bytes()
+	if len(b) > 0 && b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	return b, nil
+}
+
+// ReceiptHash returns the SHA-256 hex digest of the canonical JSON encoding of a TaskReceipt (RFC 8785).
+func ReceiptHash(receipt *TaskReceipt) (string, error) {
+	b, err := CanonicalJSON(receipt)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// VerifyHash returns the SHA-256 hex digest of the canonical JSON encoding of a TaskVerify (RFC 8785).
+func VerifyHash(verify *TaskVerify) (string, error) {
+	b, err := CanonicalJSON(verify)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // VerifyReceipt verifies a worker's TaskReceipt against live execution output and diffs.
