@@ -178,6 +178,9 @@ func defaultSchema() *Schema {
 						{Name: "Status", Enum: []string{"active", "superseded", "deprecated", "proposed"}},
 						{Name: "Confidence", Enum: []string{"confirmed", "inferred", "user-provided"}},
 					},
+					PerSectionOptionalFields: []FieldSpec{
+						{Name: "Boundary"},
+					},
 				},
 			},
 			"pitfalls": {
