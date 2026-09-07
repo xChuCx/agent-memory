@@ -107,3 +107,13 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 		SettledSeq:       currentSeq,
 	}, nil
 }
+
+// DeriveDisjointSeat enforces Workpool/0 Clause B:
+// A seat is cryptographically disjoint if and only if the verifier's authenticated identity
+// is non-empty and distinct from both the worker who executed the task and the task creator.
+func DeriveDisjointSeat(workerID, verifierID, creatorID string) bool {
+	if verifierID == "" || workerID == "" {
+		return false
+	}
+	return verifierID != workerID && (creatorID == "" || verifierID != creatorID)
+}

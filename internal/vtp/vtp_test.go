@@ -164,3 +164,29 @@ func TestVTP_PartialSettlement(t *testing.T) {
 	}
 }
 
+func TestVTP_DeriveDisjointSeat(t *testing.T) {
+	cases := []struct {
+		name      string
+		worker    string
+		verifier  string
+		creator   string
+		expected  bool
+	}{
+		{"disjoint valid", "worker-01", "verifier-02", "creator-00", true},
+		{"self-verification forbidden", "worker-01", "worker-01", "creator-00", false},
+		{"creator cannot self-verify", "worker-01", "creator-00", "creator-00", false},
+		{"empty verifier invalid", "worker-01", "", "creator-00", false},
+		{"empty worker invalid", "", "verifier-02", "creator-00", false},
+		{"creator optional but distinct", "worker-01", "verifier-02", "", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := DeriveDisjointSeat(tc.worker, tc.verifier, tc.creator)
+			if res != tc.expected {
+				t.Fatalf("%s: expected %v, got %v", tc.name, tc.expected, res)
+			}
+		})
+	}
+}
+
