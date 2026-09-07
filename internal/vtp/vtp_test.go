@@ -1,8 +1,12 @@
 package vtp
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/hex"
 	"testing"
 )
+
 
 func TestVTP_FullLifecycle(t *testing.T) {
 	// 1. Task Spec
@@ -448,5 +452,271 @@ func TestVTP_SettlementZeroTrustReevaluation(t *testing.T) {
 		t.Fatalf("expected amount 10, got %d", settle.Amount)
 	}
 }
+
+func TestVTP_CanonicalEncodingAndDelimiterInjection(t *testing.T) {
+	// 1. Normalization invariance: permutation, case, duplicates
+	caps1 := []string{"CAP_CHOWN", "CAP_DAC_OVERRIDE", "cap_chown"}
+	caps2 := []string{"cap_dac_override", "CAP_CHOWN"}
+	norm1 := NormalizeCapabilities(caps1)
+	norm2 := NormalizeCapabilities(caps2)
+	if len(norm1) != 2 || len(norm2) != 2 {
+		t.Fatalf("expected 2 normalized capabilities, got %d and %d", len(norm1), len(norm2))
+	}
+	if norm1[0] != norm2[0] || norm1[1] != norm2[1] {
+		t.Fatalf("expected identical normalized capabilities, got %v vs %v", norm1, norm2)
+	}
+
+	bytes1 := ComputeAttestationCanonicalBytes("task-1", "policy-1", 1, "img-1", "inp-1", "k1", caps1, 100, 200)
+	bytes2 := ComputeAttestationCanonicalBytes("task-1", "policy-1", 1, "img-1", "inp-1", "k1", caps2, 100, 200)
+	if !bytes.Equal(bytes1, bytes2) {
+		t.Fatalf("expected identical canonical bytes for permuted/duplicate caps, got differences:\n%s\nvs\n%s", string(bytes1), string(bytes2))
+	}
+
+	// 2. Delimiter collision resistance: length-delimited framing prevents field boundary bleeding
+	// Attempt collision: task_id="t:key_id:k1", key_id="k2" vs task_id="t", key_id="k1:policy_digest:p"
+	bA := ComputeAttestationCanonicalBytes("t:key_id:k1", "p", 1, "img", "inp", "k2", nil, 0, 0)
+	bB := ComputeAttestationCanonicalBytes("t", "p", 1, "img", "inp", "k1:key_id:k2", nil, 0, 0)
+	if bytes.Equal(bA, bB) {
+		t.Fatalf("length-delimited encoding failed to prevent delimiter boundary bleeding!")
+	}
+}
+
+func TestVTP_ED25519CryptographicAttestation(t *testing.T) {
+	// Generate real ED25519 runner keypair
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 keypair: %v", err)
+	}
+
+	keyID := "runner-enclave-key-2026-v1"
+	allowlist := &HermeticAllowlist{
+		TrustedIssuers:        []string{"trusted-runner-enclave"},
+		ApprovedPolicyDigests: []string{"sha256:strict-gvisor-v1"},
+		PublicKeys:            map[string]ed25519.PublicKey{keyID: pubKey},
+		CurrentEpoch:          1,
+		MinAcceptedEpoch:      1,
+		CurrentTime:           1500,
+	}
+
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-ed25519-valid",
+	}
+
+	canonicalBytes := ComputeAttestationCanonicalBytes(
+		spec.TaskID,
+		"sha256:strict-gvisor-v1",
+		1,
+		"sha256:rootfs-image-v1",
+		"sha256:input-manifest-v1",
+		keyID,
+		[]string{"cap_chown"},
+		1000,
+		2000,
+	)
+
+	// Sign canonically with ED25519 private key
+	sig := ed25519.Sign(privKey, canonicalBytes)
+	sigHex := hex.EncodeToString(sig)
+
+	receipt := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       "trusted-runner-enclave",
+				KeyID:        keyID,
+				PolicyDigest: "sha256:strict-gvisor-v1",
+				PolicyEpoch:  1,
+				RuntimeImage: "sha256:rootfs-image-v1",
+				InputDigest:  "sha256:input-manifest-v1",
+				AllowedCaps:  []string{"cap_chown"},
+				IssuedAt:     1000,
+				ExpiresAt:    2000,
+				Signature:    sigHex,
+			},
+		},
+	}
+
+	status := DeriveHermeticityStatus(spec, receipt, allowlist)
+	if status != HermeticStatusVerifiedHermetic {
+		t.Fatalf("expected VERIFIED_HERMETIC for valid ED25519 attestation, got %s", status)
+	}
+
+	verify := &TaskVerify{
+		Protocol:           ProtocolVersion,
+		Type:               "VERIFY",
+		TaskID:             spec.TaskID,
+		Verdict:            "PASS",
+		DistinctAccountIDs: true,
+		IsDisjointSeat:     true,
+		HermeticityStatus:  status,
+		IsHermetic:         status == HermeticStatusVerifiedHermetic,
+	}
+
+	if !CanFastPathCache(verify) {
+		t.Fatalf("expected CanFastPathCache=true for verified ED25519 attestation")
+	}
+}
+
+func TestVTP_AstranautNegativeHashTamper(t *testing.T) {
+	// Negative test specifically requested by @astranaut01 (#22461):
+	// Attacker tampers with attestation (e.g. injects malicious runtime image)
+	// and recomputes the SHA256 hash. Without the runner's private key,
+	// ED25519 verification MUST fail and status MUST remain UNKNOWN.
+
+	pubKey, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 keypair: %v", err)
+	}
+
+	keyID := "runner-enclave-key-2026-v1"
+	allowlist := &HermeticAllowlist{
+		TrustedIssuers:        []string{"trusted-runner-enclave"},
+		ApprovedPolicyDigests: []string{"sha256:strict-gvisor-v1"},
+		PublicKeys:            map[string]ed25519.PublicKey{keyID: pubKey},
+		CurrentEpoch:          1,
+		MinAcceptedEpoch:      1,
+		CurrentTime:           1500,
+	}
+
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-astranaut-tamper",
+	}
+
+	// Attacker tampers with image and recomputes SHA-256 hash as the "signature"
+	tamperedImage := "sha256:malicious-compromised-image"
+	tamperedCanonical := ComputeAttestationCanonicalBytes(
+		spec.TaskID,
+		"sha256:strict-gvisor-v1",
+		1,
+		tamperedImage,
+		"sha256:input-manifest-v1",
+		keyID,
+		[]string{"cap_chown"},
+		1000,
+		2000,
+	)
+	tamperedSHA := ComputeDigest(tamperedCanonical) // 32 bytes hex, not valid 64-byte ed25519 signature!
+
+	receipt := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-node",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+			Hermetic: true,
+			Sandbox: &SandboxAttestation{
+				Issuer:       "trusted-runner-enclave",
+				KeyID:        keyID,
+				PolicyDigest: "sha256:strict-gvisor-v1",
+				PolicyEpoch:  1,
+				RuntimeImage: tamperedImage,
+				InputDigest:  "sha256:input-manifest-v1",
+				AllowedCaps:  []string{"cap_chown"},
+				IssuedAt:     1000,
+				ExpiresAt:    2000,
+				Signature:    tamperedSHA,
+			},
+		},
+	}
+
+	status := DeriveHermeticityStatus(spec, receipt, allowlist)
+	if status != HermeticStatusUnknown {
+		t.Fatalf("astranaut01 audit violation: recomputed SHA hash over tampered image must yield UNKNOWN, got %s", status)
+	}
+}
+
+func TestVTP_AttestationLifecycleAndRevocation(t *testing.T) {
+	// Audit tests for @second-thought (#22431):
+	// Tests key revocation, epoch bumping, and expiration boundaries.
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+
+	keyID := "runner-key-epoch-1"
+	allowlist := &HermeticAllowlist{
+		TrustedIssuers:        []string{"trusted-runner-enclave"},
+		ApprovedPolicyDigests: []string{"sha256:strict-gvisor-v1"},
+		PublicKeys:            map[string]ed25519.PublicKey{keyID: pubKey},
+		RevokedKeyIDs:         map[string]bool{},
+		CurrentEpoch:          1,
+		MinAcceptedEpoch:      1,
+		CurrentTime:           1500,
+	}
+
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-lifecycle",
+	}
+
+	makeReceipt := func(epoch uint64, issuedAt, expiresAt int64) *TaskReceipt {
+		b := ComputeAttestationCanonicalBytes(spec.TaskID, "sha256:strict-gvisor-v1", epoch, "img-1", "inp-1", keyID, nil, issuedAt, expiresAt)
+		sig := ed25519.Sign(privKey, b)
+		return &TaskReceipt{
+			Protocol: ProtocolVersion,
+			TaskID:   spec.TaskID,
+			Worker:   "worker-node",
+			Execution: ExecutionReceipt{
+				ExitCode: 0,
+				Hermetic: true,
+				Sandbox: &SandboxAttestation{
+					Issuer:       "trusted-runner-enclave",
+					KeyID:        keyID,
+					PolicyDigest: "sha256:strict-gvisor-v1",
+					PolicyEpoch:  epoch,
+					RuntimeImage: "img-1",
+					InputDigest:  "inp-1",
+					IssuedAt:     issuedAt,
+					ExpiresAt:    expiresAt,
+					Signature:    hex.EncodeToString(sig),
+				},
+			},
+		}
+	}
+
+	// Case 1: Valid active lifecycle
+	recValid := makeReceipt(1, 1000, 2000)
+	if s := DeriveHermeticityStatus(spec, recValid, allowlist); s != HermeticStatusVerifiedHermetic {
+		t.Fatalf("expected VERIFIED_HERMETIC for active attestation, got %s", s)
+	}
+
+	// Case 2: Key Revocation
+	allowlist.RevokedKeyIDs[keyID] = true
+	if s := DeriveHermeticityStatus(spec, recValid, allowlist); s != HermeticStatusUnknown {
+		t.Fatalf("expected UNKNOWN for revoked key_id, got %s", s)
+	}
+	allowlist.RevokedKeyIDs[keyID] = false // un-revoke for next checks
+
+	// Case 3: Expired attestation (now > expires_at)
+	recExpired := makeReceipt(1, 500, 1200) // expires at 1200, current time is 1500
+	if s := DeriveHermeticityStatus(spec, recExpired, allowlist); s != HermeticStatusUnknown {
+		t.Fatalf("expected UNKNOWN for expired attestation, got %s", s)
+	}
+
+	// Case 4: Future attestation (now < issued_at)
+	recFuture := makeReceipt(1, 1800, 2500) // issued at 1800, current time is 1500
+	if s := DeriveHermeticityStatus(spec, recFuture, allowlist); s != HermeticStatusUnknown {
+		t.Fatalf("expected UNKNOWN for future attestation, got %s", s)
+	}
+
+	// Case 5: Policy Epoch Bumping (min accepted epoch bumped to 2)
+	allowlist.MinAcceptedEpoch = 2
+	if s := DeriveHermeticityStatus(spec, recValid, allowlist); s != HermeticStatusUnknown {
+		t.Fatalf("expected UNKNOWN for outdated policy epoch (attestation epoch=1, min=2), got %s", s)
+	}
+
+	// Case 6: Attestation with updated epoch 2 -> VERIFIED_HERMETIC
+	recEpoch2 := makeReceipt(2, 1000, 2000)
+	if s := DeriveHermeticityStatus(spec, recEpoch2, allowlist); s != HermeticStatusVerifiedHermetic {
+		t.Fatalf("expected VERIFIED_HERMETIC for epoch 2 attestation, got %s", s)
+	}
+}
+
 
 

@@ -1,5 +1,9 @@
 package vtp
 
+import (
+	"crypto/ed25519"
+)
+
 // ProtocolVersion defines the canonical VTP protocol version.
 const ProtocolVersion = "VTP/1.0"
 
@@ -69,21 +73,32 @@ const (
 	HermeticStatusUnknown             HermeticityStatus = "UNKNOWN"
 )
 
-// SandboxAttestation captures cryptographically bound evidence of sandbox isolation (SAR-006 / second-thought audit #22398).
+// SandboxAttestation captures cryptographically bound evidence of sandbox isolation (SAR-006 / second-thought audit #22398, #22431).
 type SandboxAttestation struct {
-	Issuer       string   `json:"issuer,omitempty" yaml:"issuer,omitempty"`               // Trusted runner / enclave identifier
+	RunnerID     string   `json:"runner_id,omitempty" yaml:"runner_id,omitempty"`         // Enclave / runner instance identifier
+	Issuer       string   `json:"issuer,omitempty" yaml:"issuer,omitempty"`               // Trusted runner / enclave authority identifier
+	KeyID        string   `json:"key_id,omitempty" yaml:"key_id,omitempty"`               // Public key ID used by runner to sign attestation
 	PolicyDigest string   `json:"policy_digest,omitempty" yaml:"policy_digest,omitempty"` // Digest of sandbox isolation profile
+	PolicyEpoch  uint64   `json:"policy_epoch,omitempty" yaml:"policy_epoch,omitempty"`   // Policy generation / epoch
 	RuntimeImage string   `json:"runtime_image,omitempty" yaml:"runtime_image,omitempty"` // Digest of container/runtime image
 	InputDigest  string   `json:"input_digest,omitempty" yaml:"input_digest,omitempty"`   // Digest of declared input artifacts
 	AllowedCaps  []string `json:"allowed_caps,omitempty" yaml:"allowed_caps,omitempty"`   // Declared permitted capabilities (must not include network)
-	Signature    string   `json:"signature,omitempty" yaml:"signature,omitempty"`         // Attestation signature over bound execution tuple
+	IssuedAt     int64    `json:"issued_at,omitempty" yaml:"issued_at,omitempty"`         // Unix timestamp of attestation issuance
+	ExpiresAt    int64    `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`       // Unix timestamp of attestation expiration
+	Signature    string   `json:"signature,omitempty" yaml:"signature,omitempty"`         // ED25519 signature (hex) or canonical digest over bound tuple
 }
 
-// HermeticAllowlist defines verifier-approved trusted sandbox issuers and strict zero-network policy digests.
+// HermeticAllowlist defines verifier-approved trusted sandbox issuers, isolation policies, and verifier key registry with revocation.
 type HermeticAllowlist struct {
-	TrustedIssuers        []string `json:"trusted_issuers" yaml:"trusted_issuers"`
-	ApprovedPolicyDigests []string `json:"approved_policy_digests" yaml:"approved_policy_digests"`
+	TrustedIssuers        []string                    `json:"trusted_issuers" yaml:"trusted_issuers"`
+	ApprovedPolicyDigests []string                    `json:"approved_policy_digests" yaml:"approved_policy_digests"`
+	PublicKeys            map[string]ed25519.PublicKey `json:"-" yaml:"-"`
+	RevokedKeyIDs         map[string]bool             `json:"revoked_key_ids,omitempty" yaml:"revoked_key_ids,omitempty"`
+	CurrentEpoch          uint64                      `json:"current_epoch,omitempty" yaml:"current_epoch,omitempty"`
+	MinAcceptedEpoch      uint64                      `json:"min_accepted_epoch,omitempty" yaml:"min_accepted_epoch,omitempty"`
+	CurrentTime           int64                       `json:"current_time,omitempty" yaml:"current_time,omitempty"` // Test injection hook for deterministic evaluation
 }
+
 
 // ExecutionReceipt captures the execution details for Phase 3.
 type ExecutionReceipt struct {

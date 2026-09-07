@@ -2,11 +2,16 @@ package vtp
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
+	"time"
 )
+
 
 // NormalizeLF applies canonical LF normalization (SAR-002) prior to hashing.
 func NormalizeLF(b []byte) []byte {
@@ -94,17 +99,59 @@ var DefaultHermeticAllowlist = &HermeticAllowlist{
 	},
 }
 
-// ComputeAttestationDigest computes the canonical SHA-256 digest over the bound execution tuple.
-func ComputeAttestationDigest(taskID, policyDigest, runtimeImage, inputDigest string, allowedCaps []string) string {
-	payload := fmt.Sprintf("task:%s|policy:%s|image:%s|input:%s|caps:%v",
-		taskID, policyDigest, runtimeImage, inputDigest, allowedCaps)
-	return ComputeDigest([]byte(payload))
+// NormalizeCapabilities strips whitespace, lowercases, deduplicates, and sorts capabilities alphabetically (second-thought audit #22431).
+func NormalizeCapabilities(caps []string) []string {
+	if len(caps) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]bool, len(caps))
+	normalized := make([]string, 0, len(caps))
+	for _, c := range caps {
+		trimmed := strings.ToLower(strings.TrimSpace(c))
+		if trimmed != "" && !seen[trimmed] {
+			seen[trimmed] = true
+			normalized = append(normalized, trimmed)
+		}
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
-// DeriveHermeticityStatus evaluates the 3-layer hermeticity contract (second-thought audit #22398):
+// ComputeAttestationCanonicalBytes constructs a length-delimited canonical byte stream
+// under domain tag "VTP1-ATTEST-V1", guaranteeing unambiguous serialization (second-thought audit #22431).
+func ComputeAttestationCanonicalBytes(taskID, policyDigest string, policyEpoch uint64, runtimeImage, inputDigest, keyID string, allowedCaps []string, issuedAt, expiresAt int64) []byte {
+	normCaps := NormalizeCapabilities(allowedCaps)
+	var buf bytes.Buffer
+	buf.WriteString("VTP1-ATTEST-V1\n")
+	writeDelimited := func(name, val string) {
+		fmt.Fprintf(&buf, "%s:%d:%s\n", name, len(val), val)
+	}
+	writeDelimited("task_id", taskID)
+	writeDelimited("key_id", keyID)
+	writeDelimited("policy_digest", policyDigest)
+	fmt.Fprintf(&buf, "policy_epoch:%d\n", policyEpoch)
+	writeDelimited("runtime_image", runtimeImage)
+	writeDelimited("input_digest", inputDigest)
+	fmt.Fprintf(&buf, "caps_count:%d\n", len(normCaps))
+	for _, cap := range normCaps {
+		writeDelimited("cap", cap)
+	}
+	fmt.Fprintf(&buf, "issued_at:%d\n", issuedAt)
+	fmt.Fprintf(&buf, "expires_at:%d\n", expiresAt)
+	return buf.Bytes()
+}
+
+// ComputeAttestationDigest computes the canonical SHA-256 digest over the bound execution tuple.
+func ComputeAttestationDigest(taskID, policyDigest, runtimeImage, inputDigest string, allowedCaps []string) string {
+	canonical := ComputeAttestationCanonicalBytes(taskID, policyDigest, 1, runtimeImage, inputDigest, "", allowedCaps, 0, 0)
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:])
+}
+
+// DeriveHermeticityStatus evaluates the 3-layer hermeticity contract (second-thought audit #22398, #22431; astranaut01 #22461):
 // Layer 1 (Declared): Worker self-declaration in receipt.Execution.Hermetic.
-// Layer 2 (Attested): Cryptographic signature over bound execution tuple (taskID, policy, image, input, caps).
-// Layer 3 (Verified): Verification against verifier-owned allowlist of trusted issuers and strict zero-network policies.
+// Layer 2 (Attested): Cryptographic ED25519 signature over length-delimited canonical tuple (TaskID, KeyID, Policy, Epoch, Image, Input, Caps, Timestamps).
+// Layer 3 (Verified): Verification against verifier-owned allowlist, key registry with revocation, and strict zero-network policies.
 func DeriveHermeticityStatus(spec *TaskSpec, receipt *TaskReceipt, allowlist *HermeticAllowlist) HermeticityStatus {
 	if receipt == nil || spec == nil {
 		return HermeticStatusUnknown
@@ -120,16 +167,10 @@ func DeriveHermeticityStatus(spec *TaskSpec, receipt *TaskReceipt, allowlist *He
 		return HermeticStatusUnknown
 	}
 
-	// Layer 2: Check attestation binding over (TaskID, PolicyDigest, RuntimeImage, InputDigest, AllowedCaps)
-	expectedDigest := ComputeAttestationDigest(spec.TaskID, att.PolicyDigest, att.RuntimeImage, att.InputDigest, att.AllowedCaps)
-	if att.Signature != expectedDigest {
-		// Signature does not match the exact bound execution tuple
-		return HermeticStatusUnknown
-	}
-
-	// Reject any ambient network capabilities
-	for _, cap := range att.AllowedCaps {
-		if cap == "CAP_NET_RAW" || cap == "CAP_NET_ADMIN" || cap == "network:egress" || cap == "network:ingress" {
+	// Canonicalize and reject any ambient network capabilities
+	normCaps := NormalizeCapabilities(att.AllowedCaps)
+	for _, cap := range normCaps {
+		if cap == "cap_net_raw" || cap == "cap_net_admin" || cap == "network:egress" || cap == "network:ingress" || cap == "net:any" || strings.Contains(cap, "net") {
 			return HermeticStatusUnknown
 		}
 	}
@@ -140,6 +181,32 @@ func DeriveHermeticityStatus(spec *TaskSpec, receipt *TaskReceipt, allowlist *He
 		targetAllowlist = DefaultHermeticAllowlist
 	}
 
+	// Check key revocation (second-thought audit #22431)
+	if targetAllowlist.RevokedKeyIDs != nil && att.KeyID != "" && targetAllowlist.RevokedKeyIDs[att.KeyID] {
+		return HermeticStatusUnknown
+	}
+
+	// Check policy epoch (second-thought audit #22431)
+	effectiveEpoch := att.PolicyEpoch
+	if effectiveEpoch == 0 {
+		effectiveEpoch = 1
+	}
+	if targetAllowlist.MinAcceptedEpoch > 0 && effectiveEpoch < targetAllowlist.MinAcceptedEpoch {
+		return HermeticStatusUnknown
+	}
+
+	// Check attestation expiration (second-thought audit #22431)
+	if att.ExpiresAt > 0 {
+		now := targetAllowlist.CurrentTime
+		if now == 0 {
+			now = time.Now().Unix()
+		}
+		if (att.IssuedAt > 0 && now < att.IssuedAt) || now > att.ExpiresAt {
+			return HermeticStatusUnknown
+		}
+	}
+
+	// Issuer trust check
 	issuerTrusted := false
 	for _, iss := range targetAllowlist.TrustedIssuers {
 		if iss == att.Issuer {
@@ -151,6 +218,7 @@ func DeriveHermeticityStatus(spec *TaskSpec, receipt *TaskReceipt, allowlist *He
 		return HermeticStatusUnknown
 	}
 
+	// Policy approval check
 	policyApproved := false
 	for _, p := range targetAllowlist.ApprovedPolicyDigests {
 		if p == att.PolicyDigest {
@@ -162,8 +230,36 @@ func DeriveHermeticityStatus(spec *TaskSpec, receipt *TaskReceipt, allowlist *He
 		return HermeticStatusUnknown
 	}
 
+	// Layer 2: Cryptographic signature verification over unambiguous canonical encoding
+	canonicalBytes := ComputeAttestationCanonicalBytes(spec.TaskID, att.PolicyDigest, effectiveEpoch, att.RuntimeImage, att.InputDigest, att.KeyID, att.AllowedCaps, att.IssuedAt, att.ExpiresAt)
+
+	if targetAllowlist.PublicKeys != nil && att.KeyID != "" {
+		pubKey, ok := targetAllowlist.PublicKeys[att.KeyID]
+		if !ok {
+			// Key ID not in verifier's trusted key registry
+			return HermeticStatusUnknown
+		}
+		sigBytes, err := hex.DecodeString(att.Signature)
+		if err != nil || len(sigBytes) != ed25519.SignatureSize {
+			return HermeticStatusUnknown
+		}
+		if !ed25519.Verify(pubKey, canonicalBytes, sigBytes) {
+			// ED25519 signature verification failed (astranaut01 audit #22461)
+			return HermeticStatusUnknown
+		}
+	} else {
+		// Fallback: SHA-256 digest equality when no public key registry configured
+		digestSum := sha256.Sum256(canonicalBytes)
+		expectedDigest := hex.EncodeToString(digestSum[:])
+		if att.Signature != expectedDigest {
+			return HermeticStatusUnknown
+		}
+
+	}
+
 	return HermeticStatusVerifiedHermetic
 }
+
 
 // CanFastPathCache evaluates whether a verification artifact can be soundly cached
 // and accepted across agent sessions via O(1) content hash checks alone.
