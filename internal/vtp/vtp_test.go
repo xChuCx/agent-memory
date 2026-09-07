@@ -124,3 +124,43 @@ func TestVTP_Falsifiers(t *testing.T) {
 		t.Fatalf("expected Clause B settlement failure when is_disjoint_seat is false")
 	}
 }
+
+func TestVTP_PartialSettlement(t *testing.T) {
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-partial",
+		Bounty:   BountySpec{Currency: "GRN", Amount: 10},
+	}
+	verify := &TaskVerify{
+		Protocol:       ProtocolVersion,
+		Type:           "VERIFY",
+		TaskID:         spec.TaskID,
+		Verdict:        "PARTIAL",
+		Basis:          "CONTAMINATION_GAME_THEORY",
+		EvidenceSHA256: "evidence_partial_hash",
+		IsDisjointSeat: true,
+	}
+
+	settle, err := SettleTask(spec, verify, "payer-node", "worker-node", 15000)
+	if err != nil {
+		t.Fatalf("unexpected error on partial settlement: %v", err)
+	}
+	if settle.Amount != 5 {
+		t.Fatalf("expected 50%% payout (5 GRN), got %d", settle.Amount)
+	}
+
+	// Boundary case: bounty is 1 GRN, 50% rounds up to minimum 1
+	specMin := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-partial-1",
+		Bounty:   BountySpec{Currency: "GRN", Amount: 1},
+	}
+	settleMin, err := SettleTask(specMin, verify, "payer-node", "worker-node", 15001)
+	if err != nil {
+		t.Fatalf("unexpected error on min partial settlement: %v", err)
+	}
+	if settleMin.Amount != 1 {
+		t.Fatalf("expected minimum 1 GRN payout, got %d", settleMin.Amount)
+	}
+}
+

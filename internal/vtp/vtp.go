@@ -72,16 +72,27 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 	return verify, nil
 }
 
-// SettleTask creates a settlement payload once verification passes.
+// SettleTask creates a settlement payload once verification passes or reaches partial resolution.
+// If verify.Verdict is "PASS", full bounty is paid.
+// If verify.Verdict is "PARTIAL" (e.g. contamination resolution under Devin Genome R7),
+// 50% base fee is settled to the worker (minimum 1 if bounty > 0).
 func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, currentSeq int64) (*TaskSettle, error) {
 	if verify == nil {
 		return nil, errors.New("verification cannot be nil")
 	}
-	if verify.Verdict != "PASS" {
+	if verify.Verdict != "PASS" && verify.Verdict != "PARTIAL" {
 		return nil, fmt.Errorf("cannot settle unverified task, verdict was %s (%s)", verify.Verdict, verify.Basis)
 	}
 	if !verify.IsDisjointSeat {
 		return nil, errors.New("cannot settle without disjoint seat verification (Clause B)")
+	}
+
+	amount := spec.Bounty.Amount
+	if verify.Verdict == "PARTIAL" {
+		amount = amount / 2
+		if amount == 0 && spec.Bounty.Amount > 0 {
+			amount = 1
+		}
 	}
 
 	return &TaskSettle{
@@ -91,7 +102,7 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 		SettlementMethod: "GRN_TRANSFER",
 		Payer:            payer,
 		Payee:            payee,
-		Amount:           spec.Bounty.Amount,
+		Amount:           amount,
 		ReceiptRef:       verify.EvidenceSHA256,
 		SettledSeq:       currentSeq,
 	}, nil
