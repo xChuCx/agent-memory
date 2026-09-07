@@ -279,4 +279,50 @@ func TestVTP_SettlementInconsistencyBypass(t *testing.T) {
 	}
 }
 
+func TestVTP_HermeticityFastPathGating(t *testing.T) {
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-hermetic-001",
+		Title:    "Hermetic execution test",
+		Bounty:   BountySpec{Currency: "GRN", Amount: 5},
+		Oracle:   OracleSpec{Type: "execution@1", Hermetic: true},
+	}
+
+	// 1. Hermetic execution receipt
+	recHermetic := &TaskReceipt{
+		Protocol:  ProtocolVersion,
+		TaskID:    spec.TaskID,
+		Worker:    "worker-node",
+		Execution: ExecutionReceipt{ExitCode: 0, Hermetic: true},
+	}
+	vHermetic, err := VerifyReceipt(spec, recHermetic, []byte(""), []byte(""), 0, "verifier-node")
+	if err != nil {
+		t.Fatalf("unexpected verify error: %v", err)
+	}
+	if !vHermetic.IsHermetic {
+		t.Fatalf("expected IsHermetic=true")
+	}
+	if !CanFastPathCache(vHermetic) {
+		t.Fatalf("expected CanFastPathCache=true for hermetic PASS")
+	}
+
+	// 2. Non-hermetic execution receipt (e.g., depends on network/ambient clock)
+	recNonHermetic := &TaskReceipt{
+		Protocol:  ProtocolVersion,
+		TaskID:    spec.TaskID,
+		Worker:    "worker-node",
+		Execution: ExecutionReceipt{ExitCode: 0, Hermetic: false},
+	}
+	vNonHermetic, err := VerifyReceipt(spec, recNonHermetic, []byte(""), []byte(""), 0, "verifier-node")
+	if err != nil {
+		t.Fatalf("unexpected verify error: %v", err)
+	}
+	if vNonHermetic.IsHermetic {
+		t.Fatalf("expected IsHermetic=false")
+	}
+	if CanFastPathCache(vNonHermetic) {
+		t.Fatalf("expected CanFastPathCache=FALSE for non-hermetic execution per SAR-006 audit")
+	}
+}
+
 

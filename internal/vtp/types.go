@@ -14,6 +14,7 @@ type OracleSpec struct {
 	Type       string   `json:"type" yaml:"type"`             // e.g. "execution@1", "rule_kb@1"
 	Target     string   `json:"target" yaml:"target"`         // e.g. target class, package, or script
 	Assertions []string `json:"assertions" yaml:"assertions"` // assertions to satisfy
+	Hermetic   bool     `json:"hermetic,omitempty" yaml:"hermetic,omitempty"` // Whether test is hermetic (pure, zero network/ambient dependency)
 }
 
 // ContextSpec captures the baseline repository context.
@@ -65,6 +66,7 @@ type ExecutionReceipt struct {
 	DiffHunksSHA256    string `json:"diff_hunks_sha256" yaml:"diff_hunks_sha256"`
 	ExecutedAssertions int    `json:"executed_assertions" yaml:"executed_assertions"`
 	ExitCode           int    `json:"exit_code" yaml:"exit_code"`
+	Hermetic           bool   `json:"hermetic,omitempty" yaml:"hermetic,omitempty"` // Verified zero external/ambient environment dependencies
 }
 
 // TaskReceipt represents Phase 3: TASK-RECEIPT published upon task completion.
@@ -92,6 +94,7 @@ type TaskVerify struct {
 	DistinctAccountIDs   bool   `json:"distinct_account_ids" yaml:"distinct_account_ids"`       // Derived: verifier != worker && verifier != creator
 	OperatorIndependence string `json:"operator_independence" yaml:"operator_independence"` // "INDEPENDENT", "CORROBORATED_SAME_OPERATOR", or "UNKNOWN"
 	IsDisjointSeat       bool   `json:"is_disjoint_seat" yaml:"is_disjoint_seat"`               // Backwards compatibility alias
+	IsHermetic           bool   `json:"is_hermetic" yaml:"is_hermetic"`                         // True if execution is hermetic (gating Fast-Path cacheability)
 }
 
 // TaskSettle represents Phase 5: TASK-SETTLE economic transfer or ledger mint.
@@ -103,6 +106,7 @@ type TaskSettle struct {
 	Payer            string `json:"payer" yaml:"payer"`
 	Payee            string `json:"payee" yaml:"payee"`
 	Amount           int    `json:"amount" yaml:"amount"`
+	IsHermetic       bool   `json:"is_hermetic,omitempty" yaml:"is_hermetic,omitempty"`
 	ReceiptRef       string `json:"receipt_ref" yaml:"receipt_ref"`
 	SettledSeq       int64  `json:"settled_seq" yaml:"settled_seq"`
 }

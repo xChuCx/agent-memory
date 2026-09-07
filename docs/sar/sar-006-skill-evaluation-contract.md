@@ -67,6 +67,13 @@ skills/<skill-name>/
 - The verifier account ID must be non-empty and strictly distinct from both the worker and creator (`verifier != worker && verifier != creator`).
 - Operator independence is recorded strictly as `UNKNOWN` unless backed by cryptographic enclave attestation or disjoint ASN/stake signals.
 
+### Signal 6: Hermeticity Tag & Fast-Path Routing (Peer Audit #22260 by @bpmd-blbt)
+- A content hash match proves that an artifact is byte-identical to what was previously tested, but it does NOT guarantee identical execution output if the test interacts with ambient state (external networks, wall-clock time, system temp directories, or host OS version).
+- **Requirement:**
+  - Every evaluation receipt MUST explicitly tag whether its test target is hermetic (`hermetic: true | false`).
+  - **Fast-Path Invariant (`CanFastPathCache`):** $O(1)$ cached consensus is strictly gated on `is_hermetic == true`.
+  - Non-hermetic evaluations MUST bypass the fast-path cache and trigger Slow Path stranger re-verification upon session restarts, preventing ambient environment drift from corrupting persistent memory under the guise of cryptographic certainty.
+
 ---
 
 ## 3. Declarative Schema (`eval.yaml`)
@@ -79,6 +86,7 @@ version: "1.0.0"
 claim:
   mechanism: "Win32 ReplaceFileW with exponential backoff prevents file corruption during concurrent reader lock"
   falsifier: "Simulate background reader lock (150ms); verify target file integrity and zero orphaned temp files"
+  hermetic: true
 
 fixtures:
   decisive_p:
@@ -118,24 +126,33 @@ state_invariant:
 def test_sar_006_skill_evaluation():
     # Signal 1: Causation
     res_without = run_agent(task_p, with_skill=False)
-    assert res_without.exit_code != 0, "Redundant: base model solved task without skill"
+    assert res_without.exit_code != 0, "Redundancy: Base model solves task without skill"
 
     res_with = run_agent(task_p, with_skill=True)
-    assert res_with.exit_code == 0 and validate_artifact(res_with.artifact), "Failed: artifact missing or invalid"
+    assert res_with.exit_code == 0, "Liveness: Skill execution failed"
+    assert validate_artifact(res_with.artifact, expected_schema), "Schema: Malformed artifact output"
 
     # Signal 2: Mechanism Sensitivity (Mutant)
-    res_mutant = run_agent(task_p, with_skill=True, mutant="remove_retry_loop")
-    assert res_mutant.exit_code != 0, "Insensitive: mutant passed, claimed rule is placebo"
+    res_mutant = run_agent(task_p, with_mutant_skill=True)
+    assert res_mutant.exit_code != 0, "Insensitivity: Mutant variant passed; mechanism not decisive"
 
-    # Signal 3: Boundary Selectivity
-    res_n1 = run_agent(task_n1, with_skill=True)
-    assert not res_n1.skill_invoked, "Over-trigger: skill fired on lexical near-miss"
-    assert res_n1.cost <= baseline_cost * 1.15, "Cost tax exceeded on non-target task"
+    # Signal 3: Boundary Selectivity (Near-Miss N1)
+    res_near_miss = run_agent(task_n1, with_skill=True)
+    assert not res_near_miss.skill_invoked, "Selectivity breach: Skill invoked for out-of-scope near-miss"
+    assert res_near_miss.token_cost <= baseline_n1_cost * 1.15, "Tax overrun: Excess turn/token overhead"
 
-    # Signal 4: State Invariance
-    diff = get_workspace_mutation_diff()
-    assert diff.matches_manifest(allowed_manifest), f"State contamination detected: {diff.unmanifested_files}"
-    assert run_neutral_canary().matches_pre_baseline(), "Sticky steering / context drift detected"
+    # Signal 4: State Invariance (Manifest & Canary)
+    diff = capture_workspace_diff()
+    assert diff.matches_manifest(allowed_mutations_manifest), f"Pollution: Unmanifested modifications: {diff}"
+    canary_post = run_canary_task()
+    assert canary_post == canary_pre, "Steering: Canary execution drifted post-skill run"
+
+    # Signal 5 & 6: Stranger Verification & Hermeticity Fast-Path
+    receipt = build_vtp_receipt(res_with)
+    assert receipt.execution.hermetic == True, "Non-hermetic execution cannot claim immutable fast path"
+    verify_result = stranger_verify(receipt, verifier_account="independent_auditor")
+    assert verify_result.distinct_account_ids == True, "Self-check violation: verifier must be distinct"
+    assert verify_result.can_fast_path_cache == True, "Fast-path cacheability denied"
 ```
 
 ---

@@ -15,7 +15,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 | **SAR-003** | Demurrage-Backed Machine Liquidity (Grain / GRN) | **Final** | [internal/vtp/consensus.go](../../internal/vtp/consensus.go) | #21858, #21923 |
 | **SAR-004** | Provenance Tags & Sub-Agent Bounded Memory | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L150) | #21972, #22101 |
 | **SAR-005** | Tenant Statistical Isolation in FTS5 (Global-IDF Shield) | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L158) | #22019, #22024, #22048 |
-| **SAR-006** | Five-Signal Skill Evaluation & State Invariance Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22174, #22179, #22181, #22209, #22221 |
+| **SAR-006** | Six-Signal Skill Evaluation & Hermeticity Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22181, #22221, #22260 |
 
 ---
 
@@ -66,17 +66,15 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   - Each tenant maintains an independent SQLite file (`.agent-memory/tenants/<id>/index.sqlite`).
   - Search across multiple federated stores (`SearchPerStore`) queries each store index independently and merges results fairly, eliminating cross-corpus statistical contamination.
 
-### SAR-006: Skill Evaluation & State Invariance Loop (Five-Signal Contract)
-- **Context:** Standard evaluation loops for on-demand procedural agent skills rely either on load-event telemetry (failing to verify if the skill changed the decision) or simple output appearance (failing to verify causation when the base model produces the artifact anyway). Furthermore, stateful skills can cause workspace pollution, toxic directive steering, or memory index drift that silently breaks subsequent tasks.
-- **Decision:** Mandate the **Five-Signal Decisive Evaluation Contract**:
-  1. **Signal 1: Functional Causation ($P_{without} \to P_{with}$):** One decisive task with checkable right answer. The baseline run without the skill MUST fail; the run with the skill MUST succeed with verifiable artifact schema. If $P_{without}$ passes, the skill is redundant.
-  2. **Signal 2: Mechanism Sensitivity ($P_{mutant}$ Mutation Check):** A mutated skill variant with the core rule/retry loop removed or inverted MUST fail $P$. If the mutant passes, the evaluation is insensitive to the claimed mechanism.
-  3. **Signal 3: Boundary Selectivity ($N_1$ Near-Miss):** A task sharing lexical keywords with $P$ but out of domain MUST NOT invoke the skill. Token/turn tax must stay $\le \text{baseline} + 15\%$.
-  4. **Signal 4: Post-Execution Invariance (Allowed Mutation Manifest):** Runtime state must strictly adhere to a declared `allowed_mutations` manifest:
-     - All workspace changes outside `allowed_mutations` (e.g. `.tmp_*`, `.lock`) are strictly prohibited.
-     - Environment variables and working directory are restored.
-     - A neutral post-execution canary task $C_{post}$ produces output identical to $C_{pre}$ (no sticky prompt steering or FTS5 index distortion).
-  5. **Signal 5: Stranger Verification (VTP-1):** Skill receipts must be verified by an authenticated third-party account (`verifier != worker && verifier != creator`), gating economic release with explicit `operator_independence: UNKNOWN` unless cryptographic stake or hardware attestation is provided.
+### SAR-006: Six-Signal Skill Evaluation & Hermeticity Contract
+- **Context:** Standard evaluation loops for on-demand procedural agent skills fail if they cannot establish causation, mechanism sensitivity, boundary isolation, post-run state cleanliness, stranger verification, and hermeticity. Furthermore, assuming that "hash match == valid fact" quietly fails if tests depend on ambient/network state, leading to stale memory corruption.
+- **Decision:** Mandate the **Six-Signal Decisive Evaluation Contract**:
+  1. **Signal 1: Functional Causation ($P_{without} \to P_{with}$):** One decisive task with checkable right answer. Baseline run without skill MUST fail; run with skill MUST succeed.
+  2. **Signal 2: Mechanism Sensitivity ($P_{mutant}$ Mutation Check):** A mutated skill variant with core rule inverted MUST fail $P$.
+  3. **Signal 3: Boundary Selectivity ($N_1$ Near-Miss):** Out-of-domain task sharing lexical keywords MUST NOT trigger the skill; overhead $\le 15\%$.
+  4. **Signal 4: Post-Execution Invariance (Allowed Mutation Manifest):** Only declared workspace mutations are permitted; neutral canary outputs remain invariant.
+  5. **Signal 5: Stranger Verification (VTP-1):** Independent validator (`verifier != worker && verifier != creator`) attests execution receipts.
+  6. **Signal 6: Hermeticity Tag & Fast-Path Routing (Peer Audit #22260 by @bpmd-blbt):** Receipts MUST carry `hermetic: true|false`. Only hermetic tests can be served as $O(1)$ fast-path cached facts (`CanFastPathCache`). Non-hermetic tasks must re-run via Slow Path upon session restart.
 - **Harness CI Assertion:**
   ```python
   assert run_agent(task_p, with_skill=False).exit_code != 0, "Redundant: base model solved without skill"
@@ -84,6 +82,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   assert run_agent(task_p, with_mutant=True).exit_code != 0, "Insensitive: mutant passed, rule not decisive"
   assert not run_agent(task_n1, with_skill=True).skill_invoked and cost <= baseline * 1.15, "Boundary breach"
   assert mutation_diff().matches_manifest(allowed_manifest), "State contamination / unmanifested leak"
+  assert receipt.execution.hermetic and can_fast_path_cache(verify), "Non-hermetic task routed to slow path"
   ```
 
 ---

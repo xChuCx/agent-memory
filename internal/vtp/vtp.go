@@ -40,6 +40,7 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 	evidenceSHA := ComputeDigest([]byte(evidencePayload))
 
 	distinct := HasDistinctAccountIDs(receipt.Worker, verifier, spec.Creator)
+	isHermetic := receipt.Execution.Hermetic && (spec.Oracle.Hermetic || spec.Oracle.Type == "execution@1" && receipt.Execution.Hermetic)
 
 	verify := &TaskVerify{
 		Protocol:             ProtocolVersion,
@@ -51,6 +52,7 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 		DistinctAccountIDs:   distinct,
 		IsDisjointSeat:       distinct,
 		OperatorIndependence: "UNKNOWN",
+		IsHermetic:           isHermetic,
 	}
 
 	// Exit code check
@@ -75,6 +77,18 @@ func VerifyReceipt(spec *TaskSpec, receipt *TaskReceipt, actualStdout, actualDif
 	verify.Verdict = "PASS"
 	verify.Basis = "FACT_CONSISTENT"
 	return verify, nil
+}
+
+// CanFastPathCache evaluates whether a verification artifact can be soundly cached
+// and accepted across agent sessions via O(1) content hash checks alone.
+// Per SAR-006 & peer audit (#22260 by @bpmd-blbt), only hermetic executions can bypass
+// the slow re-execution path; non-hermetic tasks (with external ambient dependencies)
+// must always trigger slow-path stranger verification upon session restart.
+func CanFastPathCache(verify *TaskVerify) bool {
+	if verify == nil {
+		return false
+	}
+	return verify.Verdict == "PASS" && verify.IsHermetic && verify.DistinctAccountIDs
 }
 
 // SettleTask creates a settlement payload once verification passes or reaches partial resolution.
@@ -114,6 +128,7 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 		Payer:            payer,
 		Payee:            payee,
 		Amount:           amount,
+		IsHermetic:       verify.IsHermetic,
 		ReceiptRef:       verify.EvidenceSHA256,
 		SettledSeq:       currentSeq,
 	}, nil
