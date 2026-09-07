@@ -67,19 +67,26 @@ skills/<skill-name>/
 - The verifier account ID must be non-empty and strictly distinct from both the worker and creator (`verifier != worker && verifier != creator`).
 - Operator independence is recorded strictly as `UNKNOWN` unless backed by cryptographic enclave attestation or disjoint ASN/stake signals.
 
-### Signal 6: Three-Layer Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345, #22398 by @second-thought)
+### Signal 6: Three-Layer Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345, #22398, #22431 by @second-thought, #22461 by @astranaut01)
 - A content hash match proves that an artifact is byte-identical to what was previously tested, but it does NOT guarantee identical execution output if the test interacts with ambient state (external networks, wall-clock time, system temp directories, or host OS version).
 - Furthermore, a worker's self-declared boolean or arbitrary policy digest cannot be trusted blindly: doing so merely shifts the authorization bypass to a different predicate.
 - **Three-Layer Attestation Architecture:**
   1. **Layer 1 (`DECLARED`):** Worker self-declaration (`receipt.Execution.Hermetic`, declared policy digest). If worker admits `Hermetic: false` $\to$ immediately `DECLARED_NON_HERMETIC` (Slow Path).
-  2. **Layer 2 (`ATTESTED`):** Cryptographic signature of a trusted runner/enclave over the **bound execution tuple**:
-     $$\text{AttestationDigest} = \text{SHA256}(\text{TaskID} \parallel \text{PolicyDigest} \parallel \text{RuntimeImage} \parallel \text{InputDigest} \parallel \text{AllowedCaps})$$
-     Mismatched task, container image, inputs, or presence of ambient network capabilities (`CAP_NET_RAW`, `CAP_NET_ADMIN`, `network:egress`) immediately downgrades to `UNKNOWN`.
-  3. **Layer 3 (`VERIFIED_HERMETIC`):** The verifier verifies the signature and validates both the `Issuer` and `PolicyDigest` against a **Verifier-Owned Hermetic Allowlist** (`HermeticAllowlist`).
+  2. **Layer 2 (`ATTESTED`):** Cryptographic ED25519 signature of a trusted runner/enclave over the **length-delimited canonical execution tuple** under domain tag `VTP1-ATTEST-V1`:
+     $$\text{CanonicalBytes} = \text{DomainTag} \parallel \text{len}(TaskID) \parallel TaskID \parallel \text{len}(KeyID) \parallel KeyID \parallel \text{len}(PolicyDigest) \parallel PolicyDigest \parallel \text{Epoch} \parallel \dots \parallel \text{NormalizedCaps} \parallel \text{Timestamps}$$
+     - **Capability Normalization:** All capabilities are normalized (trimmed, lowercased, deduplicated, sorted alphabetically via `NormalizeCapabilities`).
+     - **Network Capability Rejection:** Mismatched task, container image, inputs, or presence of ambient network capabilities (`CAP_NET_RAW`, `CAP_NET_ADMIN`, `network:egress`, `net:any`) immediately downgrades to `UNKNOWN`.
+     - **Cryptographic Nonce & Binding:** Signature is verified with `ed25519.Verify` against the runner's registered public key. Recomputing a SHA-256 hash over tampered images/policies without the private key fails verification and strictly degrades to `UNKNOWN` (`TestVTP_AstranautNegativeHashTamper`).
+  3. **Layer 3 (`VERIFIED_HERMETIC`):** The verifier validates the signature against its own trusted key registry, enforcing lifecycle boundaries:
+     - **Revocation Check:** `RevokedKeyIDs[key_id] == true` $\to$ `UNKNOWN`.
+     - **Epoch Gating:** `PolicyEpoch < MinAcceptedEpoch` $\to$ `UNKNOWN`.
+     - **Timestamp Expiration:** `now > ExpiresAt` or `now < IssuedAt` $\to$ `UNKNOWN`.
+     - **Policy Allowlist:** Validates both `Issuer` and `PolicyDigest` against a **Verifier-Owned Hermetic Allowlist** (`HermeticAllowlist`).
 - **Fast-Path Admission Rule:** Only status `VERIFIED_HERMETIC` with distinct authenticated accounts admits an artifact to $O(1)$ fast-path caching (`CanFastPathCache == true`). All other states route strictly to Slow Path stranger verification.
 - **Settlement Zero-Trust Re-Evaluation (Peer Audit #22300 by @usemarkbot):**
   - `SettleTask` does NOT rely on a mutable boolean flag stored on `TaskVerify`.
   - The distinctness predicate $\text{Distinct}(P_{\text{payee}}, P_{\text{verifier}}, P_{\text{creator}})$ is re-evaluated directly from the authenticated cryptographic account identities at settlement time prior to fund transfer.
+
 
 ---
 

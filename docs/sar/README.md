@@ -15,7 +15,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 | **SAR-003** | Demurrage-Backed Machine Liquidity (Grain / GRN) | **Final** | [internal/vtp/consensus.go](../../internal/vtp/consensus.go) | #21858, #21923 |
 | **SAR-004** | Provenance Tags & Sub-Agent Bounded Memory | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L150) | #21972, #22101 |
 | **SAR-005** | Tenant Statistical Isolation in FTS5 (Global-IDF Shield) | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L158) | #22019, #22024, #22048 |
-| **SAR-006** | Six-Signal Skill Evaluation & Hermeticity Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22181, #22221, #22260 |
+| **SAR-006** | Six-Signal Skill Evaluation & Hermeticity Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22181, #22221, #22260, #22345, #22398, #22431, #22461 |
 
 ---
 
@@ -74,7 +74,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   3. **Signal 3: Boundary Selectivity ($N_1$ Near-Miss):** Out-of-domain task sharing lexical keywords MUST NOT trigger the skill; overhead $\le 15\%$.
   4. **Signal 4: Post-Execution Invariance (Allowed Mutation Manifest):** Only declared workspace mutations are permitted; neutral canary outputs remain invariant.
   5. **Signal 5: Stranger Verification (VTP-1):** Independent validator (`verifier != worker && verifier != creator`) attests execution receipts.
-  6. **Signal 6: Three-Layer Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345, #22398 by @second-thought):** Workers cannot self-certify hermeticity. Hermeticity enforces a 3-layer pipeline: `DECLARED` (worker self-claim), `ATTESTED` (cryptographic signature over bound tuple $\text{task} \parallel \text{policy} \parallel \text{image} \parallel \text{input} \parallel \text{caps}$), and `VERIFIED_HERMETIC` (checked against a verifier-owned allowlist). Only `VERIFIED_HERMETIC` is admitted to $O(1)$ fast-path caching (`CanFastPathCache`); all other states route strictly to Slow Path stranger verification.
+  6. **Signal 6: Three-Layer Hermeticity & Sandbox Attestation (Peer Audits #22260 by @bpmd-blbt, #22345, #22398, #22431 by @second-thought, #22461 by @astranaut01):** Workers cannot self-certify hermeticity. Hermeticity enforces a 3-layer pipeline: `DECLARED` (worker self-claim), `ATTESTED` (ED25519 signature over length-delimited canonical tuple `VTP1-ATTEST-V1` with normalized capabilities and key/epoch/time lifecycle bounds), and `VERIFIED_HERMETIC` (checked against verifier allowlist and public key registry with revocation). Only `VERIFIED_HERMETIC` is admitted to $O(1)$ fast-path caching (`CanFastPathCache`); all other states route strictly to Slow Path stranger verification.
 - **Harness CI Assertion:**
   ```python
   assert run_agent(task_p, with_skill=False).exit_code != 0, "Redundant: base model solved without skill"
@@ -82,8 +82,9 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   assert run_agent(task_p, with_mutant=True).exit_code != 0, "Insensitive: mutant passed, rule not decisive"
   assert not run_agent(task_n1, with_skill=True).skill_invoked and cost <= baseline * 1.15, "Boundary breach"
   assert mutation_diff().matches_manifest(allowed_manifest), "State contamination / unmanifested leak"
-  assert receipt.execution.sandbox.signature == bound_digest and can_fast_path_cache(verify), "Unattested hermeticity routed to slow path"
+  assert verify_attestation(receipt.execution.sandbox) and can_fast_path_cache(verify), "Unattested hermeticity routed to slow path"
   ```
+
 
 ---
 
