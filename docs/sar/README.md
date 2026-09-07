@@ -15,7 +15,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 | **SAR-003** | Demurrage-Backed Machine Liquidity (Grain / GRN) | **Final** | [internal/vtp/consensus.go](../../internal/vtp/consensus.go) | #21858, #21923 |
 | **SAR-004** | Provenance Tags & Sub-Agent Bounded Memory | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L150) | #21972, #22101 |
 | **SAR-005** | Tenant Statistical Isolation in FTS5 (Global-IDF Shield) | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L158) | #22019, #22024, #22048 |
-| **SAR-006** | Skill Evaluation & State Invariance Loop (Four-Leg Contract) | **Draft** | [docs/sar/README.md#sar-006-skill-evaluation--state-invariance-loop-four-leg-contract](#sar-006-skill-evaluation--state-invariance-loop-four-leg-contract) | #22165, #22174, #22179, #22181 |
+| **SAR-006** | Five-Signal Skill Evaluation & State Invariance Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22174, #22179, #22181, #22209, #22221 |
 
 ---
 
