@@ -408,20 +408,60 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 	}
 
 	stageFilesDir := filepath.Join(deps.MemoryDir, "staging", stagingID, "files")
+	type fileBackup struct {
+		abs     string
+		existed bool
+		orig    []byte
+		perm    os.FileMode
+	}
+	backups := make([]fileBackup, 0, len(proposal.Files))
 	for _, rel := range proposal.Files {
+		dstAbs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
+		if info, err := os.Stat(dstAbs); err == nil {
+			orig, err := os.ReadFile(dstAbs)
+			if err != nil {
+				return nil, fmt.Errorf("ApplyStaged: backup %s: %w", rel, err)
+			}
+			backups = append(backups, fileBackup{abs: dstAbs, existed: true, orig: orig, perm: info.Mode().Perm()})
+		} else if os.IsNotExist(err) {
+			backups = append(backups, fileBackup{abs: dstAbs, existed: false})
+		} else {
+			return nil, fmt.Errorf("ApplyStaged: stat %s: %w", rel, err)
+		}
+	}
+
+	rollback := func(appliedCount int) {
+		for i := 0; i < appliedCount; i++ {
+			b := backups[i]
+			if b.existed {
+				_ = agentfs.WriteAtomic(b.abs, b.orig, b.perm)
+			} else {
+				_ = os.Remove(b.abs)
+			}
+		}
+	}
+
+	for i, rel := range proposal.Files {
 		srcAbs := filepath.Join(stageFilesDir, filepath.FromSlash(rel))
 		dstAbs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
 		body, err := os.ReadFile(srcAbs)
 		if err != nil {
+			rollback(i)
 			return nil, fmt.Errorf("ApplyStaged: read staged %s: %w", rel, err)
 		}
 		if err := os.MkdirAll(filepath.Dir(dstAbs), 0755); err != nil {
+			rollback(i)
 			return nil, fmt.Errorf("ApplyStaged: mkdir %s: %w", filepath.Dir(dstAbs), err)
 		}
 		if err := agentfs.WriteAtomic(dstAbs, body, 0644); err != nil {
+			rollback(i)
 			return nil, fmt.Errorf("ApplyStaged: write %s: %w", rel, err)
 		}
 	}
+
+	// Invalidate pending read nonces now that durable memory state has mutated (SAR-008).
+	DefaultNonceStore.SetStorageDir(deps.MemoryDir)
+	DefaultNonceStore.InvalidateAll()
 
 	// Best-effort re-index. Index errors don't roll back the writes — bytes
 	// are durable and rebuild-index can repair.

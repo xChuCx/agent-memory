@@ -3,6 +3,7 @@ package memory
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -543,21 +544,40 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (re
 		fileOps[ep] = append(fileOps[ep], opCat{rel: ep, category: cat})
 	}
 
-	// (7) Provenance — checked against the dominant category. When ops touch
-	// multiple categories, the strictest policy wins; for M3 we use the first
-	// op's category as the policy source (almost all proposals are single-
-	// category; the orchestrator can be extended later).
-	dominant := resolved[0].category
-	pctx := ProvenanceContext{
-		Sources:      req.Sources,
-		Grounding:    req.Grounding,
-		Confidence:   req.Confidence,
-		IsNewSection: containsNewSectionOp(ops),
+	// (7) Provenance — checked against all touched categories.
+	// A multi-category proposal must satisfy the provenance requirements
+	// of EVERY category it touches (strictest policy wins). Order of operations
+	// in the request does not weaken policy enforcement.
+	// IsNewSection is evaluated per category to prevent a new section in a permissive
+	// category from erroneously triggering RequiredForNewSections on an unchanged section in another category.
+	seenCat := map[string]bool{}
+	for _, oc := range resolved {
+		catName := oc.category.Name
+		if seenCat[catName] {
+			continue
+		}
+		seenCat[catName] = true
+		pctx := ProvenanceContext{
+			Sources:      req.Sources,
+			Grounding:    req.Grounding,
+			Confidence:   req.Confidence,
+			IsNewSection: categoryHasNewSection(fileOps, catName),
+		}
+		if provViols := ValidateProvenance(oc.category.Provenance, pctx); len(provViols) > 0 {
+			return rejectWithProvViolations(ReasonProvenanceViolation,
+				fmt.Sprintf("category %q: %d provenance violation(s)", oc.category.Name, len(provViols)),
+				provViols), nil
+		}
 	}
-	if provViols := ValidateProvenance(dominant.Provenance, pctx); len(provViols) > 0 {
-		return rejectWithProvViolations(ReasonProvenanceViolation,
-			fmt.Sprintf("category %q: %d provenance violation(s)", dominant.Name, len(provViols)),
-			provViols), nil
+
+	// (7.1) Validate and consume one-shot Proof-of-Grounding capability if provided (SAR-008).
+	if req.Grounding != nil && req.Grounding.ReadNonce != "" {
+		DefaultNonceStore.SetStorageDir(deps.MemoryDir)
+		if err := DefaultNonceStore.Consume(req.Grounding.ReadNonce, req.Grounding.PackDigest); err != nil {
+			return rejectWithProvViolations(ReasonProvenanceViolation,
+				fmt.Sprintf("grounding verification failed: %v", err),
+				[]string{err.Error()}), nil
+		}
 	}
 
 	// (8) Routing — combine per-op routings.
@@ -619,24 +639,74 @@ func applyImmediately(
 	intent Intent,
 	rationale string,
 ) (*ProposeResponse, error) {
+	// Best-effort multi-file rollback on write failure:
+	// Snapshots pre-state of all touched files before writing. If any write in the batch fails,
+	// previously written files are rolled back to their pre-state.
+	// Note: This provides in-process consistency against transient write/permission failures;
+	// it does not guarantee crash-atomicity across kernel panics or power loss.
+	type fileBackup struct {
+		abs     string
+		existed bool
+		orig    []byte
+		perm    os.FileMode
+	}
+	backups := make([]fileBackup, 0, len(fileOrder))
 	for _, rel := range fileOrder {
 		abs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
+		if info, err := os.Stat(abs); err == nil {
+			orig, err := os.ReadFile(abs)
+			if err != nil {
+				return nil, fmt.Errorf("applyImmediately: backup %s: %w", rel, err)
+			}
+			backups = append(backups, fileBackup{abs: abs, existed: true, orig: orig, perm: info.Mode().Perm()})
+		} else if os.IsNotExist(err) {
+			backups = append(backups, fileBackup{abs: abs, existed: false})
+		} else {
+			return nil, fmt.Errorf("applyImmediately: stat %s: %w", rel, err)
+		}
+	}
+
+	rollback := func(appliedCount int) {
+		for i := 0; i < appliedCount; i++ {
+			b := backups[i]
+			if b.existed {
+				_ = agentfs.WriteAtomic(b.abs, b.orig, b.perm)
+			} else {
+				_ = os.Remove(b.abs)
+			}
+		}
+	}
+
+	for i, rel := range fileOrder {
+		abs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+			rollback(i)
 			return nil, fmt.Errorf("applyImmediately: mkdir %s: %w", filepath.Dir(abs), err)
 		}
 		if err := agentfs.WriteAtomic(abs, postState[rel], 0644); err != nil {
+			rollback(i)
 			return nil, fmt.Errorf("applyImmediately: write %s: %w", rel, err)
 		}
 	}
 
+	// Invalidate pending read nonces now that durable memory state has mutated (SAR-008).
+	DefaultNonceStore.SetStorageDir(deps.MemoryDir)
+	DefaultNonceStore.InvalidateAll()
+
 	// Re-index touched files. Errors here do NOT roll back the write — the
 	// bytes are durable and the index can be rebuilt via `rebuild-index`.
-	// We log nothing (no logger plumbed in); future T3.7 follow-up wires
-	// slog through deps.
+	// We track whether indexing completed without error for truthful reporting.
+	var (
+		indexUpdated = false
+		hasIndexErr  = false
+	)
 	if deps.Idx != nil {
+		indexUpdated = true
 		for _, rel := range fileOrder {
 			cat := categoryForFile(deps, fileOps, rel)
-			_ = reindexFile(ctx, deps.Idx, deps.MemoryDir, rel, cat)
+			if err := reindexFile(ctx, deps.Idx, deps.MemoryDir, rel, cat); err != nil {
+				hasIndexErr = true
+			}
 		}
 	}
 
@@ -651,7 +721,9 @@ func applyImmediately(
 		}
 		if deps.Idx != nil {
 			cat, _ := deps.Schema.CategoryForPath(indexFileName)
-			_ = reindexFile(ctx, deps.Idx, deps.MemoryDir, indexFileName, cat)
+			if err := reindexFile(ctx, deps.Idx, deps.MemoryDir, indexFileName, cat); err != nil {
+				hasIndexErr = true
+			}
 		}
 	}
 
@@ -667,7 +739,7 @@ func applyImmediately(
 		Routing:          routing,
 		AppliedAt:        time.Now().UTC().Format(time.RFC3339),
 		AffectedSections: affectedSections(fileOrder, fileOps),
-		IndexUpdated:     deps.Idx != nil,
+		IndexUpdated:     indexUpdated && !hasIndexErr,
 		Warnings:         []string{},
 		AutoStage:        &autoStage,
 	}, nil
@@ -857,10 +929,11 @@ func sectionHash(src []byte, id string) string {
 
 // makeStagingID builds the staging directory name. Format:
 //
-//	<UTC YYYYMMDDTHHMMSS>-<slug(intent + rationale, max 40 chars)>
+//	<UTC YYYYMMDDTHHMMSS>-<slug(intent + rationale, max 40 chars)>-<8 hex random chars>
 //
 // The timestamp prefix keeps directory listings naturally chronologically
 // ordered. The slug appendix gives humans a hint of WHAT was staged.
+// The random hex suffix prevents collisions between concurrent swarm proposals.
 func makeStagingID(req ProposeRequest) string {
 	ts := time.Now().UTC().Format("20060102T150405")
 	hint := string(req.Intent)
@@ -871,7 +944,9 @@ func makeStagingID(req ProposeRequest) string {
 	if slug == "" {
 		slug = "proposal"
 	}
-	return ts + "-" + slug
+	var rnd [4]byte
+	_, _ = rand.Read(rnd[:])
+	return fmt.Sprintf("%s-%s-%s", ts, slug, hex.EncodeToString(rnd[:]))
 }
 
 // slugify lower-cases s, drops everything outside [a-z0-9], collapses runs
@@ -923,6 +998,22 @@ func containsNewSectionOp(ops []Operation) bool {
 		switch op.Kind() {
 		case "create_file", "append_section":
 			return true
+		}
+	}
+	return false
+}
+
+// categoryHasNewSection returns true if any operation targeting the given category
+// creates a new section (append_section, insert_section, or create_file).
+func categoryHasNewSection(fileOps map[string][]opCat, catName string) bool {
+	for _, ops := range fileOps {
+		for _, oc := range ops {
+			if oc.category.Name == catName && oc.op != nil {
+				switch oc.op.Kind() {
+				case "create_file", "append_section", "insert_section":
+					return true
+				}
+			}
 		}
 	}
 	return false

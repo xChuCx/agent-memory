@@ -685,3 +685,149 @@ func TestSlugify_OnlyLowercaseAlphanum(t *testing.T) {
 		t.Errorf("slug = %q, want hello-world-42", out)
 	}
 }
+
+func TestMakeStagingID_Uniqueness(t *testing.T) {
+	seen := make(map[string]bool)
+	req := ProposeRequest{
+		Intent:    IntentRecordDecision,
+		Rationale: "identical rationale in concurrent swarm",
+	}
+	for i := 0; i < 100; i++ {
+		id := makeStagingID(req)
+		if seen[id] {
+			t.Fatalf("collision detected on iteration %d: %s", i, id)
+		}
+		seen[id] = true
+	}
+}
+
+func TestProposeUpdate_MultiCategory_StrictestProvenanceWins(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+
+	lenientOp := OperationInput{
+		Op:           "append_section",
+		Path:         "pitfalls.md",
+		Heading:      "Memory Leak in Cache",
+		HeadingLevel: 2,
+		Content:      "## Memory Leak in Cache\n<!-- @id: mem-leak -->\n\n**Severity:** high\n\nCache lacks eviction.\n",
+	}
+	strictOp := OperationInput{
+		Op:           "append_section",
+		Path:         "decisions.md",
+		Heading:      "Adopt Foo Decision",
+		HeadingLevel: 2,
+		Content:      "## Adopt Foo Decision\n<!-- @id: adopt-foo-dec -->\n\n**Date:** 2026-05-27\n**Status:** active\n**Confidence:** confirmed\n\nFoo decision text.\n",
+	}
+
+	// Ordering 1: Lenient first, strict second (previously bypassed provenance!)
+	resp1, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent:     IntentRecordDecision,
+			Operations: []OperationInput{lenientOp, strictOp},
+			// No sources provided
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+	if resp1.Reason != ReasonProvenanceViolation {
+		t.Fatalf("Ordering 1: Reason = %q, want %q (lenient first must not bypass strict category provenance)", resp1.Reason, ReasonProvenanceViolation)
+	}
+
+	// Ordering 2: Strict first, lenient second
+	resp2, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent:     IntentRecordDecision,
+			Operations: []OperationInput{strictOp, lenientOp},
+			// No sources provided
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+	if resp2.Reason != ReasonProvenanceViolation {
+		t.Fatalf("Ordering 2: Reason = %q, want %q", resp2.Reason, ReasonProvenanceViolation)
+	}
+}
+
+func TestApplyImmediately_MultiFileRollbackOnFailure(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+
+	file1 := filepath.Join(memDir, "file1.md")
+	if err := os.WriteFile(file1, []byte("original content 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create file2 as a directory to force WriteAtomic to fail on file2
+	file2Dir := filepath.Join(memDir, "file2.md")
+	if err := os.Mkdir(file2Dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	fileOrder := []string{"file1.md", "file2.md"}
+	postState := map[string][]byte{
+		"file1.md": []byte("mutated content 1"),
+		"file2.md": []byte("mutated content 2"),
+	}
+	fileOps := map[string][]opCat{
+		"file1.md": nil,
+		"file2.md": nil,
+	}
+
+	deps := UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir}
+	_, err := applyImmediately(context.Background(), deps, fileOrder, postState, fileOps, Routing{Mode: schema.ApprovalApply}, IntentUpdateCurrent, "test rollback")
+	if err == nil {
+		t.Fatal("expected error from applyImmediately when file2 fails to write, got nil")
+	}
+
+	// Verify file1.md was restored to original content
+	got, err := os.ReadFile(file1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original content 1" {
+		t.Fatalf("atomicity violation: file1.md was not rolled back; got %q, want %q", string(got), "original content 1")
+	}
+}
+
+func TestProposeUpdate_MultiCategory_PerCategoryNewSection(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+
+	// Configure decisions category to require provenance ONLY for new sections
+	decCat := sch.Categories["decisions"]
+	decCat.Provenance.Required = false
+	decCat.Provenance.RequiredForNewSections = true
+	decCat.Provenance.AllowedSourceTypes = []string{"human"}
+	sch.Categories["decisions"] = decCat
+
+	// Replace existing section in decisions.md (not a new section in decisions)
+	replaceOp := OperationInput{
+		Op:           "replace_section",
+		Path:         "decisions.md",
+		SectionID:    "adr-001",
+		Heading:      "ADR-001 Use SQLite FTS5 for the Shadow Index",
+		HeadingLevel: 2,
+		Content:      "## ADR-001 Use SQLite FTS5 for the Shadow Index\n<!-- @id: adr-001 -->\n\n**Date:** 2026-05-26\n**Status:** active\n**Confidence:** confirmed\n\nUpdated decision text.\n",
+	}
+
+	// Append a new section to pitfalls.md (a new section in pitfalls, which has no provenance requirement)
+	appendOp := OperationInput{
+		Op:           "append_section",
+		Path:         "pitfalls.md",
+		Heading:      "New Pitfall",
+		HeadingLevel: 2,
+		Content:      "## New Pitfall\n<!-- @id: new-pitfall -->\n\n**Severity:** low\n\nDetails.\n",
+	}
+
+	// Proposal replaces section in decisions (NOT a new section in decisions)
+	// and appends a new section in pitfalls.
+	// Because decisions did NOT add a new section, it should NOT be rejected by RequiredForNewSections!
+	resp, err := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent:     IntentRecordDecision,
+			Rationale:  "Per-category new section test",
+			Operations: []OperationInput{replaceOp, appendOp},
+		},
+		UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Status == StatusRejected && resp.Reason == ReasonProvenanceViolation {
+		t.Fatalf("spurious provenance rejection: new section in pitfalls incorrectly triggered RequiredForNewSections on decisions: %v", resp.Violations)
+	}
+}
