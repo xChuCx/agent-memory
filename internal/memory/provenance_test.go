@@ -1,8 +1,10 @@
 package memory
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xChuCx/agent-memory/internal/schema"
 )
@@ -244,4 +246,125 @@ func TestValidateProvenance_WithGrounding(t *testing.T) {
 		t.Errorf("expected pack_digest violation in ValidateProvenance, got %v", viols)
 	}
 }
+
+func TestNonceStore_Lifecycle(t *testing.T) {
+	store := NewNonceStore(100 * time.Millisecond)
+	nonce := "poi-test-12345"
+	digest := "sha256:abcd"
+
+	// 1. Issue
+	store.Issue(nonce, digest)
+
+	// 2. Consume with wrong digest fails
+	if err := store.Consume(nonce, "sha256:wrong"); err == nil {
+		t.Fatal("expected error on digest mismatch, got nil")
+	}
+
+	// 3. Consume with correct digest succeeds
+	if err := store.Consume(nonce, digest); err != nil {
+		t.Fatalf("unexpected consume error: %v", err)
+	}
+
+	// 4. One-shot: second consume fails
+	if err := store.Consume(nonce, digest); err != ErrNonceConsumed {
+		t.Fatalf("expected ErrNonceConsumed, got %v", err)
+	}
+
+	// 5. InvalidateAll clears everything
+	store.Issue("poi-2", "sha256:2222")
+	store.InvalidateAll()
+	if err := store.Consume("poi-2", "sha256:2222"); err != ErrNonceNotFound {
+		t.Fatalf("expected ErrNonceNotFound after InvalidateAll, got %v", err)
+	}
+}
+
+func TestNonceStore_Persistent_CrossProcessSyncAndSweep(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "meta", "nonces.json")
+
+	// Process 1 issues a nonce
+	store1 := NewNonceStore(50 * time.Millisecond)
+	store1.SetStoragePath(storePath)
+	store1.Issue("poi-proc1", "sha256:1111")
+
+	// Process 2 opens same file and consumes the nonce
+	store2 := NewNonceStore(50 * time.Millisecond)
+	store2.SetStoragePath(storePath)
+	if err := store2.Consume("poi-proc1", "sha256:1111"); err != nil {
+		t.Fatalf("process 2 failed to consume nonce issued by process 1: %v", err)
+	}
+
+	// Process 1 attempts to consume already-consumed nonce -> must fail
+	if err := store1.Consume("poi-proc1", "sha256:1111"); err != ErrNonceConsumed {
+		t.Fatalf("expected ErrNonceConsumed across processes, got %v", err)
+	}
+
+	// Test auto-sweep after TTL
+	store1.Issue("poi-short-lived", "sha256:2222")
+	time.Sleep(70 * time.Millisecond)
+	if err := store2.Consume("poi-short-lived", "sha256:2222"); err != ErrNonceNotFound {
+		t.Fatalf("expected ErrNonceNotFound after TTL expiry, got %v", err)
+	}
+}
+
+func TestNonceStore_InvalidateAll_RejectsStalePostMutation(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "meta", "nonces.json")
+
+	store := NewNonceStore(10 * time.Minute)
+	store.SetStoragePath(storePath)
+
+	store.Issue("poi-context-a", "sha256:aaaa")
+
+	// Memory mutation occurs (applyImmediately / ApplyStaged) -> InvalidateAll()
+	store.InvalidateAll()
+
+	// Propose update using stale nonce must be rejected
+	err := store.Consume("poi-context-a", "sha256:aaaa")
+	if err != ErrNonceNotFound {
+		t.Fatalf("expected ErrNonceNotFound after memory mutation, got %v", err)
+	}
+}
+
+func TestValidateProvenance_GroundingRequiredPolicy(t *testing.T) {
+	policy := schema.Provenance{
+		Required:          true,
+		GroundingRequired: true,
+	}
+
+	// Missing grounding receipt fails
+	viols1 := ValidateProvenance(policy, ProvenanceContext{
+		Sources: []Source{{Type: "file", Ref: "x.go"}},
+	})
+	if !containsSubstr(viols1, "grounding receipt is required") {
+		t.Fatalf("expected grounding required error, got %v", viols1)
+	}
+
+	// Grounding receipt without locator fails
+	viols2 := ValidateProvenance(policy, ProvenanceContext{
+		Sources: []Source{{Type: "file", Ref: "x.go"}},
+		Grounding: &GroundingReceipt{
+			PackDigest: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+			ReadNonce:  "poi-7f83b165-1757262981000000000",
+			Locator:    "",
+		},
+	})
+	if !containsSubstr(viols2, "locator is required") {
+		t.Fatalf("expected locator is required error, got %v", viols2)
+	}
+
+	// Complete grounding receipt succeeds
+	viols3 := ValidateProvenance(policy, ProvenanceContext{
+		Sources: []Source{{Type: "file", Ref: "x.go"}},
+		Grounding: &GroundingReceipt{
+			PackDigest: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+			ReadNonce:  "poi-7f83b165-1757262981000000000",
+			Locator:    "decisions.md#ADR-004",
+		},
+	})
+	if len(viols3) != 0 {
+		t.Fatalf("expected zero violations, got %v", viols3)
+	}
+}
+
 

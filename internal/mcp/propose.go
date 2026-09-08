@@ -21,9 +21,10 @@ type ProposeUpdateInput struct {
 	Intent     string                  `json:"intent" jsonschema:"intent: update_current | update_shared | session_log | add_pitfall | record_decision | refresh_module | update_conventions | archive_stale"`
 	Rationale  string                  `json:"rationale,omitempty" jsonschema:"short human-readable reason; shown in CLI status and used in the staging-id slug"`
 	Operations []memory.OperationInput `json:"operations" jsonschema:"one or more structured edits to apply"`
-	Sources    []memory.Source         `json:"sources,omitempty" jsonschema:"provenance citations (required for some categories, e.g. decisions)"`
-	Confidence string                  `json:"confidence,omitempty" jsonschema:"confirmed | inferred | user-provided | stale | unknown"`
-	Owner      memory.OwnerInfo        `json:"owner,omitempty" jsonschema:"identifier of the proposing agent; recorded in lock metadata"`
+	Sources    []memory.Source          `json:"sources,omitempty" jsonschema:"provenance citations (required for some categories, e.g. decisions)"`
+	Grounding  *memory.GroundingReceipt `json:"grounding,omitempty" jsonschema:"proof-of-grounding receipt from a previous fetch call (SAR-008)"`
+	Confidence string                   `json:"confidence,omitempty" jsonschema:"confirmed | inferred | user-provided | stale | unknown"`
+	Owner      memory.OwnerInfo         `json:"owner,omitempty" jsonschema:"identifier of the proposing agent; recorded in lock metadata"`
 }
 
 // ProposeUpdateOutput is the JSON shape memory.propose_update returns.
@@ -122,6 +123,7 @@ func runProposeUpdate(ctx context.Context, root string, logger *slog.Logger, inp
 		Rationale:  input.Rationale,
 		Operations: input.Operations,
 		Sources:    input.Sources,
+		Grounding:  input.Grounding,
 		Confidence: input.Confidence,
 		Owner:      input.Owner,
 	}, memory.UpdateDeps{

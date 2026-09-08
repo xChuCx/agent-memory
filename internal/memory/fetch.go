@@ -165,6 +165,9 @@ func (d FetchDeps) log() *slog.Logger {
 // path (empty query) and the search path (non-empty query). All output goes
 // into FetchResponse.
 func BuildContextPack(ctx context.Context, req FetchRequest, deps FetchDeps) (resp *FetchResponse, err error) {
+	if deps.MemoryDir != "" {
+		DefaultNonceStore.SetStorageDir(deps.MemoryDir)
+	}
 	budget := req.Budget
 	if budget <= 0 {
 		budget = deps.Manifest.Budgets.FetchContextChars
@@ -268,6 +271,7 @@ func computeProofOfIngestion(packStr string) (string, string) {
 	h := sha256.Sum256(packBytes)
 	digest := fmt.Sprintf("sha256:%x", h)
 	nonce := fmt.Sprintf("poi-%x-%d", h[:8], time.Now().UnixNano())
+	DefaultNonceStore.Issue(nonce, digest)
 	return digest, nonce
 }
 
@@ -397,6 +401,11 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 	var includedOrder []sfKey
 	externalPreambleEmitted := false
 
+	topScore := float64(0)
+	if len(results) > 0 {
+		topScore = results[0].Score
+	}
+
 	for _, r := range results {
 		dir, origin, ok := deps.storeDir(r.Store)
 		// omit records a dropped candidate, mirroring an included one's
@@ -411,6 +420,14 @@ func buildSearchPack(ctx context.Context, req FetchRequest, deps FetchDeps, budg
 		}
 		if !ok {
 			omitted = append(omitted, omit("unknown store"))
+			continue
+		}
+
+		// Relevance threshold cutoff (preventing Issue #8 precision regression):
+		// Drop low-relevance tail candidates whose BM25 score is significantly worse
+		// than the leading candidate. (In FTS5, scores are negative, so more negative = better).
+		if topScore < -0.5 && r.Score > topScore*0.25 {
+			omitted = append(omitted, omit("relevance below threshold"))
 			continue
 		}
 		key := sfKey{r.Store, r.File}

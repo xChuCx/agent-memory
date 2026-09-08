@@ -152,7 +152,13 @@ func ValidateProvenance(policy schema.Provenance, ctx ProvenanceContext) []strin
 		}
 	}
 
-	if ctx.Grounding != nil {
+	if policy.GroundingRequired {
+		if ctx.Grounding == nil {
+			violations = append(violations, "grounding receipt is required by schema policy but was not provided")
+		} else {
+			violations = append(violations, ValidateGrounding(ctx.Grounding, true)...)
+		}
+	} else if ctx.Grounding != nil {
 		violations = append(violations, ValidateGrounding(ctx.Grounding, false)...)
 	}
 

@@ -257,3 +257,54 @@ func TestBuildContextPack_NoGitRepoFallsBackToShared(t *testing.T) {
 		t.Errorf("ActiveBranch should be empty without git, got %q", resp.ContextMetadata.ActiveBranch)
 	}
 }
+
+func TestBuildContextPack_BootstrapIssuesValidNonce(t *testing.T) {
+	deps, cleanup := fixture(t)
+	defer cleanup()
+
+	resp, err := BuildContextPack(context.Background(), FetchRequest{}, deps)
+	if err != nil {
+		t.Fatalf("BuildContextPack failed: %v", err)
+	}
+
+	nonce := resp.ContextMetadata.ReadNonce
+	digest := resp.ContextMetadata.PackDigest
+	if nonce == "" || digest == "" {
+		t.Fatalf("expected non-empty nonce and digest, got nonce=%q digest=%q", nonce, digest)
+	}
+
+	// Nonce issued on bootstrap must be consumable once
+	if err := DefaultNonceStore.Consume(nonce, digest); err != nil {
+		t.Fatalf("failed to consume bootstrap nonce: %v", err)
+	}
+
+	// Second consume must be rejected as already used
+	if err := DefaultNonceStore.Consume(nonce, digest); err != ErrNonceConsumed {
+		t.Fatalf("expected ErrNonceConsumed on replay, got %v", err)
+	}
+}
+
+func TestBuildContextPack_NegativeQuery_RelevanceCutoff(t *testing.T) {
+	deps, cleanup := fixture(t)
+	defer cleanup()
+
+	// Add another unrelated document
+	unrelated := "## Baking Sourdough\n<!-- @id: baking-sourdough -->\n\nFerment flour and water for 24 hours.\n"
+	if err := os.WriteFile(filepath.Join(deps.MemoryDir, "modules", "bread.md"), []byte(unrelated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := deps.Idx.RebuildAll(ctx, deps.MemoryDir, deps.Schema, index.RebuildOpts{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Query targeting specific auth terms shouldn't pull bread even if budget is huge
+	resp, err := BuildContextPack(ctx, FetchRequest{Query: "refresh token rotation jwt auth"}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(resp.Context, "Baking Sourdough") {
+		t.Errorf("unrelated document leaked into results: %s", resp.Context)
+	}
+}

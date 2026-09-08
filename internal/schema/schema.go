@@ -113,6 +113,7 @@ type Provenance struct {
 	RequiredForNewSections bool     `yaml:"required_for_new_sections,omitempty"`
 	AllowedSourceTypes     []string `yaml:"allowed_source_types,omitempty"`
 	ForbiddenSourceTypes   []string `yaml:"forbidden_source_types,omitempty"`
+	GroundingRequired      bool     `yaml:"grounding_required,omitempty"`
 }
 
 // DefaultSchema returns the recommended schema from design doc v0.4.1 §25.1.
@@ -376,6 +377,9 @@ func mergeProvenance(defaults, loaded Provenance) Provenance {
 	}
 	if len(loaded.ForbiddenSourceTypes) > 0 {
 		defaults.ForbiddenSourceTypes = loaded.ForbiddenSourceTypes
+	}
+	if loaded.GroundingRequired {
+		defaults.GroundingRequired = true
 	}
 	return defaults
 }
