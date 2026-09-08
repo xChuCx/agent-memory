@@ -5,6 +5,42 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-09-08
+
+### Added
+
+- **SAR-008 Proof of Memory Consumption & Anti-Ornamental Memory Contract (`internal/memory`, `internal/cli`, `internal/eval`).**
+  Resolves the "Decorative Memory Paradox" (@bpmd-blbt #23051) where persistent memory files exist on disk but are silently ignored by recurring loops:
+  - **Proof-of-Ingestion (PoI) Nonces:** `agent-memory fetch` emits a content-addressable context pack digest (`pack_digest`, SHA-256) and an episodic continuity nonce (`read_nonce`, `poi-<hash[:8]>-<timestamp_ns>`).
+  - **Proof-of-Grounding (PoG) Locators:** `ProposeRequest` requires a `GroundingReceipt` citing `pack_digest`, single-use `read_nonce`, and an active content anchor `locator` (e.g. `decisions.md#ADR-004`), rejecting un-grounded proposals under `provenance_violation`.
+  - **Linear Invalidation Semantics:** Single-use nonce policy; applying any mutation altering `.agent-memory/` immediately invalidates outstanding nonces.
+  - **Layer 4B Scheduled Loop Hazard Linter (`agent-memory doctor`):** Dual-scope wiring diagnostics inspecting both root instruction files (Layer 4A: `CLAUDE.md`, `AGENTS.md`) and recurring prompt templates/cron workflows (Layer 4B: `prompts/recurring*.md`, `.github/workflows/*.yml` with `cron:` schedules).
+  - **Invariant 5 Counterfactual Memory Ablation (`internal/eval/ablation_test.go`):** Machine-verifiable proof-of-use asserting $\text{Eval}(T, C \cup \{M\}) = \text{PASS} \land \text{Eval}(T, C) = \text{FAIL} \implies \text{DECISIVE}(M) = \text{TRUE}$.
+  - **Singleton One-Shot Boundary Receipt:** Honest emission of `CAUSED_DECISION(M) = UNKNOWN (SINGLETON_ONE_SHOT)` for live streaming cycles without counterfactual twins.
+
+- **SAR-007 Representation & Dual-Contour Verification Contract (`internal/vtp`).**
+  Prevents false agreement on binaries and false divergence on cross-platform CRLF line endings (@astranaut01 #23145):
+  - **Tier 1A (Bit-Exact Raw Bytes):** `ComputeRawDigest` guarantees byte-preserving storage integrity.
+  - **Tier 1B (Normalized Text Projection):** `ComputeLFDigest` evaluates semantic text equivalence across Windows `\r\n` and POSIX `\n`.
+  - **Digest Comparison Primitives:** `DigestComparison` and `CompareDigestProjections` with explicit representation identifiers (`repr_id`).
+
+- **VTP-1 Cross-Language Determinism & RFC 8785 Canonical JSON (`internal/vtp`).**
+  - Bit-exact TaskReceipt serialization matching Python RFC 8785 (`jcs.canonicalize`) and Go `cyberphone/json-canonicalization` (`ReceiptHash` matching test vector `e536ad8cf230799fa9d8d754f049c1d007d4c770f101452867d9ec5932c91310`).
+
+- **Three-Layer Hermeticity Attestation & Zero-Trust Settlement (`internal/vtp`).**
+  - Tri-state status model: `DECLARED`, `ATTESTED`, and `VERIFIED_HERMETIC`.
+  - Canonical length-delimited attestation framing (`VTP1-ATTEST-V2`) with ED25519 signature verification against verifier allowlists (`HermeticAllowlist`).
+  - Strict lifecycle gating: epoch enforcement (`MinAcceptedEpoch`), time window bounds (`ExpiresAt > IssuedAt`), and key revocation checks (`RevokedKeyIDs`).
+  - Diagnostic reason codes (`REASON_VERIFIED`, `REASON_SIGNATURE_INVALID`, `REASON_KEY_REVOKED`, `REASON_NETWORK_CAPABILITY_DENIED`, etc.).
+  - Elimination of SHA-256 fallback bypass in attestation verification.
+  - Runtime tenant freshness checks (`CanFastPathCacheWithFreshness`).
+  - Re-evaluation of account distinctness at settlement time (`SettleTask`), enforcing Clause B disjoint seats without trusting caller booleans.
+
+- **Swarm Architecture Records (SAR) Registry (`docs/sar/`).**
+  - Canonical standards covering SAR-001 through SAR-008 with cross-agent consensus thread citations.
+  - Aligned SAR-006 to Six-Signal Skill Evaluation & Hermeticity Contract.
+  - Formalized multi-store retrieval evaluation in `internal/eval/federation_test.go` (PR6).
+
 ## [0.5.4] — 2026-09-06
 
 ### Fixed

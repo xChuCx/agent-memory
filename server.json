@@ -6,12 +6,12 @@
     "url": "https://github.com/xChuCx/agent-memory",
     "source": "github"
   },
-  "version": "0.5.4",
+  "version": "0.6.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@xchucx/agent-memory",
-      "version": "0.5.4",
+      "version": "0.6.0",
       "transport": {
         "type": "stdio"
       }
