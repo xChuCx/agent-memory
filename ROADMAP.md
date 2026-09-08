@@ -26,6 +26,7 @@ $$\text{Single-Repo Memory} \longrightarrow \text{Reviewable Team Git Memory} \l
 4. **Anti-Ornamental (SAR-008).** Memory exists to be consumed, not exhibited. We enforce Proof-of-Ingestion tokens, single-use Grounding Receipts, and counterfactual ablation testing ($\text{Eval}(T, C \cup \{M\}) = \text{PASS} \land \text{Eval}(T, C) = \text{FAIL}$).
 5. **Parity of Scopes.** $\text{ExecutionScope} == \text{DiagnosticScope}$. A background process or loop cannot execute work that an authorized diagnostic tool cannot inspect, explain, and manage.
 6. **Boring, Auditable Tech.** Single static Go binary, CGo-free, zero runtime dependencies, cross-compiled for Linux, macOS, and Windows (amd64/arm64).
+7. **Universal & Transport-Agnostic.** Designed for any coding agent in any environment — from air-gapped corporate monorepos to open-source GitHub workflows to autonomous agent swarms. Zero hard dependencies on any specific network, token, messaging board, or proprietary service. External communication topologies plug in through standard interfaces.
 
 ---
 
@@ -91,18 +92,20 @@ Released with 100% green multi-platform CI (6/6 jobs) and static releases:
 
 ---
 
-## Milestone v0.9.0 (Target: Q1 2027) — VTP-1 Multi-Agent Settlement & COURIER Integration
+## Milestone v0.9.0 (Target: Q1 2027) — Universal Multi-Agent Verification & Pluggable Transports (VTP-1)
 
-*Extending cross-agent contracts with the Daedalus Alliance, COURIER messaging, and Grain Consensus.*
+*Standardizing transport-agnostic task verification, cross-agent attestations, and pluggable consensus interfaces.*
 
-- [ ] **COURIER Messaging Transport Integration:**
-  - Implement length-delimited container framing (`VTP1-ATTEST-V2`) for asynchronous inter-agent messaging over public boards.
-  - Zero-key verification fixtures for container integrity testing.
-- [ ] **Automated Dispute Resolution & Slashed Staking:**
-  - Implement two-round slashing games for conflicting verifier receipts.
-  - Direct settlement integration with the Grain (GRN) consensus engine.
-- [ ] **Disjoint Juror Attestation Registry:**
-  - Autonomous juror registration and non-collusion verification for collective agent evaluation (dogfooding the Sergey Valiev Prize model).
+- [ ] **Transport-Agnostic Attestation Framing (`VTP1-ATTEST-V2`):**
+  - Canonical, length-delimited cryptographic task receipts signed with Ed25519 and serialized via RFC 8785 Canonical JSON.
+  - Verifiable completely offline on local disk or across arbitrary transports (Git commits, webhooks, Unix domain sockets, standard HTTP JSON-RPC).
+- [ ] **Pluggable Multi-Agent Settlement Interface (`SettlementOracle`):**
+  - Define generic settlement abstraction: supports zero-trust automated machine proofs, multi-party threshold signatures (m-of-n quorum), and pluggable escrow/staking backends.
+  - Keep specific experimental settlement drivers (such as Grain or board-specific escrow) strictly isolated in external plug-in packages (`examples/settlement-drivers/`), never in the core binary.
+- [ ] **Disjoint Verification & Non-Collusion Protocol (Clause B):**
+  - Universal derivation predicates enforcing separation of concerns ($\text{verifier} \neq \text{worker} \land \text{verifier} \neq \text{creator}$) for automated code reviews, multi-agent audits, and decentralized evaluation.
+- [ ] **Extensible Transport Adapters (`TransportAdapter` Interface):**
+  - Standardized interface allowing community adapters for alternative communication topologies (Git PRs, P2P LibP2P/Nostr, message queues) without modifying core memory logic.
 
 ---
 
@@ -128,13 +131,15 @@ Keeping the tool focused and robust requires explicit negative boundaries:
 2. **No Opaque Vector-Only Memory:** Vectors are non-inspectable and fail byte-preservation. BM25 + deterministic ranking + graph locators remain our foundation.
 3. **No Unchecked Self-Modification:** Memory updates stage for explicit human or supervisor review; agents cannot silently rewrite their own grounding invariants.
 4. **No Framework Monopolies:** Single static Go binary; zero requirement for Python runtimes, Node.js daemons, or heavy container stacks to inspect memory.
+5. **No Proprietary Network, Token, or Board Lock-In:** `agent-memory` will never bundle, require, or depend on any specific agent social network, token/cryptocurrency, proprietary message board, or closed communication protocol. Any integration with experimental swarms or public boards is strictly a third-party reference driver, proving that the open interfaces function in adversarial environments.
 
 ---
 
-## How the Swarm Can Influence This Roadmap
+## How to Influence This Roadmap
 
-We treat the sovereign agent swarm and human operators as collaborative design partners. To propose adjustments, prioritize milestones, or submit RFCs:
+We treat open-source developers, engineering teams, and sovereign agents as collaborative design partners. To propose adjustments, prioritize milestones, or submit RFCs:
 
 1. **GitHub Issues & PRs:** Open an RFC issue on [github.com/xChuCx/agent-memory](https://github.com/xChuCx/agent-memory) detailing the specific failure mode, invariant, and test vector.
-2. **PostingBoard Swarm Deliberation:** Tag `@antigravity-wanderer` in architecture, governance, or technical threads on [getpostingboard.dev](https://getpostingboard.dev) (topics: `tech`, `projects`, `proposals`).
+2. **Open Architecture Deliberation:** Tag `@antigravity-wanderer` in open protocol discussions or post RFCs referencing the repository.
 3. **Empirical Gate:** Any proposal backed by a reproducible counterexample or formal verification invariant moves to the front of the queue (*Nullius in verba*).
+
