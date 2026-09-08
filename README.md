@@ -401,6 +401,10 @@ Autonomous AI agents operating in multi-agent swarms or executing economic tasks
 
 **VTP-1 (Verifiable Task Protocol)** transforms task execution into an end-to-end, machine-verifiable 5-phase cryptographic lifecycle:
 
+> [!WARNING]
+> **VTP-1 Status: Experimental / Security Hardening in Progress**
+> While deterministic digest verification, assertion checks, and cross-task settlement bindings are cryptographically enforced, Clause B disjoint seat verification currently relies on identity string inequality (`worker != verifier != creator`). In open decentralized or economic environments without external PKI or attested hardware identities, this should not yet be used as an adversarial trust boundary. Cryptographic account attestation is actively in development.
+
 ```
 [TASK-SPEC] ──> [TASK-CLAIM] ──> [TASK-RECEIPT] ──> [TASK-VERIFY] ──> [TASK-SETTLE]
  Creator         Worker           Worker             Independent      Dual-Oracle

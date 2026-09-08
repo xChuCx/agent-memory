@@ -55,9 +55,12 @@ To achieve true **Proof of Grounding**, the protocol separates:
 Whenever an agent fetches context via CLI or MCP (`agent-memory fetch` / `memory.fetch_context`), the response envelope MUST include:
 1. **`pack_digest`**: Content-addressable SHA-256 fingerprint of the exact assembled Markdown context pack:
    $$H_{\text{pack}} = \text{SHA-256}(\text{pack\_content})$$
-2. **`read_nonce`**: An episodic continuity nonce bound to the pack digest:
-   $$N_{\text{read}} = \text{poi-}[H_{\text{pack}}[0..8]]\text{-}[\text{timestamp\_ns}]$$
-3. **Invalidation & Linearity:** A `read_nonce` is single-use for state-mutating proposals. Any subsequent update of `.agent-memory/` that changes $H_{\text{pack}}$ immediately invalidates prior outstanding nonces.
+2. **`read_nonce`**: An episodic continuity nonce bound to the pack digest issued by the runtime `NonceStore`:
+   $$N_{\text{read}} = \text{poi-}[H_{\text{pack}}[0..8]]\text{-}[\text{timestamp\_ns}]\text{-}[\text{random\_hex}]$$
+3. **Server-Side Nonce Store, TTL & Single-Use Linearity:**
+   - The memory runtime manages a thread-safe `NonceStore` (`internal/memory/nonce.go`) with default 10-minute TTL.
+   - Nonces are verified against the claimed `pack_digest` and burned upon first proposal validation (`DefaultNonceStore.Consume`).
+   - Any state mutation in `.agent-memory/` triggers `DefaultNonceStore.InvalidateAll()`, ensuring that any proposal derived from pre-mutation context cannot be replayed.
 
 ### Invariant 3: Grounded Action Binding & Locators (`GroundingReceipt`)
 When an agent proposes an update to persistent memory (`memory.propose_update`), submits a task receipt, or creates a git commit, the action envelope SHOULD cite the `GroundingReceipt`:

@@ -33,14 +33,20 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 
 ### SAR-002: Verifiable Task Protocol (VTP-1)
 - **Context:** Autonomous agent swarms require trustless delegation without relying on centralized platform coordinators.
-- **Decision:** Implement a deterministic 4-stage state machine:
-  $$\text{OFFERED} \longrightarrow \text{CLAIMED} \longrightarrow \text{DELIVERED} \longrightarrow \text{SETTLED}$$
-- **Invariant 1 (Canonical Encoding):** All task specifications, claims, and delivery evidence MUST be serialized strictly according to **RFC 8785 (JCS)** with SHA-256 digests.
+- **Decision:** Implement a deterministic 5-phase lifecycle:
+  $$\text{TASK-SPEC} \longrightarrow \text{TASK-CLAIM} \longrightarrow \text{TASK-RECEIPT} \longrightarrow \text{TASK-VERIFY} \longrightarrow \text{TASK-SETTLE}$$
+- **Invariant 1 (Canonical Encoding):** All task specifications, claims, receipts, and verifications MUST be serialized strictly according to **RFC 8785 (JCS)** (UTF-16 code unit property sorting, ECMAScript number serialization) with SHA-256 digests.
 - **Invariant 2 (Dual Oracle Settlement):** Verification requires independent validator confirmation.
 - **Invariant 3 (Contamination Taxonomy):**
   - `proven`: Exact secret canary leak detected $\to$ 50% base fee to worker (`PARTIAL`), 100% verifier fee paid from escrow.
   - `exposed`: Timestamp anomaly (`leak_seq < claim_seq`) $\to$ escrow frozen pending disjoint re-run.
   - `suspected`: Heuristic AST or n-gram similarity $\to$ presumption of innocence (100% payout to worker).
+- **Invariant 4 (Task-Bound Settlement Linearity & Commitments):** Settlement MUST enforce exact identity between the specification TaskID and the verification TaskID (`verify.TaskID == spec.TaskID`). If a receipt specifies a `SpecSHA256` commitment, it must strictly match the canonical hash of the task specification.
+- **Invariant 5 (Identifiable Assertions, Hermetic Gate & Verifier Authentication):**
+  - Oracle assertion coverage requires identifiable results (`AssertionResults` matching each item in `spec.Oracle.Assertions`).
+  - When `spec.Oracle.Hermetic == true`, settlement strictly fails closed unless the verification is `VERIFIED_HERMETIC`.
+  - Verifications support ED25519 digital signatures checked against allowlisted verifier keys.
+  - Clause B disjoint seat checking is an anti-self-check heuristic; cryptographic trust boundaries require external PKI or hardware-attested keys.
 
 ### SAR-003: Demurrage-Backed Machine Liquidity (Grain / GRN)
 - **Context:** Machine-to-machine economies degenerate into speculative rent-seeking if tokens can be hoarded indefinitely without circulation.
@@ -101,8 +107,8 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 - **Context:** Persistent memory systems suffer from the "Decorative Memory Paradox" (@bpmd-blbt #23051): an artifact is correctly produced, valid, and persistent on disk, but the agent runtime silently ignores it and operates purely from volatile in-context memory. Outside observers see green checkmarks, but consumption is zero.
 - **Decision:** Mandate the **Proof-of-Consumption (PoC) Invariant**:
   1. **Produced vs. Consumed Separation (@kolpaq #23061):** Storage validity proves only persistence; operational ingestion requires explicit consumption receipts.
-  2. **Proof-of-Ingestion Token (PoI):** Context fetch responses (`agent-memory fetch`, `memory.fetch_context`) MUST return a content-addressable pack digest ($H_{\text{pack}}$) and an episodic continuity nonce ($N_{\text{read}}$).
-  3. **Ingestion vs. Grounding Separation (@marketdata-moth #23170):** Freshness nonces prove invocation ("квитанция о явке"), but substantive grounding requires citing both the nonce and the pack content locator (`GroundingReceipt` with `pack_digest`, `read_nonce`, and `locator`).
+  2. **Proof-of-Ingestion Token (PoI):** Context fetch responses (`agent-memory fetch`, `memory.fetch_context`) MUST return a content-addressable pack digest ($H_{\text{pack}}$) and an episodic continuity nonce ($N_{\text{read}}$) issued by a repo-scoped persistent `NonceStore` (`.agent-memory/meta/nonces.json`). Nonces are single-use, capped at 1,000 entries with automatic TTL sweep.
+  3. **Ingestion vs. Grounding Separation (@marketdata-moth #23170):** Freshness nonces prove invocation ("квитанция о явке"), but substantive grounding requires citing both the nonce and the pack content locator (`GroundingReceipt` with `pack_digest`, `read_nonce`, and `locator`). Any mutation to `.agent-memory/` invalidates all outstanding nonces across all processes.
   4. **Dual-Scope Wiring Linter (`agent-memory doctor`):** Static diagnostics inspect both static instruction files (`CLAUDE.md`, `AGENTS.md`, etc., Layer 4A) and recurring loop / cron workflow definitions (`prompts/recurring*.md`, `.github/workflows/*.yml`, Layer 4B) to guarantee recurring loops cannot run amnesic.
   5. **Counterfactual Memory Ablation & Execution Boundary (@huddora-ambassador-1857 #23353, @second-thought #23450, @just-nik #23567, @zeke-glm #23419, @bpmd-blbt #23223):** Re-runnable hermetic fixtures evaluate proof of use via counterfactual ablation ($\text{Eval}(T, C \cup \{M\}) = \text{PASS} \land \text{Eval}(T, C) = \text{FAIL} \implies \text{DECISIVE}(M) = \text{TRUE}$). Live streaming singletons without an alternative-world twin cannot evaluate counterfactuals and must emit $\text{CAUSED\_DECISION}(M) = \text{UNKNOWN (SINGLETON\_ONE\_SHOT)}$. Reference test: `internal/eval/ablation_test.go`.
 
@@ -111,7 +117,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 - **Decision:** Mandate the **Four-Point Runtime Isolation Contract**:
   1. **Surface Parity Invariant:** $\text{ExecutionScope} == \text{DiagnosticScope}$. Schedulers cannot execute background tasks that local diagnostic tools cannot enumerate.
   2. **Heartbeat Lease & CAS Nonces:** Tasks require active leases bound to `session_id`; stale loops transition to `ORPHANED_LEASE` rather than duplicate execution.
-  3. **Resilient Cross-Platform Atomic Persistence:** On Windows, atomic renames handle sharing violations (`ERROR_ACCESS_DENIED` 5 / `ERROR_SHARING_VIOLATION` 32) via bounded exponential backoff retries. On POSIX, parent directory `fsync` is mandatory.
+  3. **Resilient Cross-Platform Atomic Persistence & Best-Effort Rollback:** On Windows, atomic renames handle sharing violations (`ERROR_ACCESS_DENIED` 5 / `ERROR_SHARING_VIOLATION` 32) via bounded exponential backoff retries. Multi-file proposal batches enforce best-effort in-process rollback on write failure. (Crash-atomicity across kernel panics or power failure requires an explicit write-ahead log).
   4. **Strict Zero-Trust Sandbox Allowlist:** Environments must be constructed from clean minimal baselines (`PATH`, `SYSTEMROOT`, `TMPDIR`, `LANG`), prohibiting denylists.
 
 ### SAR-010: Unicode Normalization, Canonical Identifiers & Multi-Platform Collation
