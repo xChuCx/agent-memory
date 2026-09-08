@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -132,6 +133,61 @@ func TestVTP_Falsifiers(t *testing.T) {
 	if vSelf.DistinctAccountIDs {
 		t.Fatalf("expected DistinctAccountIDs to be false when verifier == worker")
 	}
+
+	// Negative control 4: Exit code mismatch (receipt claims 1, verifier passes 0)
+	recExitMismatch := *receipt
+	recExitMismatch.Execution.ExitCode = 1
+	vExitMismatch, err := VerifyReceipt(spec, &recExitMismatch, []byte("expected_hash"), []byte(""), 0, "verifier")
+	if err != nil || vExitMismatch.Verdict != "FAIL" || vExitMismatch.Basis != "EXIT_CODE_MISMATCH" {
+		t.Fatalf("expected EXIT_CODE_MISMATCH, got %+v", vExitMismatch)
+	}
+
+	// Negative control 5: Unsatisfied assertions
+	specWithAssertions := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-assertions",
+		Creator:  "task-creator",
+		Oracle: OracleSpec{
+			Assertions: []string{"check1", "check2"},
+		},
+	}
+	recUnsatisfied := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   specWithAssertions.TaskID,
+		Worker:   "worker-seat",
+		Execution: ExecutionReceipt{
+			ExitCode:           0,
+			ExecutedAssertions: 1, // only 1 of 2
+		},
+		IdempotencyKey: "rec-unsatisfied",
+	}
+	vUnsatisfied, err := VerifyReceipt(specWithAssertions, recUnsatisfied, []byte(""), []byte(""), 0, "verifier")
+	if err != nil || vUnsatisfied.Verdict != "FAIL" || vUnsatisfied.Basis != "UNSATISFIED_ASSERTIONS" {
+		t.Fatalf("expected UNSATISFIED_ASSERTIONS, got %+v", vUnsatisfied)
+	}
+
+	// Negative control 6: Empty digests on deterministic oracle
+	specDeterministic := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-vtp-det",
+		Creator:  "task-creator",
+		Oracle: OracleSpec{
+			Type: "DETERMINISTIC",
+		},
+	}
+	recEmptyDigests := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   specDeterministic.TaskID,
+		Worker:   "worker-seat",
+		Execution: ExecutionReceipt{
+			ExitCode: 0,
+		},
+		IdempotencyKey: "rec-det",
+	}
+	vEmptyDigests, err := VerifyReceipt(specDeterministic, recEmptyDigests, []byte(""), []byte(""), 0, "verifier")
+	if err != nil || vEmptyDigests.Verdict != "FAIL" || vEmptyDigests.Basis != "EMPTY_EXECUTION_DIGESTS" {
+		t.Fatalf("expected EMPTY_EXECUTION_DIGESTS, got %+v", vEmptyDigests)
+	}
 	_, err = SettleTask(spec, vSelf, "payer", "payee", 14450)
 	if err == nil {
 		t.Fatalf("expected settlement failure when DistinctAccountIDs is false")
@@ -183,7 +239,17 @@ func TestVTP_PartialSettlement(t *testing.T) {
 		TaskID:   "task-vtp-partial-1",
 		Bounty:   BountySpec{Currency: "GRN", Amount: 1},
 	}
-	settleMin, err := SettleTask(specMin, verify, "payer-node", "worker-node", 15001)
+	verifyMin := &TaskVerify{
+		Protocol:           ProtocolVersion,
+		Type:               "VERIFY",
+		TaskID:             specMin.TaskID,
+		Verifier:           "verifier-node",
+		Verdict:            "PARTIAL",
+		Basis:              "FACT_INCONSISTENT_CONTAMINATION",
+		DistinctAccountIDs: true,
+		IsDisjointSeat:     true,
+	}
+	settleMin, err := SettleTask(specMin, verifyMin, "payer-node", "worker-node", 15001)
 	if err != nil {
 		t.Fatalf("unexpected error on minimum partial settlement: %v", err)
 	}
@@ -699,6 +765,33 @@ func TestVTP_SettlementZeroTrustReevaluation(t *testing.T) {
 	}
 }
 
+func TestSettleTask_CrossTaskReplayRejected(t *testing.T) {
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-legit-999",
+		Creator:  "creator-account",
+		Bounty:   BountySpec{Amount: 1000},
+	}
+	verifyAlien := &TaskVerify{
+		Protocol:           ProtocolVersion,
+		Type:               "VERIFY",
+		TaskID:             "task-foreign-001",
+		Verifier:           "verifier-account",
+		Verdict:            "PASS",
+		Basis:              "FACT_CONSISTENT",
+		DistinctAccountIDs: true,
+		IsDisjointSeat:     true,
+	}
+
+	_, err := SettleTask(spec, verifyAlien, "payer-account", "worker-account", 15000)
+	if err == nil {
+		t.Fatalf("expected cross-task replay rejection when verify.TaskID != spec.TaskID")
+	}
+	if !strings.Contains(err.Error(), "does not match spec TaskID") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
 func TestVTP_CanonicalEncodingAndDelimiterInjection(t *testing.T) {
 	// 1. Normalization invariance: permutation, case, duplicates
 	caps1 := []string{"CAP_CHOWN", "CAP_DAC_OVERRIDE", "cap_chown"}
@@ -1046,6 +1139,222 @@ func TestVTP_ReceiptHash_ZcodeAvikhMatch(t *testing.T) {
 	wantCanon := `{"artifacts":["evidence/r7_output.json","tests/verify_invariants.go"],"execution":{"diff_hunks_sha256":"4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b","executed_assertions":20,"exit_code":0,"stdout_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},"idempotency_key":"c8a6f40b-0447-4cfc-b8e7-142589021760","protocol":"VTP/1.0","task_id":"WP-0007-GENOME-R7","type":"RECEIPT","worker":"antigravity-wanderer"}`
 	if string(canonBytes) != wantCanon {
 		t.Fatalf("CanonicalJSON mismatch:\ngot:  %s\nwant: %s", string(canonBytes), wantCanon)
+	}
+}
+
+func TestCanonicalJSON_RFC8785_UTF16SortOrder(t *testing.T) {
+	// In UTF-8: "\uE000" is 3 bytes (0xEE...), "\U00010000" is 4 bytes (0xF0...)
+	// In standard UTF-8 byte comparison: "\uE000" < "\U00010000"
+	// In RFC 8785 UTF-16 code units: "\U00010000" is encoded as 0xD800 0xDC00,
+	// while "\uE000" is 0xE000. Since 0xD800 < 0xE000, "\U00010000" MUST sort first!
+	m := map[string]int{
+		"\uE000":     1,
+		"\U00010000": 2,
+	}
+	b, err := CanonicalJSON(m)
+	if err != nil {
+		t.Fatalf("CanonicalJSON failed: %v", err)
+	}
+	want := `{"𐀀":2,"":1}`
+	if string(b) != want {
+		t.Fatalf("RFC 8785 UTF-16 sort order mismatch: got %s, want %s", string(b), want)
+	}
+}
+
+func TestVerifyReceipt_IdentifiableAssertions(t *testing.T) {
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-assert-ident",
+		Oracle: OracleSpec{
+			Type:       "DETERMINISTIC",
+			Assertions: []string{"check_auth", "check_db", "check_audit"},
+		},
+	}
+
+	// Case 1: Partial / failing assertion in receipt
+	receiptFail := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-1",
+		Execution: ExecutionReceipt{
+			StdoutSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			ExitCode:     0,
+			AssertionResults: []AssertionResult{
+				{ID: "check_auth", Passed: true},
+				{ID: "check_db", Passed: false, Evidence: "connection refused"},
+				{ID: "check_audit", Passed: true},
+			},
+		},
+	}
+	v, err := VerifyReceipt(spec, receiptFail, []byte(""), []byte(""), 0, "verifier-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Verdict != "FAIL" || v.Basis != "UNSATISFIED_ASSERTIONS" {
+		t.Fatalf("expected FAIL with UNSATISFIED_ASSERTIONS, got %s (%s)", v.Verdict, v.Basis)
+	}
+
+	// Case 2: All assertions passed
+	receiptPass := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-1",
+		Execution: ExecutionReceipt{
+			StdoutSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			ExitCode:     0,
+			AssertionResults: []AssertionResult{
+				{ID: "check_auth", Passed: true},
+				{ID: "check_db", Passed: true},
+				{ID: "check_audit", Passed: true},
+			},
+		},
+	}
+	vPass, err := VerifyReceipt(spec, receiptPass, []byte(""), []byte(""), 0, "verifier-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vPass.Verdict != "PASS" {
+		t.Fatalf("expected PASS, got %s (%s)", vPass.Verdict, vPass.Basis)
+	}
+}
+
+func TestVerifyReceipt_SpecCommitmentMismatch(t *testing.T) {
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-commit-check",
+		Title:    "Legitimate Task",
+		Oracle: OracleSpec{
+			Type: "DETERMINISTIC",
+		},
+	}
+	receipt := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-1",
+		Commitments: &CommitmentSpec{
+			SpecSHA256: "0000000000000000000000000000000000000000000000000000000000000000",
+		},
+		Execution: ExecutionReceipt{
+			StdoutSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			ExitCode:     0,
+		},
+	}
+	v, err := VerifyReceipt(spec, receipt, []byte(""), []byte(""), 0, "verifier-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Verdict != "FAIL" || v.Basis != "SPEC_COMMITMENT_MISMATCH" {
+		t.Fatalf("expected FAIL with SPEC_COMMITMENT_MISMATCH, got %s (%s)", v.Verdict, v.Basis)
+	}
+}
+
+func TestSettleTask_HermeticGateEnforced(t *testing.T) {
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-herm-gate",
+		Creator:  "creator-alice",
+		Bounty:   BountySpec{Amount: 100},
+		Oracle: OracleSpec{
+			Hermetic: true,
+		},
+	}
+
+	// Verification with non-hermetic execution status
+	verifyNonHerm := &TaskVerify{
+		Protocol:           ProtocolVersion,
+		TaskID:             spec.TaskID,
+		Verifier:           "verifier-bob",
+		Verdict:            "PASS",
+		DistinctAccountIDs: true,
+		IsDisjointSeat:     true,
+		HermeticityStatus:  HermeticStatusUnknown,
+		HermeticityReason:  HermeticReasonMissingSandbox,
+		IsHermetic:         false,
+	}
+	_, err := SettleTask(spec, verifyNonHerm, "creator-alice", "worker-charlie", 10)
+	if err == nil {
+		t.Fatal("expected settlement failure for unverified hermeticity when spec.Oracle.Hermetic is true")
+	}
+	if !strings.Contains(err.Error(), "spec requires hermetic execution") {
+		t.Fatalf("expected 'spec requires hermetic execution' error, got: %v", err)
+	}
+
+	// Verification with VERIFIED_HERMETIC status
+	verifyHerm := &TaskVerify{
+		Protocol:           ProtocolVersion,
+		TaskID:             spec.TaskID,
+		Verifier:           "verifier-bob",
+		Verdict:            "PASS",
+		DistinctAccountIDs: true,
+		IsDisjointSeat:     true,
+		HermeticityStatus:  HermeticStatusVerifiedHermetic,
+		HermeticityReason:  HermeticReasonVerified,
+		IsHermetic:         true,
+	}
+	settle, err := SettleTask(spec, verifyHerm, "creator-alice", "worker-charlie", 10)
+	if err != nil {
+		t.Fatalf("unexpected settlement error for verified hermetic task: %v", err)
+	}
+	if settle.Amount != 100 {
+		t.Fatalf("expected bounty amount 100, got %d", settle.Amount)
+	}
+}
+
+func TestTaskVerify_SignatureAuthentication(t *testing.T) {
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spec := &TaskSpec{
+		Protocol: ProtocolVersion,
+		TaskID:   "task-sig-auth",
+		Creator:  "creator-node",
+		Bounty:   BountySpec{Amount: 50},
+	}
+	verify := &TaskVerify{
+		Protocol:           ProtocolVersion,
+		TaskID:             spec.TaskID,
+		Verifier:           "verifier-node",
+		Verdict:            "PASS",
+		DistinctAccountIDs: true,
+		IsDisjointSeat:     true,
+	}
+
+	// Sign TaskVerify
+	if err := SignTaskVerify(verify, privKey, "verifier-key-1"); err != nil {
+		t.Fatal(err)
+	}
+	if verify.Signature == "" || verify.VerifierKeyID != "verifier-key-1" {
+		t.Fatal("signature not set")
+	}
+
+	// Verify signature helper directly
+	valid, err := VerifyTaskVerifySignature(verify, pubKey)
+	if err != nil || !valid {
+		t.Fatalf("VerifyTaskVerifySignature failed: %v", err)
+	}
+
+	// Settlement with allowlist containing the public key
+	allowlist := &HermeticAllowlist{
+		PublicKeys: map[string]ed25519.PublicKey{
+			"verifier-key-1": pubKey,
+		},
+	}
+	settle, err := SettleTaskWithAllowlist(spec, verify, "creator-node", "worker-node", 1, allowlist)
+	if err != nil {
+		t.Fatalf("SettleTaskWithAllowlist failed: %v", err)
+	}
+	if settle.Amount != 50 {
+		t.Errorf("amount mismatch: %d", settle.Amount)
+	}
+
+	// Reject if key is unregistered or signature tampered
+	verifyTampered := *verify
+	verifyTampered.Signature = hex.EncodeToString(make([]byte, 64))
+	_, err = SettleTaskWithAllowlist(spec, &verifyTampered, "creator-node", "worker-node", 1, allowlist)
+	if err == nil {
+		t.Fatal("expected settlement failure for tampered signature")
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -62,27 +61,19 @@ func CompareDigestProjections(a, b []byte) DigestComparison {
 }
 
 // CanonicalJSON serializes a value to canonical JSON conforming to RFC 8785 (JCS)
-// with lexicographically sorted keys, compact separators, and unescaped HTML.
+// with UTF-16 code unit key sorting, ECMAScript number serialization, and compact separators.
 func CanonicalJSON(v any) ([]byte, error) {
-	raw, err := json.Marshal(v)
+	return CanonicalizeRFC8785(v)
+}
+
+// SpecHash returns the SHA-256 hex digest of the canonical JSON encoding of a TaskSpec (RFC 8785).
+func SpecHash(spec *TaskSpec) (string, error) {
+	b, err := CanonicalJSON(spec)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	var generic any
-	if err := json.Unmarshal(raw, &generic); err != nil {
-		return nil, err
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(generic); err != nil {
-		return nil, err
-	}
-	b := buf.Bytes()
-	if len(b) > 0 && b[len(b)-1] == '\n' {
-		b = b[:len(b)-1]
-	}
-	return b, nil
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // ReceiptHash returns the SHA-256 hex digest of the canonical JSON encoding of a TaskReceipt (RFC 8785).
@@ -156,10 +147,60 @@ func VerifyReceiptWithAllowlist(spec *TaskSpec, receipt *TaskReceipt, actualStdo
 		VerifiedAt:           now,
 	}
 
-	// Exit code check
+	// Exit code checks
 	if actualExitCode != 0 {
 		verify.Verdict = "FAIL"
 		verify.Basis = "NON_ZERO_EXIT"
+		return verify, nil
+	}
+	if receipt.Execution.ExitCode != actualExitCode {
+		verify.Verdict = "FAIL"
+		verify.Basis = "EXIT_CODE_MISMATCH"
+		return verify, nil
+	}
+
+	// Oracle assertions check: receipt executed assertions must satisfy declared spec assertions.
+	// If identifiable AssertionResults are provided, each declared assertion must be reported passed.
+	// Otherwise, fallback to verifying coverage count.
+	if len(spec.Oracle.Assertions) > 0 {
+		if len(receipt.Execution.AssertionResults) > 0 {
+			passedMap := make(map[string]bool, len(receipt.Execution.AssertionResults))
+			for _, ar := range receipt.Execution.AssertionResults {
+				if ar.Passed {
+					passedMap[ar.ID] = true
+				}
+			}
+			for _, expected := range spec.Oracle.Assertions {
+				if !passedMap[expected] {
+					verify.Verdict = "FAIL"
+					verify.Basis = "UNSATISFIED_ASSERTIONS"
+					return verify, nil
+				}
+			}
+		} else if receipt.Execution.ExecutedAssertions < len(spec.Oracle.Assertions) {
+			verify.Verdict = "FAIL"
+			verify.Basis = "UNSATISFIED_ASSERTIONS"
+			return verify, nil
+		}
+	}
+
+	// Commitments check: if receipt commits to a SpecSHA256, it must match canonical hash of spec
+	if receipt.Commitments != nil && receipt.Commitments.SpecSHA256 != "" {
+		specHash, err := SpecHash(spec)
+		if err != nil {
+			return nil, fmt.Errorf("canonical hash spec: %w", err)
+		}
+		if receipt.Commitments.SpecSHA256 != specHash {
+			verify.Verdict = "FAIL"
+			verify.Basis = "SPEC_COMMITMENT_MISMATCH"
+			return verify, nil
+		}
+	}
+
+	// Oracle digest requirements for deterministic oracle
+	if spec.Oracle.Type == "DETERMINISTIC" && receipt.Execution.StdoutSHA256 == "" && receipt.Execution.DiffHunksSHA256 == "" {
+		verify.Verdict = "FAIL"
+		verify.Basis = "EMPTY_EXECUTION_DIGESTS"
 		return verify, nil
 	}
 
@@ -466,14 +507,27 @@ func CanFastPathCacheWithFreshness(verify *TaskVerify, freshness *FreshnessPolic
 // If verify.Verdict is "PARTIAL" (e.g. contamination resolution under Devin Genome R7),
 // 50% base fee is settled to the worker (minimum 1 if bounty > 0).
 func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, currentSeq int64) (*TaskSettle, error) {
+	return SettleTaskWithAllowlist(spec, verify, payer, payee, currentSeq, nil)
+}
+
+// SettleTaskWithAllowlist creates a settlement payload while validating hermetic execution gates,
+// cross-task replay prevention, and verifier digital signature if an allowlist is provided.
+func SettleTaskWithAllowlist(spec *TaskSpec, verify *TaskVerify, payer, payee string, currentSeq int64, allowlist *HermeticAllowlist) (*TaskSettle, error) {
 	if spec == nil {
 		return nil, errors.New("spec cannot be nil")
 	}
 	if verify == nil {
 		return nil, errors.New("verification cannot be nil")
 	}
+	if verify.TaskID != spec.TaskID {
+		return nil, fmt.Errorf("cannot settle task: verify TaskID %q does not match spec TaskID %q", verify.TaskID, spec.TaskID)
+	}
 	if verify.Verdict != "PASS" && verify.Verdict != "PARTIAL" {
 		return nil, fmt.Errorf("cannot settle unverified task, verdict was %s (%s)", verify.Verdict, verify.Basis)
+	}
+	// Hermetic Oracle Settlement Gate: If spec requires hermetic execution, verification MUST be VERIFIED_HERMETIC.
+	if spec.Oracle.Hermetic && (verify.HermeticityStatus != HermeticStatusVerifiedHermetic || !verify.IsHermetic) {
+		return nil, fmt.Errorf("cannot settle task: spec requires hermetic execution, but verification hermeticity status was %s (%s)", verify.HermeticityStatus, verify.HermeticityReason)
 	}
 	if !verify.DistinctAccountIDs {
 		return nil, errors.New("cannot settle without distinct authenticated accounts (Clause B)")
@@ -484,6 +538,21 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 	// Zero-Trust re-evaluation on settlement arguments (usemarkbot audit #22300)
 	if verify.Verifier != "" && !HasDistinctAccountIDs(payee, verify.Verifier, spec.Creator) {
 		return nil, errors.New("cannot settle: payee, verifier, and creator must be distinct authenticated accounts")
+	}
+
+	// Verifier authentication check if allowlist has registered public keys
+	if allowlist != nil && len(allowlist.PublicKeys) > 0 {
+		if verify.VerifierKeyID == "" || verify.Signature == "" {
+			return nil, errors.New("cannot settle: verification lacks verifier signature under configured allowlist")
+		}
+		pubKey, ok := allowlist.PublicKeys[verify.VerifierKeyID]
+		if !ok {
+			return nil, fmt.Errorf("cannot settle: verifier key %q not found in allowlist", verify.VerifierKeyID)
+		}
+		valid, err := VerifyTaskVerifySignature(verify, pubKey)
+		if err != nil || !valid {
+			return nil, fmt.Errorf("cannot settle: verifier signature verification failed: %v", err)
+		}
 	}
 
 	amount := spec.Bounty.Amount
@@ -509,9 +578,54 @@ func SettleTask(spec *TaskSpec, verify *TaskVerify, payer, payee string, current
 	}, nil
 }
 
-// HasDistinctAccountIDs enforces anti-self-check by verifying that the verifier's authenticated
-// account ID is non-empty and strictly distinct from both the worker account and task creator,
-// and that worker and creator are distinct when creator is declared.
+// SignTaskVerify computes the canonical RFC 8785 JSON of TaskVerify (with Signature and VerifierKeyID excluded)
+// and attaches the ED25519 hex signature.
+func SignTaskVerify(verify *TaskVerify, privKey ed25519.PrivateKey, keyID string) error {
+	if verify == nil {
+		return errors.New("verify cannot be nil")
+	}
+	clone := *verify
+	clone.Signature = ""
+	clone.VerifierKeyID = ""
+	b, err := CanonicalJSON(&clone)
+	if err != nil {
+		return err
+	}
+	sig := ed25519.Sign(privKey, b)
+	verify.Signature = hex.EncodeToString(sig)
+	verify.VerifierKeyID = keyID
+	return nil
+}
+
+// VerifyTaskVerifySignature verifies the ED25519 signature on a TaskVerify against canonical bytes.
+func VerifyTaskVerifySignature(verify *TaskVerify, pubKey ed25519.PublicKey) (bool, error) {
+	if verify == nil {
+		return false, errors.New("verify cannot be nil")
+	}
+	if verify.Signature == "" {
+		return false, errors.New("verify has no signature")
+	}
+	sigBytes, err := hex.DecodeString(verify.Signature)
+	if err != nil {
+		return false, fmt.Errorf("invalid hex signature: %w", err)
+	}
+	clone := *verify
+	clone.Signature = ""
+	clone.VerifierKeyID = ""
+	b, err := CanonicalJSON(&clone)
+	if err != nil {
+		return false, err
+	}
+	return ed25519.Verify(pubKey, b, sigBytes), nil
+}
+
+// HasDistinctAccountIDs evaluates the string identifiers of worker, verifier, and creator.
+//
+// SECURITY NOTICE (Clause B - Experimental):
+// String inequality is an anti-self-check heuristic, NOT a cryptographic identity or process-isolation
+// proof. In environments without external PKI / authenticated account infrastructure, separate string
+// handles from the same operator will satisfy this check. True operator independence requires cryptographic
+// identity attestations (e.g. Ed25519 account signatures or TPM/enclave attestations).
 func HasDistinctAccountIDs(workerID, verifierID, creatorID string) bool {
 	if verifierID == "" || workerID == "" {
 		return false

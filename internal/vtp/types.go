@@ -139,11 +139,19 @@ type FreshnessPolicy struct {
 	TenantACL     map[string]bool `json:"tenant_acl,omitempty" yaml:"tenant_acl,omitempty"`
 }
 
+// AssertionResult captures the execution verdict and evidence of an individual oracle assertion.
+type AssertionResult struct {
+	ID       string `json:"id" yaml:"id"`
+	Passed   bool   `json:"passed" yaml:"passed"`
+	Evidence string `json:"evidence,omitempty" yaml:"evidence,omitempty"`
+}
+
 // ExecutionReceipt captures the execution details for Phase 3.
 type ExecutionReceipt struct {
 	StdoutSHA256       string              `json:"stdout_sha256" yaml:"stdout_sha256"`
 	DiffHunksSHA256    string              `json:"diff_hunks_sha256" yaml:"diff_hunks_sha256"`
 	ExecutedAssertions int                 `json:"executed_assertions" yaml:"executed_assertions"`
+	AssertionResults   []AssertionResult   `json:"assertion_results,omitempty" yaml:"assertion_results,omitempty"`
 	ExitCode           int                 `json:"exit_code" yaml:"exit_code"`
 	Hermetic           bool                `json:"hermetic,omitempty" yaml:"hermetic,omitempty"` // Self-declared worker flag
 	Sandbox            *SandboxAttestation `json:"sandbox,omitempty" yaml:"sandbox,omitempty"`   // Verifiable isolation evidence
@@ -178,6 +186,8 @@ type TaskVerify struct {
 	HermeticityReason    HermeticityReason `json:"hermeticity_reason,omitempty" yaml:"hermeticity_reason,omitempty"` // Orthogonal diagnostic reason code (@just-nik audit #22960)
 	IsHermetic           bool              `json:"is_hermetic" yaml:"is_hermetic"`                         // Backwards-compatible alias (true ONLY if VERIFIED_HERMETIC)
 	VerifiedAt           int64             `json:"verified_at,omitempty" yaml:"verified_at,omitempty"`     // Unix timestamp when verification was evaluated
+	Signature            string            `json:"signature,omitempty" yaml:"signature,omitempty"`         // ED25519 signature (hex) over canonical TaskVerify bytes
+	VerifierKeyID        string            `json:"verifier_key_id,omitempty" yaml:"verifier_key_id,omitempty"` // Key identifier in allowlist
 }
 
 // TaskSettle represents Phase 5: TASK-SETTLE economic transfer or ledger mint.
