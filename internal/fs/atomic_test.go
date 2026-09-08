@@ -217,3 +217,25 @@ func TestWriteAtomic_ConcurrentReadersAndWriters(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+func TestWriteAtomic_RefusesSymlinkLeaf(t *testing.T) {
+	dir := t.TempDir()
+	targetFile := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(targetFile, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	symlinkFile := filepath.Join(dir, "symlink.txt")
+	if err := os.Symlink(targetFile, symlinkFile); err != nil {
+		t.Skipf("skipping symlink test: %v", err)
+	}
+
+	err := WriteAtomic(symlinkFile, []byte("attack"), 0644)
+	if err == nil {
+		t.Fatal("expected error when writing to symlink leaf, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to overwrite symlink target") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+

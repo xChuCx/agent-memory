@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -112,3 +113,67 @@ func TestIsDerivedPath(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateMemoryPath_SymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outsideDir := t.TempDir()
+
+	symlinkPath := filepath.Join(root, "modules")
+	err := os.Symlink(outsideDir, symlinkPath)
+	if err != nil {
+		t.Skipf("skipping symlink test: symlink creation not permitted: %v", err)
+	}
+
+	// Attempt to validate a path traversing the external symlink with non-existent leaf.
+	_, err = ValidateMemoryPath(root, "modules/auth.md")
+	if err == nil {
+		t.Fatalf("expected error for symlink escaping root, got nil")
+	}
+	if !strings.Contains(err.Error(), "escapes root via symlink") {
+		t.Errorf("expected 'escapes root via symlink' error, got: %v", err)
+	}
+}
+
+func TestValidateMemoryPath_RootPrefixCollision(t *testing.T) {
+	tempBase := t.TempDir()
+	root := filepath.Join(tempBase, "memory")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	evilDir := filepath.Join(tempBase, "memory-evil")
+	if err := os.MkdirAll(evilDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// isSubpath must reject memory-evil against memory
+	if isSubpath(root, filepath.Join(evilDir, "secret.md")) {
+		t.Errorf("isSubpath allowed memory-evil to match memory prefix")
+	}
+	if !isSubpath(root, filepath.Join(root, "valid.md")) {
+		t.Errorf("isSubpath rejected legitimate child of memory")
+	}
+}
+
+func TestValidateMemoryPath_NestedParentSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	parent := filepath.Join(root, "sub", "level1")
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	symlink := filepath.Join(parent, "escaped")
+	if err := os.Symlink(outside, symlink); err != nil {
+		t.Skipf("skipping symlink test: %v", err)
+	}
+
+	_, err := ValidateMemoryPath(root, "sub/level1/escaped/deep/file.md")
+	if err == nil {
+		t.Fatalf("expected error for nested symlink escaping root, got nil")
+	}
+	if !strings.Contains(err.Error(), "escapes root via symlink") {
+		t.Errorf("expected escapes root via symlink, got: %v", err)
+	}
+}
+

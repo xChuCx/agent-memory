@@ -45,6 +45,10 @@ func WriteAtomic(path string, data []byte, perm fs.FileMode) error {
 	if !filepath.IsAbs(path) {
 		return fmt.Errorf("WriteAtomic: path must be absolute: %q", path)
 	}
+	// Refuse writing directly through a leaf symlink to prevent symlink poisoning.
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("WriteAtomic: refusing to overwrite symlink target: %q", path)
+	}
 	dir := filepath.Dir(path)
 	info, err := os.Stat(dir)
 	if err != nil {

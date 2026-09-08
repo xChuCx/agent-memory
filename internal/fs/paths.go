@@ -2,7 +2,9 @@ package fs
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -60,7 +62,67 @@ func ValidateMemoryPath(root, rel string) (string, error) {
 		return "", fmt.Errorf("ValidateMemoryPath: refusing derived path: %q", rel)
 	}
 
-	return filepath.Join(root, cleaned), nil
+	target := filepath.Join(root, cleaned)
+	if err := checkSymlinkContainment(root, target); err != nil {
+		return "", err
+	}
+
+	return target, nil
+}
+
+// checkSymlinkContainment verifies that any existing path component between root
+// and target does not resolve outside root via symlinks.
+//
+// Security Notice: checkSymlinkContainment validates pre-existing filesystem structure
+// against symlink traversal. It does not provide race-free TOCTOU kernel guarantees
+// against concurrent directory replacement during write (e.g. openat2/RESOLVE_NO_SYMLINKS);
+// for cooperative local agent operations this prevents static and pre-existing path escapes.
+func checkSymlinkContainment(root, target string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = filepath.Clean(root)
+	} else {
+		realRoot = filepath.Clean(realRoot)
+	}
+
+	// Find the longest existing prefix of target.
+	curr := target
+	for {
+		if _, err := os.Lstat(curr); err == nil {
+			// Found an existing ancestor.
+			resolved, err := filepath.EvalSymlinks(curr)
+			if err != nil {
+				return fmt.Errorf("ValidateMemoryPath: eval symlinks on %q: %w", curr, err)
+			}
+			if !isSubpath(realRoot, resolved) {
+				return fmt.Errorf("ValidateMemoryPath: path escapes root via symlink: %q resolves to %q", target, resolved)
+			}
+			return nil
+		}
+		parent := filepath.Dir(curr)
+		if parent == curr || parent == "." {
+			break
+		}
+		curr = parent
+	}
+	return nil
+}
+
+// isSubpath reports whether target is equal to base or is a descendant of base.
+// It uses filepath.Rel to eliminate prefix-matching ambiguities (e.g. /repo/memory-evil
+// sharing a prefix with /repo/memory).
+func isSubpath(base, target string) bool {
+	b := filepath.Clean(base)
+	t := filepath.Clean(target)
+	if runtime.GOOS == "windows" {
+		b = strings.ToLower(b)
+		t = strings.ToLower(t)
+	}
+	rel, err := filepath.Rel(b, t)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
 }
 
 // IsDerivedPath reports whether rel refers to a server-managed derived file
@@ -85,6 +147,8 @@ func IsDerivedPath(rel string) bool {
 		// index.sqlite-journal, and any future SQLite sidecar.
 		return true
 	case rel == "meta/lock":
+		return true
+	case rel == "meta/nonces.json":
 		return true
 	}
 	return false
