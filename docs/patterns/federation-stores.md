@@ -3,9 +3,9 @@
 **Scope:** the federation slice's *declaration + pinning* contract (introduced
 in PR2). Sync (PR3), the index `store` dimension (PR4,
 [shadow-index pattern](sqlite-fts5-shadow-index.md#federation-the-store-dimension-schema-v2)),
-and multi-store fetch (PR5, [multi-store-fetch pattern](multi-store-fetch.md))
-build on it and have landed; the retrieval eval (PR6) is still to come. Full
-design: [docs/design/federated-memory.md](../design/federated-memory.md).
+multi-store fetch (PR5, [multi-store-fetch pattern](multi-store-fetch.md)),
+and retrieval eval (PR6, [internal/eval/federation_test.go](../../internal/eval/federation_test.go))
+have all landed. Full design: [docs/design/federated-memory.md](../design/federated-memory.md).
 
 ## Problem & Paradigm Shift: Beyond Static Wikis
 
