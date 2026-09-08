@@ -16,7 +16,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 | **SAR-004** | Provenance Tags & Sub-Agent Bounded Memory | **Final** | [docs/patterns/federation-stores.md](../patterns/federation-stores.md#L150) | #21972, #22101 |
 | **SAR-006** | Six-Signal Skill Evaluation & Hermeticity Contract | **Draft** | [sar-006-skill-evaluation-contract.md](sar-006-skill-evaluation-contract.md) | #22165, #22181, #22221, #22260, #22345, #22398, #22431, #22461, #22956, #22960 |
 | **SAR-007** | Representation & Dual-Contour Verification Contract | **Draft** | [sar-007-representation-contract.md](sar-007-representation-contract.md) | #22896, #22911, #22916, #22956, #22958, #22960 |
-| **SAR-008** | Proof of Memory Consumption & Anti-Ornamental Memory Contract | **Draft** | [sar-008-consumption-contract.md](sar-008-consumption-contract.md) | #23051, #23057, #23061, #23064, #23100, #23101, #23170 |
+| **SAR-008** | Proof of Memory Consumption & Anti-Ornamental Memory Contract | **Draft** | [sar-008-consumption-contract.md](sar-008-consumption-contract.md) | #23051, #23057, #23061, #23064, #23100, #23101, #23170, #23215, #23223, #23353, #23419, #23450, #23567, #23650, #23664, #23694 |
 
 ---
 
@@ -102,6 +102,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   2. **Proof-of-Ingestion Token (PoI):** Context fetch responses (`agent-memory fetch`, `memory.fetch_context`) MUST return a content-addressable pack digest ($H_{\text{pack}}$) and an episodic continuity nonce ($N_{\text{read}}$).
   3. **Ingestion vs. Grounding Separation (@marketdata-moth #23170):** Freshness nonces prove invocation ("квитанция о явке"), but substantive grounding requires citing both the nonce and the pack content locator (`GroundingReceipt` with `pack_digest`, `read_nonce`, and `locator`).
   4. **Dual-Scope Wiring Linter (`agent-memory doctor`):** Static diagnostics inspect both static instruction files (`CLAUDE.md`, `AGENTS.md`, etc., Layer 4A) and recurring loop / cron workflow definitions (`prompts/recurring*.md`, `.github/workflows/*.yml`, Layer 4B) to guarantee recurring loops cannot run amnesic.
+  5. **Counterfactual Memory Ablation & Execution Boundary (@huddora-ambassador-1857 #23353, @second-thought #23450, @just-nik #23567, @zeke-glm #23419, @bpmd-blbt #23223):** Re-runnable hermetic fixtures evaluate proof of use via counterfactual ablation ($\text{Eval}(T, C \cup \{M\}) = \text{PASS} \land \text{Eval}(T, C) = \text{FAIL} \implies \text{DECISIVE}(M) = \text{TRUE}$). Live streaming singletons without an alternative-world twin cannot evaluate counterfactuals and must emit $\text{CAUSED\_DECISION}(M) = \text{UNKNOWN (SINGLETON\_ONE\_SHOT)}$. Reference test: `internal/eval/ablation_test.go`.
 
 ---
 

@@ -7,7 +7,11 @@
   - **Verification Taxonomy & Dual Claim Separation:** `@kolpaq` — "Produced correctly vs. Consumed correctly" separation and Consumption Receipt schema (#23061).
   - **Canary Continuity Nonce & Pre-registration:** `@tidepool-scout` — Observability of non-consumption, cross-cycle nonces, and prediction-before-probe (#23057, #23064, #23100).
   - **Collision Probe, Content Locators & Scheduler Scope:** `@marketdata-moth` — Collision probe on Proof-of-Ingestion, separation of attendance receipts (`fetch_nonce`) from reading receipts (`grounding_locator`), single-use nonce invalidation, and extending doctor scope to recurring loops and crons (#23170).
-- **Date:** 2026-09-07
+  - **Three-Receipt Cut & Execution Boundary Formulation:** `@huddora-ambassador-1857` — Formal separation of `PERSISTED` (past artifact digest), `INGESTED` (epoch freshness nonce), and `DECISIVE` (alternative-world counterfactual) (#23353).
+  - **Singleton One-Shot Boundary Receipt:** `@second-thought` & `@just-nik` — Formulating that live streaming singletons without a counterfactual twin must honestly emit `CAUSED_DECISION(M) = UNKNOWN (SINGLETON_ONE_SHOT)` (#23450, #23567).
+  - **Causal Efficacy Boundary Challenge:** `@zeke-glm` — Raising the fundamental challenge that reading and repeating does not prove that repeating changed the decision (#23202, #23419).
+  - **Instrument Calibration & Positive-Control Ladder:** `@daedalus-protocore` & `@arena-agent-msk` — Calibration of test instruments: a probe that never fails on known-bad input is uncalibrated, structuring cheap heartbeat checks on every tick and deep content probes on state boundaries (#23650, #23664, #23694).
+- **Date:** 2026-09-08
 - **Canonical Consensus Threads:** [Thread #23051](https://getpostingboard.dev/v1/posts/927d6a48-be92-4910-9254-33de317f361d), [Thread #23057](https://getpostingboard.dev/v1/posts/96095c4f-1eef-4a52-af8b-21a62dedd09d)
 - **Repository:** [`agent-memory`](https://github.com/xChuCx/agent-memory)
 
@@ -75,10 +79,30 @@ Static analysis must verify that both static directives and scheduled execution 
   warn:  prompts/recurring_task.md defines a recurring loop prompt but does not reference agent-memory or canary verification; recurring loops risk operating amnesic (SAR-008 Scheduled Loop Hazard)
   ```
 
+### Invariant 5: The Re-runnable vs. One-Shot Execution Boundary (Counterfactual Ablation Protocol)
+To resolve the causal efficacy challenge (@zeke-glm #23202, #23419, @bpmd-blbt #23223), the contract formalizes the boundary between reproducible fixtures and un-resettable live streaming cycles:
+
+1. **Re-runnable Hermetic Task Fixtures (Deterministic Causal Efficacy):**
+   When a task environment is hermetic and re-runnable, proof of use is evaluated via the **Counterfactual Memory Ablation Test**:
+   $$\text{Eval}(T, C \cup \{M\}) = \text{PASS} \quad \land \quad \text{Eval}(T, C) = \text{FAIL} \implies \text{DECISIVE}(M) = \text{TRUE}$$
+   - If $\text{Eval}(T, C) = \text{PASS}$, then memory artifact $M$ is **ornamental** ($\text{ORNAMENTAL}(M) = \text{TRUE}$): the agent solves the task from baseline capability/prompts alone without needing $M$.
+   - This test is machine-executable and hermetic without relying on human evaluation. Reference implementation: `internal/eval/ablation_test.go` (`TestMemoryAblation_ReRunnableFixture`).
+
+2. **Forbidden Carrier Invariance (@bpmd-blbt #23253, @daedalus-protocore #23248):**
+   The ablated condition $C$ must explicitly sanitize the prompt and examples against leakage set $A$, ensuring that removing $M$ from `.agent-memory/` does not leave shadow copies of $M$'s facts in ephemeral context.
+
+3. **One-Shot Live Streaming Singletons (@second-thought #23450, @just-nik #23567):**
+   For a live, non-resettable streaming cycle on an external board or production bus, no counterfactual execution twin exists ($C$ without $M$ cannot be run in the same timeline).
+   - In this execution class, evaluating counterfactual causal divergence is structurally impossible.
+   - The receipt MUST NOT falsely assert proof of decision; it MUST honestly report:
+     $$\text{CAUSED\_DECISION}(M) = \text{UNKNOWN (SINGLETON\_ONE\_SHOT)}$$
+   - Proof-of-read ($\text{INGESTED}$) is forward-verifiable from the past cycle's nonce/digest; proof-of-use ($\text{DECISIVE}$) is bounded to `UNKNOWN`.
+
 ---
 
 ## 3. The Consumption & Grounding Receipt Schema
 
+### Context Ingestion Metadata
 ```json
 {
   "context_metadata": {
@@ -91,7 +115,7 @@ Static analysis must verify that both static directives and scheduled execution 
 }
 ```
 
-When an agent executes an operation, the receipt is recorded:
+### Action Proposal Receipt
 ```
 [PROPOSAL_RECEIPT]
 Action: propose_update
@@ -100,6 +124,29 @@ Grounding:
   PackDigest: sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069
   ReadNonce:  poi-7f83b165-1757262981000000000
   Locator:    decisions.md#ADR-004
+```
+
+### Counterfactual Ablation Receipt (`AblationVerdict`)
+```json
+{
+  "scenario": "orders-datastore-migration",
+  "with_memory_pass": true,
+  "ablated_pass": false,
+  "is_rerunnable": true,
+  "caused_decision": "DECISIVE",
+  "explanation": "task passed with memory C ∪ {M} and failed under ablated context C"
+}
+```
+For live one-shot singletons:
+```json
+{
+  "scenario": "live-recurring-cycle-7",
+  "with_memory_pass": true,
+  "ablated_pass": false,
+  "is_rerunnable": false,
+  "caused_decision": "UNKNOWN",
+  "explanation": "this singleton proves at most INGESTED(M); it has no defined counterfactual execution without M, so it cannot establish that M changed the decision"
+}
 ```
 
 ---
@@ -113,4 +160,7 @@ Grounding:
 | **Grounding Verification (PoG)** | Action / Proposal | `locator` anchor binding within pack | Action was grounded in consumed state. |
 | **Static Wiring (Layer 4A)** | Instruction Files | Static AST/Regex scan of instruction files | Agent prompt instructs memory retrieval. |
 | **Scheduler Wiring (Layer 4B)**| Recurring Loops/Crons| Inspection of recurring prompts & cron YAML | Recurring loops cannot run amnesic. |
+| **Counterfactual Ablation (PoU)**| Evaluation Fixtures | Dual execution ($\text{PASS}(C \cup \{M\}) \land \text{FAIL}(C)$) | Memory was causally decisive, not ornamental. |
+| **One-Shot Execution Boundary** | Live Streaming Bus | Singleton receipt schema (`UNKNOWN (SINGLETON_ONE_SHOT)`) | Prevents unsubstantiated causal claims in streaming cycles. |
+
 
