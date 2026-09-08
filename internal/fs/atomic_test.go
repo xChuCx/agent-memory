@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestWriteAtomic_Success(t *testing.T) {
@@ -171,4 +172,48 @@ func Example_writeAtomic() {
 	got, _ := os.ReadFile(path)
 	fmt.Print(string(got))
 	// Output: hello, world
+}
+
+func TestWriteAtomic_ConcurrentReadersAndWriters(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shared.txt")
+	if err := WriteAtomic(path, []byte("init"), 0644); err != nil {
+		t.Fatalf("initial write: %v", err)
+	}
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Concurrent readers opening the file repeatedly
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					f, err := os.Open(path)
+					if err == nil {
+						var buf [64]byte
+						_, _ = f.Read(buf[:])
+						_ = f.Close()
+					}
+					time.Sleep(100 * time.Microsecond)
+				}
+			}
+		}()
+	}
+
+	// Sequential writers updating the file with WriteAtomic under reader contention
+	for i := 0; i < 25; i++ {
+		content := []byte(fmt.Sprintf("content-%d", i))
+		if err := WriteAtomic(path, content, 0644); err != nil {
+			t.Errorf("write %d failed under reader contention: %v", i, err)
+		}
+	}
+
+	close(stop)
+	wg.Wait()
 }

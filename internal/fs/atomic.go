@@ -11,11 +11,14 @@ package fs
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
+	"time"
 )
 
 // WriteAtomic writes data to path atomically using the canonical
@@ -80,7 +83,7 @@ func WriteAtomic(path string, data []byte, perm fs.FileMode) error {
 		return fmt.Errorf("WriteAtomic: close temp: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := renameWithRetry(tmpPath, path); err != nil {
 		return fmt.Errorf("WriteAtomic: rename: %w", err)
 	}
 	// Rename succeeded; the temp file no longer exists.
@@ -88,6 +91,42 @@ func WriteAtomic(path string, data []byte, perm fs.FileMode) error {
 
 	syncDir(dir)
 	return nil
+}
+
+// renameWithRetry attempts os.Rename with a bounded exponential backoff on Windows
+// to withstand transient sharing locks (e.g. concurrent readers or indexers holding handles).
+func renameWithRetry(src, dst string) error {
+	var err error
+	const maxAttempts = 25
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err = os.Rename(src, dst)
+		if err == nil {
+			return nil
+		}
+		if runtime.GOOS == "windows" && isWindowsSharingViolation(err) && attempt < maxAttempts-1 {
+			// Backoff: 2ms, 4ms, 8ms ... capped at 50ms
+			sleepMs := 2 * (1 << attempt)
+			if sleepMs > 50 {
+				sleepMs = 50
+			}
+			time.Sleep(time.Duration(sleepMs) * time.Millisecond)
+			continue
+		}
+		return err
+	}
+	return err
+}
+
+func isWindowsSharingViolation(err error) bool {
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		var errno syscall.Errno
+		if errors.As(linkErr.Err, &errno) {
+			// 5: ERROR_ACCESS_DENIED, 32: ERROR_SHARING_VIOLATION
+			return errno == 5 || errno == 32
+		}
+	}
+	return false
 }
 
 // makeTempPath returns a unique temp path in the same directory as path.
