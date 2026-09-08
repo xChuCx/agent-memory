@@ -466,3 +466,41 @@ func TestRebuildAll_SkipsUnclassifiedFiles(t *testing.T) {
 		t.Errorf("stray.md should not have been indexed: %v", err)
 	}
 }
+
+func TestSAR010_UnicodeMultiLingualIndexingAndBinaryKeyCollation(t *testing.T) {
+	idx, ctx := openTestIndex(t)
+
+	// Invariant 2: Primary keys in memory_sections use COLLATE BINARY,
+	// preserving distinct case identifiers without naive SQLite NOCASE collision.
+	doc1 := sectionDoc("arch.md", "sec-Привет", "Архитектура Системы", "Спецификация автономных агентов и консенсуса.")
+	doc2 := sectionDoc("arch.md", "sec-привет", "Архитектура Модулей", "Реализация шины событий и задач.")
+
+	if err := idx.UpsertSections(ctx, []SectionDoc{doc1, doc2}); err != nil {
+		t.Fatalf("UpsertSections failed: %v", err)
+	}
+
+	count, err := idx.CountSections(ctx)
+	if err != nil {
+		t.Fatalf("CountSections: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("CountSections = %d, want 2 (binary primary key distinctness)", count)
+	}
+
+	// FTS5 with unicode61 tokenizer matches Cyrillic case-insensitively.
+	resultsLower, err := idx.Search(ctx, "архитектура", 5)
+	if err != nil {
+		t.Fatalf("Search 'архитектура': %v", err)
+	}
+	if len(resultsLower) != 2 {
+		t.Errorf("expected 2 matches for lowercase query 'архитектура', got %d", len(resultsLower))
+	}
+
+	resultsUpper, err := idx.Search(ctx, "АРХИТЕКТУРА", 5)
+	if err != nil {
+		t.Fatalf("Search 'АРХИТЕКТУРА': %v", err)
+	}
+	if len(resultsUpper) != 2 {
+		t.Errorf("expected 2 matches for uppercase query 'АРХИТЕКТУРА', got %d", len(resultsUpper))
+	}
+}
