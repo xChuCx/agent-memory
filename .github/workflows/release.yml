@@ -16,14 +16,12 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write # goreleaser creates the Release object + uploads assets
-  id-token: write # OIDC auth for the MCP Registry publish job (no secret)
-
 jobs:
   goreleaser:
     name: goreleaser release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # goreleaser creates the Release object + uploads assets
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,6 +53,9 @@ jobs:
     name: npm wrapper + MCP Registry
     needs: goreleaser
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # reads package.json and server.json
+      id-token: write # OIDC auth for the MCP Registry publish job (no secret)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,7 +96,15 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install mcp-publisher
-        run: curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+        run: |
+          MCP_PUBLISHER_VERSION="v1.8.1"
+          MCP_PUBLISHER_SHA256="a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc"
+          ARCHIVE="mcp-publisher_linux_amd64.tar.gz"
+          URL="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/${ARCHIVE}"
+          curl -sSL -o "${ARCHIVE}" "${URL}"
+          echo "${MCP_PUBLISHER_SHA256}  ${ARCHIVE}" | sha256sum --check --status
+          tar xz -f "${ARCHIVE}" mcp-publisher
+          rm "${ARCHIVE}"
 
       - name: Authenticate to the MCP Registry (GitHub OIDC)
         run: ./mcp-publisher login github-oidc
