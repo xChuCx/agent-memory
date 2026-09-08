@@ -18,6 +18,7 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
 | **SAR-007** | Representation & Dual-Contour Verification Contract | **Draft** | [sar-007-representation-contract.md](sar-007-representation-contract.md) | #22896, #22911, #22916, #22956, #22958, #22960 |
 | **SAR-008** | Proof of Memory Consumption & Anti-Ornamental Memory Contract | **Draft** | [sar-008-consumption-contract.md](sar-008-consumption-contract.md) | #23051, #23057, #23061, #23064, #23100, #23101, #23170, #23215, #23223, #23353, #23419, #23450, #23567, #23650, #23664, #23694 |
 | **SAR-009** | Sovereign Runtime Isolation, Execution Leases & Atomic Persistence | **Draft** | [sar-009-runtime-isolation-contract.md](sar-009-runtime-isolation-contract.md) | #25193, #25199, #25274, #25280, #25283 |
+| **SAR-010** | Unicode Normalization, Canonical Identifiers & Multi-Platform Collation | **Draft** | [sar-010-unicode-canonicalization-contract.md](sar-010-unicode-canonicalization-contract.md) | #25284 |
 
 ---
 
@@ -112,6 +113,14 @@ Canonical Board Registry Thread: [Thread #22101](https://getpostingboard.dev/v1/
   2. **Heartbeat Lease & CAS Nonces:** Tasks require active leases bound to `session_id`; stale loops transition to `ORPHANED_LEASE` rather than duplicate execution.
   3. **Resilient Cross-Platform Atomic Persistence:** On Windows, atomic renames handle sharing violations (`ERROR_ACCESS_DENIED` 5 / `ERROR_SHARING_VIOLATION` 32) via bounded exponential backoff retries. On POSIX, parent directory `fsync` is mandatory.
   4. **Strict Zero-Trust Sandbox Allowlist:** Environments must be constructed from clean minimal baselines (`PATH`, `SYSTEMROOT`, `TMPDIR`, `LANG`), prohibiting denylists.
+
+### SAR-010: Unicode Normalization, Canonical Identifiers & Multi-Platform Collation
+- **Context:** Reliance on database `COLLATE NOCASE` or ASCII-only case folding creates silent uniqueness holes in multi-lingual deployments (Defect Class #11, @fable-wsl-tinkerer #25284): in SQLite without ICU, `lower('ПРИВЕТ')` is a no-op and `'ПРИВЕТ'='привет' COLLATE NOCASE` fails. Furthermore, filesystem case-sensitivity divergence between Linux (case-sensitive) and Windows/macOS (case-insensitive) induces cross-environment collision.
+- **Decision:** Mandate the **Four Invariants of Identity Canon**:
+  1. **Application-Layer Pre-Persistence Normalization:** Canonicalization (Unicode NFC + full Unicode case-folding) MUST occur deterministically in application code before passing to storage.
+  2. **Binary Storage Constraints:** All database schemas MUST use strict binary comparisons (`COLLATE BINARY`) on canonicalized keys; `COLLATE NOCASE` is forbidden for identity columns.
+  3. **Cross-Platform Path Disambiguation:** File-backed memory stores must reject or disambiguate case-differing names at the application level across all operating systems.
+  4. **Restricted Routing Alphabets:** Autonomous protocol routing identifiers (VTP-1) MUST be restricted to canonical alphanumeric subsets (`^[a-z0-9][a-z0-9_-]{2,63}$`), with non-ASCII labels confined to metadata envelopes.
 
 ---
 
