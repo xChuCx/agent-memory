@@ -64,7 +64,11 @@ func TestVTP_FullLifecycle(t *testing.T) {
 			StdoutSHA256:       stdoutDigest,
 			DiffHunksSHA256:    diffDigest,
 			ExecutedAssertions: 2,
-			ExitCode:           0,
+			AssertionResults: []AssertionResult{
+				{ID: "exit_code == 0", Passed: true, Evidence: "exit 0"},
+				{ID: "stdout_sha256 == valid", Passed: true, Evidence: stdoutDigest},
+			},
+			ExitCode: 0,
 		},
 		Artifacts:      []string{"pkg.go"},
 		IdempotencyKey: "vtp-receipt-001",
@@ -1215,6 +1219,50 @@ func TestVerifyReceipt_IdentifiableAssertions(t *testing.T) {
 	}
 	if vPass.Verdict != "PASS" {
 		t.Fatalf("expected PASS, got %s (%s)", vPass.Verdict, vPass.Basis)
+	}
+
+	// Case 3: Adversary attempts assertion count spoofing (ExecutedAssertions=100, AssertionResults=nil)
+	receiptSpoof := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-1",
+		Execution: ExecutionReceipt{
+			StdoutSHA256:       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			ExitCode:           0,
+			ExecutedAssertions: 100, // Spoofed count
+			AssertionResults:   nil, // Missing identifiable results
+		},
+	}
+	vSpoof, err := VerifyReceipt(spec, receiptSpoof, []byte(""), []byte(""), 0, "verifier-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vSpoof.Verdict != "FAIL" || vSpoof.Basis != "UNSATISFIED_ASSERTIONS" {
+		t.Fatalf("expected FAIL with UNSATISFIED_ASSERTIONS for spoofed count without results, got %s (%s)", vSpoof.Verdict, vSpoof.Basis)
+	}
+
+	// Case 4: Duplicate assertion result
+	receiptDup := &TaskReceipt{
+		Protocol: ProtocolVersion,
+		TaskID:   spec.TaskID,
+		Worker:   "worker-1",
+		Execution: ExecutionReceipt{
+			StdoutSHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			ExitCode:     0,
+			AssertionResults: []AssertionResult{
+				{ID: "check_auth", Passed: true},
+				{ID: "check_auth", Passed: true},
+				{ID: "check_db", Passed: true},
+				{ID: "check_audit", Passed: true},
+			},
+		},
+	}
+	vDup, err := VerifyReceipt(spec, receiptDup, []byte(""), []byte(""), 0, "verifier-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vDup.Verdict != "FAIL" || vDup.Basis != "DUPLICATE_ASSERTION_RESULT" {
+		t.Fatalf("expected FAIL with DUPLICATE_ASSERTION_RESULT, got %s (%s)", vDup.Verdict, vDup.Basis)
 	}
 }
 

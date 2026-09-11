@@ -3,6 +3,7 @@ package memory
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -280,44 +281,93 @@ func TestNonceStore_Lifecycle(t *testing.T) {
 
 func TestNonceStore_Persistent_CrossProcessSyncAndSweep(t *testing.T) {
 	tempDir := t.TempDir()
-	storePath := filepath.Join(tempDir, "meta", "nonces.json")
+	storePath := filepath.Join(tempDir, "meta", "nonces.sqlite")
 
-	// Process 1 issues a nonce
-	store1 := NewNonceStore(50 * time.Millisecond)
-	store1.SetStoragePath(storePath)
-	store1.Issue("poi-proc1", "sha256:1111")
+	// Process 1 issues a nonce with generous 5-second TTL so slow CI runners don't flake
+	store1 := NewNonceStore(5 * time.Second)
+	if err := store1.SetStoragePath(storePath); err != nil {
+		t.Fatal(err)
+	}
+	defer store1.Close()
 
-	// Process 2 opens same file and consumes the nonce
-	store2 := NewNonceStore(50 * time.Millisecond)
-	store2.SetStoragePath(storePath)
+	if err := store1.Issue("poi-proc1", "sha256:1111"); err != nil {
+		t.Fatalf("process 1 failed to issue: %v", err)
+	}
+
+	// Process 2 opens same SQLite database and consumes the nonce
+	store2 := NewNonceStore(5 * time.Second)
+	if err := store2.SetStoragePath(storePath); err != nil {
+		t.Fatal(err)
+	}
+	defer store2.Close()
+
 	if err := store2.Consume("poi-proc1", "sha256:1111"); err != nil {
 		t.Fatalf("process 2 failed to consume nonce issued by process 1: %v", err)
 	}
 
-	// Process 1 attempts to consume already-consumed nonce -> must fail
+	// Process 1 attempts to consume already-consumed nonce -> must fail atomically
 	if err := store1.Consume("poi-proc1", "sha256:1111"); err != ErrNonceConsumed {
 		t.Fatalf("expected ErrNonceConsumed across processes, got %v", err)
 	}
 
-	// Test auto-sweep after TTL
-	store1.Issue("poi-short-lived", "sha256:2222")
-	time.Sleep(70 * time.Millisecond)
-	if err := store2.Consume("poi-short-lived", "sha256:2222"); err != ErrNonceNotFound {
+	// Concurrent race test: 10 concurrent consumers racing for a single nonce
+	if err := store1.Issue("poi-race", "sha256:race"); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	successCount := 0
+	var mu sync.Mutex
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s := NewNonceStore(5 * time.Second)
+			_ = s.SetStoragePath(storePath)
+			defer s.Close()
+			err := s.Consume("poi-race", "sha256:race")
+			if err == nil {
+				mu.Lock()
+				successCount++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if successCount != 1 {
+		t.Fatalf("expected exactly 1 winner in concurrent race, got %d", successCount)
+	}
+
+	// Test auto-sweep after TTL with short-lived store
+	sweepStore := NewNonceStore(50 * time.Millisecond)
+	sweepPath := filepath.Join(tempDir, "meta", "sweep.sqlite")
+	_ = sweepStore.SetStoragePath(sweepPath)
+	defer sweepStore.Close()
+
+	sweepStore.Issue("poi-short-lived", "sha256:2222")
+	time.Sleep(150 * time.Millisecond)
+	if err := sweepStore.Consume("poi-short-lived", "sha256:2222"); err != ErrNonceNotFound {
 		t.Fatalf("expected ErrNonceNotFound after TTL expiry, got %v", err)
 	}
 }
 
 func TestNonceStore_InvalidateAll_RejectsStalePostMutation(t *testing.T) {
 	tempDir := t.TempDir()
-	storePath := filepath.Join(tempDir, "meta", "nonces.json")
+	storePath := filepath.Join(tempDir, "meta", "nonces.sqlite")
 
 	store := NewNonceStore(10 * time.Minute)
-	store.SetStoragePath(storePath)
+	if err := store.SetStoragePath(storePath); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
 
-	store.Issue("poi-context-a", "sha256:aaaa")
+	if err := store.Issue("poi-context-a", "sha256:aaaa"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Memory mutation occurs (applyImmediately / ApplyStaged) -> InvalidateAll()
-	store.InvalidateAll()
+	if err := store.InvalidateAll(); err != nil {
+		t.Fatal(err)
+	}
 
 	// Propose update using stale nonce must be rejected
 	err := store.Consume("poi-context-a", "sha256:aaaa")

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,9 @@ func updateFixture(t *testing.T) (memDir string, mf *config.Manifest, sch *schem
 	mf = config.DefaultManifest()
 	mf.Project.Name = "test"
 	sch = schema.DefaultSchema()
+	t.Cleanup(func() {
+		_ = DefaultNonceStore.Close()
+	})
 	return memDir, mf, sch
 }
 
@@ -751,11 +755,29 @@ func TestApplyImmediately_MultiFileRollbackOnFailure(t *testing.T) {
 	if err := os.WriteFile(file1, []byte("original content 1"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
-	// Create file2 as a directory to force WriteAtomic to fail on file2
-	file2Dir := filepath.Join(memDir, "file2.md")
-	if err := os.Mkdir(file2Dir, 0755); err != nil {
+	file2 := filepath.Join(memDir, "file2.md")
+	if err := os.WriteFile(file2, []byte("original content 2"), 0644); err != nil {
 		t.Fatal(err)
+	}
+
+	// Genuine failure injection: allow file1 to be written with mutated content,
+	// then fail on file2. Rollback must restore file1 to original content.
+	origWriter := atomicWriteFile
+	defer func() { atomicWriteFile = origWriter }()
+
+	writeCount := 0
+	atomicWriteFile = func(path string, data []byte, perm os.FileMode) error {
+		writeCount++
+		if writeCount == 1 {
+			// Write mutated content to file1
+			return origWriter(path, data, perm)
+		}
+		if writeCount == 2 {
+			// Injected failure on file2
+			return errors.New("injected failure writing file2")
+		}
+		// Rollback writes (file1 restore) succeed
+		return origWriter(path, data, perm)
 	}
 
 	fileOrder := []string{"file1.md", "file2.md"}
@@ -773,14 +795,68 @@ func TestApplyImmediately_MultiFileRollbackOnFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from applyImmediately when file2 fails to write, got nil")
 	}
+	if !strings.Contains(err.Error(), "injected failure writing file2") {
+		t.Fatalf("expected injected failure message, got: %v", err)
+	}
 
-	// Verify file1.md was restored to original content
+	// Verify file1.md was restored to original content after having been mutated
 	got, err := os.ReadFile(file1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != "original content 1" {
 		t.Fatalf("atomicity violation: file1.md was not rolled back; got %q, want %q", string(got), "original content 1")
+	}
+	if writeCount < 3 {
+		t.Fatalf("expected at least 3 write calls (file1 mutate, file2 fail, file1 rollback), got %d", writeCount)
+	}
+}
+
+func TestApplyImmediately_RollbackIncomplete_CompoundError(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+
+	file1 := filepath.Join(memDir, "file1.md")
+	if err := os.WriteFile(file1, []byte("original content 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	file2 := filepath.Join(memDir, "file2.md")
+	if err := os.WriteFile(file2, []byte("original content 2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origWriter := atomicWriteFile
+	defer func() { atomicWriteFile = origWriter }()
+
+	writeCount := 0
+	atomicWriteFile = func(path string, data []byte, perm os.FileMode) error {
+		writeCount++
+		if writeCount == 1 {
+			return origWriter(path, data, perm)
+		}
+		if writeCount == 2 {
+			return errors.New("injected failure on file2")
+		}
+		// Rollback write also fails!
+		return errors.New("injected failure during rollback of file1")
+	}
+
+	fileOrder := []string{"file1.md", "file2.md"}
+	postState := map[string][]byte{
+		"file1.md": []byte("mutated content 1"),
+		"file2.md": []byte("mutated content 2"),
+	}
+	fileOps := map[string][]opCat{
+		"file1.md": nil,
+		"file2.md": nil,
+	}
+
+	deps := UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir}
+	_, err := applyImmediately(context.Background(), deps, fileOrder, postState, fileOps, Routing{Mode: schema.ApprovalApply}, IntentUpdateCurrent, "test compound error")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "rollback incomplete") {
+		t.Fatalf("expected compound error with 'rollback incomplete', got: %v", err)
 	}
 }
 

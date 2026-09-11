@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -417,3 +418,198 @@ func updateFixtureDeps(t *testing.T) (string, string, UpdateDeps) {
 	memDir, mf, sch := updateFixture(t)
 	return memDir, "", UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir}
 }
+
+// =============================================================================
+// Security: StagingID & Staged Path Validation + Rollback Hardening
+// =============================================================================
+
+func TestValidateStagingID(t *testing.T) {
+	valid := []string{
+		"20260912T010405-proposal-1a2b3c4d",
+		"proposal-123",
+		"abc_def-456",
+	}
+	for _, id := range valid {
+		if err := ValidateStagingID(id); err != nil {
+			t.Errorf("ValidateStagingID(%q) = %v; want nil", id, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		".",
+		"..",
+		"../escape",
+		"foo/bar",
+		"foo\\bar",
+		"/root",
+		"c:\\windows",
+		".hidden",
+		"space in id",
+		"id*wildcard",
+		"id?query",
+	}
+	for _, id := range invalid {
+		if err := ValidateStagingID(id); err == nil {
+			t.Errorf("ValidateStagingID(%q) succeeded; want error", id)
+		}
+	}
+}
+
+func TestApplyStaged_RejectInvalidStagingID(t *testing.T) {
+	_, _, deps := updateFixtureDeps(t)
+	_, err := ApplyStaged(context.Background(), "../escape", deps)
+	if err == nil {
+		t.Fatal("expected error for traversal staging ID")
+	}
+	if !strings.Contains(err.Error(), "invalid") && !strings.Contains(err.Error(), "dot") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestApplyStaged_RejectEscapingProposalFiles(t *testing.T) {
+	memDir, id, deps := stageDecision(t)
+
+	// Tamper with proposal.json to include an escaping file
+	propPath := filepath.Join(memDir, "staging", id, "proposal.json")
+	prop, err := LoadStaged(memDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prop.Files = append(prop.Files, "../escape.md")
+	b, _ := json.Marshal(prop)
+	if err := os.WriteFile(propPath, b, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ApplyStaged(context.Background(), id, deps)
+	if err == nil {
+		t.Fatal("expected error for escaping file in proposal.json")
+	}
+	if !strings.Contains(err.Error(), "invalid proposal file") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCheckDrift_RejectEscapingTargetPath(t *testing.T) {
+	memDir, _, _ := updateFixture(t)
+	_, err := CheckDrift(memDir, OperationTarget{
+		Path:   "../outside.md",
+		Policy: RequireFilePresent,
+	})
+	if err == nil {
+		t.Fatal("expected error for escaping target path")
+	}
+	if !strings.Contains(err.Error(), "invalid target path") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestApplyStaged_MultiFileRollbackOnFailure(t *testing.T) {
+	memDir, id, deps := stageDecision(t)
+
+	// Augment staged proposal to touch 2 files
+	prop, err := LoadStaged(memDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prop.Files = append(prop.Files, "pitfalls.md")
+	propBytes, _ := json.Marshal(prop)
+	if err := os.WriteFile(filepath.Join(memDir, "staging", id, "proposal.json"), propBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	secondFileStaged := filepath.Join(memDir, "staging", id, "files", "pitfalls.md")
+	if err := os.WriteFile(secondFileStaged, []byte("# Pitfalls\n\n## Mutated Pitfall\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDecisions, err := os.ReadFile(filepath.Join(memDir, "decisions.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origPitfalls, err := os.ReadFile(filepath.Join(memDir, "pitfalls.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject write failure on the second file (pitfalls.md)
+	targetFail := filepath.Join(memDir, "pitfalls.md")
+	oldAtomic := atomicWriteFile
+	defer func() { atomicWriteFile = oldAtomic }()
+
+	atomicWriteFile = func(path string, data []byte, perm os.FileMode) error {
+		if path == targetFail {
+			return errors.New("injected disk full error on pitfalls.md")
+		}
+		return oldAtomic(path, data, perm)
+	}
+
+	_, err = ApplyStaged(context.Background(), id, deps)
+	if err == nil {
+		t.Fatal("expected ApplyStaged to fail due to injected error")
+	}
+	if !strings.Contains(err.Error(), "injected disk full error") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+
+	// Verify decisions.md was rolled back to its original state
+	currentDecisions, err := os.ReadFile(filepath.Join(memDir, "decisions.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(currentDecisions) != string(origDecisions) {
+		t.Errorf("decisions.md was not rolled back!\nGot:\n%s\nWant:\n%s", string(currentDecisions), string(origDecisions))
+	}
+	currentPitfalls, err := os.ReadFile(filepath.Join(memDir, "pitfalls.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(currentPitfalls) != string(origPitfalls) {
+		t.Errorf("pitfalls.md modified!\nGot:\n%s\nWant:\n%s", string(currentPitfalls), string(origPitfalls))
+	}
+}
+
+func TestApplyStaged_RollbackIncomplete_CompoundError(t *testing.T) {
+	memDir, id, deps := stageDecision(t)
+
+	// Augment staged proposal to touch 2 files
+	prop, err := LoadStaged(memDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prop.Files = append(prop.Files, "pitfalls.md")
+	propBytes, _ := json.Marshal(prop)
+	if err := os.WriteFile(filepath.Join(memDir, "staging", id, "proposal.json"), propBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	secondFileStaged := filepath.Join(memDir, "staging", id, "files", "pitfalls.md")
+	if err := os.WriteFile(secondFileStaged, []byte("# Pitfalls\n\n## Mutated Pitfall\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	targetFail := filepath.Join(memDir, "pitfalls.md")
+	firstFile := filepath.Join(memDir, "decisions.md")
+	oldAtomic := atomicWriteFile
+	defer func() { atomicWriteFile = oldAtomic }()
+
+	hasFailedOnce := false
+	atomicWriteFile = func(path string, data []byte, perm os.FileMode) error {
+		if path == targetFail {
+			hasFailedOnce = true
+			return errors.New("injected write failure")
+		}
+		if hasFailedOnce && path == firstFile {
+			return errors.New("injected rollback failure")
+		}
+		return oldAtomic(path, data, perm)
+	}
+
+	_, err = ApplyStaged(context.Background(), id, deps)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "rollback incomplete") {
+		t.Errorf("expected compound error with 'rollback incomplete', got: %v", err)
+	}
+}
+

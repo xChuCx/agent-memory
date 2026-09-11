@@ -2,6 +2,7 @@ package vtp
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -88,11 +89,13 @@ func TestJCS_NumberFormatting(t *testing.T) {
 		input json.Number
 		want  string
 	}{
-		{json.Number("1000000000000000000000"), "1e21"},
+		{json.Number("1000000000000000000000"), "1e+21"},
 		{json.Number("100000000000000000000"), "100000000000000000000"},
 		{json.Number("100"), "100"},
 		{json.Number("0.0000001"), "1e-7"},
 		{json.Number("0.000001"), "0.000001"},
+		{json.Number("1e+30"), "1e+30"},
+		{json.Number("1E30"), "1e+30"},
 	}
 	for _, c := range cases {
 		out, err := CanonicalJSON(map[string]json.Number{"n": c.input})
@@ -105,3 +108,81 @@ func TestJCS_NumberFormatting(t *testing.T) {
 		}
 	}
 }
+
+func TestJCS_RFC8785_AppendixB_Table1(t *testing.T) {
+	// Table 1: ECMAScript-Compatible JSON Number Serialization Samples from RFC 8785 Appendix B
+	table1 := []struct {
+		bits     uint64
+		expected string
+		comment  string
+	}{
+		{0x0000000000000000, "0", "Zero"},
+		{0x8000000000000000, "0", "Minus zero"},
+		{0x0000000000000001, "5e-324", "Min pos number"},
+		{0x8000000000000001, "-5e-324", "Min neg number"},
+		{0x7fefffffffffffff, "1.7976931348623157e+308", "Max pos number"},
+		{0xffefffffffffffff, "-1.7976931348623157e+308", "Max neg number"},
+		{0x4340000000000000, "9007199254740992", "Max pos int (1)"},
+		{0xc340000000000000, "-9007199254740992", "Max neg int (1)"},
+		{0x4430000000000000, "295147905179352830000", "~2**68 (2)"},
+		{0x44b52d02c7e14af5, "9.999999999999997e+22", ""},
+		{0x44b52d02c7e14af6, "1e+23", ""},
+		{0x44b52d02c7e14af7, "1.0000000000000001e+23", ""},
+		{0x444b1ae4d6e2ef4e, "999999999999999700000", ""},
+		{0x444b1ae4d6e2ef4f, "999999999999999900000", ""},
+		{0x444b1ae4d6e2ef50, "1e+21", ""},
+		{0x3eb0c6f7a0b5ed8c, "9.999999999999997e-7", ""},
+		{0x3eb0c6f7a0b5ed8d, "0.000001", ""},
+		{0x41b3de4355555553, "333333333.3333332", ""},
+		{0x41b3de4355555554, "333333333.33333325", ""},
+		{0x41b3de4355555555, "333333333.3333333", ""},
+		{0x41b3de4355555556, "333333333.3333334", ""},
+		{0x41b3de4355555557, "333333333.33333343", ""},
+		{0xbecbf647612f3696, "-0.0000033333333333333333", ""},
+		{0x43143ff3c1cb0959, "1424953923781206.2", "Round to even (4)"},
+	}
+
+	for _, entry := range table1 {
+		val := math.Float64frombits(entry.bits)
+		got, err := FormatJCSFloat(val)
+		if err != nil {
+			t.Errorf("FormatJCSFloat(0x%016x) failed: %v", entry.bits, err)
+			continue
+		}
+		if got != entry.expected {
+			t.Errorf("bits 0x%016x (%s): got %q, want %q", entry.bits, entry.comment, got, entry.expected)
+		}
+	}
+}
+
+func TestJCS_IEEE754_BigIntPrecisionLoss(t *testing.T) {
+	// 9007199254740993 (2^53 + 1) cannot be represented in IEEE-754 float64.
+	// RFC 8785 mandates IEEE-754 semantics: it must round to 9007199254740992.
+	input := map[string]json.Number{
+		"large": json.Number("9007199254740993"),
+	}
+	out, err := CanonicalJSON(input)
+	if err != nil {
+		t.Fatalf("CanonicalJSON failed: %v", err)
+	}
+	expected := `{"large":9007199254740992}`
+	if string(out) != expected {
+		t.Errorf("got %s, want %s", string(out), expected)
+	}
+}
+
+func TestJCS_StructWithInvalidUTF8Rejected(t *testing.T) {
+	type SampleStruct struct {
+		Name  string
+		Value string
+	}
+	bad := SampleStruct{
+		Name:  "valid",
+		Value: "\xed\xa0\x80", // lone surrogate U+D800 in CESU-8
+	}
+	_, err := CanonicalJSON(bad)
+	if err == nil {
+		t.Fatalf("expected error for struct field with lone surrogate, got nil")
+	}
+}
+

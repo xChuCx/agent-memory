@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -80,7 +79,11 @@ func ValidateMemoryPath(root, rel string) (string, error) {
 func checkSymlinkContainment(root, target string) error {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		realRoot = filepath.Clean(root)
+		if os.IsNotExist(err) {
+			realRoot = filepath.Clean(root)
+		} else {
+			return fmt.Errorf("checkSymlinkContainment: eval root %s: %w", root, err)
+		}
 	} else {
 		realRoot = filepath.Clean(realRoot)
 	}
@@ -89,34 +92,36 @@ func checkSymlinkContainment(root, target string) error {
 	curr := target
 	for {
 		if _, err := os.Lstat(curr); err == nil {
-			// Found an existing ancestor.
-			resolved, err := filepath.EvalSymlinks(curr)
-			if err != nil {
-				return fmt.Errorf("ValidateMemoryPath: eval symlinks on %q: %w", curr, err)
-			}
-			if !isSubpath(realRoot, resolved) {
-				return fmt.Errorf("ValidateMemoryPath: path escapes root via symlink: %q resolves to %q", target, resolved)
-			}
-			return nil
+			break
 		}
 		parent := filepath.Dir(curr)
-		if parent == curr || parent == "." {
+		if parent == curr {
 			break
 		}
 		curr = parent
 	}
+
+	resolvedTarget, err := filepath.EvalSymlinks(curr)
+	if err != nil {
+		resolvedTarget = filepath.Clean(curr)
+	} else {
+		resolvedTarget = filepath.Clean(resolvedTarget)
+	}
+
+	if !IsSubpath(realRoot, resolvedTarget) {
+		return fmt.Errorf("checkSymlinkContainment: path %q escapes root via symlinks to %q", target, resolvedTarget)
+	}
+
 	return nil
 }
 
-// isSubpath reports whether target is equal to base or is a descendant of base.
-// It uses filepath.Rel to eliminate prefix-matching ambiguities (e.g. /repo/memory-evil
-// sharing a prefix with /repo/memory).
-func isSubpath(base, target string) bool {
+// IsSubpath returns true if target is equal to base or located strictly within base.
+// Uses filepath.Rel to eliminate string prefix collision bugs (e.g. /a/b-evil vs /a/b).
+func IsSubpath(base, target string) bool {
 	b := filepath.Clean(base)
 	t := filepath.Clean(target)
-	if runtime.GOOS == "windows" {
-		b = strings.ToLower(b)
-		t = strings.ToLower(t)
+	if b == t {
+		return true
 	}
 	rel, err := filepath.Rel(b, t)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -136,6 +141,7 @@ func isSubpath(base, target string) bool {
 //
 //   - meta/index.sqlite and its WAL/SHM companions (the FTS5 shadow index).
 //   - meta/lock (the advisory-lock file).
+//   - meta/nonces.sqlite and its WAL/SHM companions (the persistent NonceStore).
 //
 // Files that are server-interpreted but stored as canonical Markdown or YAML
 // (manifest.yaml, schema.yaml, index.md) are NOT derived in this sense —
@@ -145,6 +151,9 @@ func IsDerivedPath(rel string) bool {
 	case strings.HasPrefix(rel, "meta/index.sqlite"):
 		// Catches index.sqlite, index.sqlite-wal, index.sqlite-shm,
 		// index.sqlite-journal, and any future SQLite sidecar.
+		return true
+	case strings.HasPrefix(rel, "meta/nonces.sqlite"):
+		// Catches nonces.sqlite, nonces.sqlite-wal, nonces.sqlite-shm, etc.
 		return true
 	case rel == "meta/lock":
 		return true

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,39 +43,56 @@ func CanonicalizeRFC8785(v any) ([]byte, error) {
 }
 
 func validateNoLoneSurrogates(v any) error {
-	switch val := v.(type) {
-	case string:
-		if !utf8.ValidString(val) {
-			return errors.New("JCS: invalid UTF-8 or lone surrogate sequence")
+	if v == nil {
+		return nil
+	}
+	return validateReflectValue(reflect.ValueOf(v))
+}
+
+func validateReflectValue(val reflect.Value) error {
+	switch val.Kind() {
+	case reflect.String:
+		s := val.String()
+		if !utf8.ValidString(s) {
+			return errors.New("JCS: invalid UTF-8 sequence")
 		}
-		for _, r := range val {
+		for _, r := range s {
 			if r >= 0xD800 && r <= 0xDFFF {
 				return fmt.Errorf("JCS: lone surrogate U+%04X not allowed", r)
 			}
-		}
-	case map[string]string:
-		for k, s := range val {
-			if err := validateNoLoneSurrogates(k); err != nil {
-				return err
-			}
-			if err := validateNoLoneSurrogates(s); err != nil {
-				return err
+			if r == utf8.RuneError {
+				return errors.New("JCS: invalid Unicode character in string")
 			}
 		}
-	case map[string]any:
-		for k, elem := range val {
-			if err := validateNoLoneSurrogates(k); err != nil {
-				return err
-			}
-			if err := validateNoLoneSurrogates(elem); err != nil {
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < val.Len(); i++ {
+			if err := validateReflectValue(val.Index(i)); err != nil {
 				return err
 			}
 		}
-	case []any:
-		for _, elem := range val {
-			if err := validateNoLoneSurrogates(elem); err != nil {
+	case reflect.Map:
+		for _, k := range val.MapKeys() {
+			if err := validateReflectValue(k); err != nil {
 				return err
 			}
+			if err := validateReflectValue(val.MapIndex(k)); err != nil {
+				return err
+			}
+		}
+	case reflect.Struct:
+		for i := 0; i < val.NumField(); i++ {
+			field := val.Field(i)
+			if val.Type().Field(i).PkgPath != "" {
+				// unexported field
+				continue
+			}
+			if err := validateReflectValue(field); err != nil {
+				return err
+			}
+		}
+	case reflect.Pointer, reflect.Interface:
+		if !val.IsNil() {
+			return validateReflectValue(val.Elem())
 		}
 	}
 	return nil
@@ -101,6 +119,16 @@ func formatJCS(buf *bytes.Buffer, v any) error {
 		if err := formatJCSNumber(buf, val); err != nil {
 			return err
 		}
+	case float64:
+		formatted, err := FormatJCSFloat(val)
+		if err != nil {
+			return err
+		}
+		buf.WriteString(formatted)
+	case int, int8, int16, int32, int64:
+		buf.WriteString(fmt.Sprintf("%d", val))
+	case uint, uint8, uint16, uint32, uint64:
+		buf.WriteString(fmt.Sprintf("%d", val))
 	case []any:
 		buf.WriteByte('[')
 		for i, elem := range val {
@@ -136,12 +164,12 @@ func formatJCS(buf *bytes.Buffer, v any) error {
 		}
 		buf.WriteByte('}')
 	default:
-		return fmt.Errorf("formatJCS: unsupported type %T", v)
+		return fmt.Errorf("JCS: unsupported type %T", v)
 	}
 	return nil
 }
 
-// formatJCSString encodes a string according to RFC 8785 Section 3.2.2.2.
+// formatJCSString serializes a string according to RFC 8785 Section 3.2.2.2.
 func formatJCSString(buf *bytes.Buffer, s string) error {
 	if !utf8.ValidString(s) {
 		return errors.New("JCS: invalid UTF-8 string")
@@ -150,6 +178,9 @@ func formatJCSString(buf *bytes.Buffer, s string) error {
 	for _, r := range s {
 		if r >= 0xD800 && r <= 0xDFFF {
 			return fmt.Errorf("JCS: lone surrogate U+%04X not allowed", r)
+		}
+		if r == utf8.RuneError {
+			return errors.New("JCS: invalid Unicode character in string")
 		}
 		switch r {
 		case '"':
@@ -178,44 +209,55 @@ func formatJCSString(buf *bytes.Buffer, s string) error {
 	return nil
 }
 
-// formatJCSNumber serializes numbers per RFC 8785 Section 3.2.2.3 (ECMAScript Number.toString()).
+// formatJCSNumber serializes numbers per RFC 8785 Section 3.2.2.3.
 func formatJCSNumber(buf *bytes.Buffer, num json.Number) error {
 	s := num.String()
-	if s == "-0" || s == "-0.0" {
-		buf.WriteString("0")
-		return nil
-	}
 	f, err := num.Float64()
 	if err != nil {
 		return fmt.Errorf("JCS: invalid number %q: %w", s, err)
 	}
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return errors.New("JCS: NaN and Infinity are not permitted in JSON")
+	formatted, err := FormatJCSFloat(f)
+	if err != nil {
+		return err
 	}
-	if f == 0 {
-		buf.WriteString("0")
-		return nil
-	}
-
-	abs := math.Abs(f)
-	if abs >= 1e-6 && abs < 1e21 {
-		// Decimal representation per ECMAScript 7.1.12.1
-		if !strings.ContainsAny(s, ".eE") {
-			buf.WriteString(s)
-			return nil
-		}
-		formatted := strconv.FormatFloat(f, 'f', -1, 64)
-		buf.WriteString(formatted)
-		return nil
-	}
-
-	// Exponential representation per ECMAScript 7.1.12.1
-	formatted := strconv.FormatFloat(f, 'e', -1, 64)
-	formatted = strings.ReplaceAll(formatted, "e+", "e")
-	formatted = strings.ReplaceAll(formatted, "e-0", "e-")
-	formatted = strings.ReplaceAll(formatted, "e0", "e")
 	buf.WriteString(formatted)
 	return nil
+}
+
+// FormatJCSFloat formats an IEEE-754 double precision float according to ECMAScript 7.1.12.1 / RFC 8785.
+func FormatJCSFloat(f float64) (string, error) {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return "", errors.New("JCS: NaN and Infinity are not permitted in JSON")
+	}
+	if f == 0 {
+		return "0", nil
+	}
+
+	isNeg := math.Signbit(f)
+	abs := math.Abs(f)
+
+	var res string
+	if abs >= 1e-6 && abs < 1e21 {
+		// Decimal representation per ECMAScript 7.1.12.1
+		res = strconv.FormatFloat(abs, 'f', -1, 64)
+	} else {
+		// Exponential representation per ECMAScript 7.1.12.1
+		expStr := strconv.FormatFloat(abs, 'e', -1, 64)
+		eIdx := strings.IndexByte(expStr, 'e')
+		significand := expStr[:eIdx]
+		expPart := expStr[eIdx+1:]
+		expSign := expPart[0] // '+' or '-'
+		expDigits := strings.TrimLeft(expPart[1:], "0")
+		if expDigits == "" {
+			expDigits = "0"
+		}
+		res = significand + "e" + string(expSign) + expDigits
+	}
+
+	if isNeg {
+		return "-" + res, nil
+	}
+	return res, nil
 }
 
 // compareUTF16 compares two strings by UTF-16 code units per RFC 8785 Section 3.2.3.

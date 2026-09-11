@@ -629,6 +629,10 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (re
 //
 // intent and rationale are passed through to the optional git auto-stage
 // step at the end so the commit message can identify the change.
+// atomicWriteFile is the atomic write implementation used by applyImmediately.
+// Package-scoped to allow failure injection testing of multi-file rollback.
+var atomicWriteFile = agentfs.WriteAtomic
+
 func applyImmediately(
 	ctx context.Context,
 	deps UpdateDeps,
@@ -666,25 +670,35 @@ func applyImmediately(
 		}
 	}
 
-	rollback := func(appliedCount int) {
+	rollback := func(appliedCount int) error {
+		var errs []error
 		for i := 0; i < appliedCount; i++ {
 			b := backups[i]
 			if b.existed {
-				_ = agentfs.WriteAtomic(b.abs, b.orig, b.perm)
+				if err := atomicWriteFile(b.abs, b.orig, b.perm); err != nil {
+					errs = append(errs, fmt.Errorf("restore %s: %w", b.abs, err))
+				}
 			} else {
-				_ = os.Remove(b.abs)
+				if err := os.Remove(b.abs); err != nil && !os.IsNotExist(err) {
+					errs = append(errs, fmt.Errorf("remove %s: %w", b.abs, err))
+				}
 			}
 		}
+		return errors.Join(errs...)
 	}
 
 	for i, rel := range fileOrder {
 		abs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
-			rollback(i)
+			if rerr := rollback(i); rerr != nil {
+				return nil, fmt.Errorf("applyImmediately: mkdir %s: %w; rollback incomplete: %v", filepath.Dir(abs), err, rerr)
+			}
 			return nil, fmt.Errorf("applyImmediately: mkdir %s: %w", filepath.Dir(abs), err)
 		}
-		if err := agentfs.WriteAtomic(abs, postState[rel], 0644); err != nil {
-			rollback(i)
+		if err := atomicWriteFile(abs, postState[rel], 0644); err != nil {
+			if rerr := rollback(i); rerr != nil {
+				return nil, fmt.Errorf("applyImmediately: write %s: %w; rollback incomplete: %v", rel, err, rerr)
+			}
 			return nil, fmt.Errorf("applyImmediately: write %s: %w", rel, err)
 		}
 	}
@@ -991,17 +1005,6 @@ func readPreState(memDir, rel string) ([]byte, error) {
 	return b, nil
 }
 
-// containsNewSectionOp returns true if any op in ops creates a new section
-// (informs ProvenanceContext.IsNewSection).
-func containsNewSectionOp(ops []Operation) bool {
-	for _, op := range ops {
-		switch op.Kind() {
-		case "create_file", "append_section":
-			return true
-		}
-	}
-	return false
-}
 
 // categoryHasNewSection returns true if any operation targeting the given category
 // creates a new section (append_section, insert_section, or create_file).

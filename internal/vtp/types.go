@@ -103,6 +103,7 @@ type TrustedKeyBinding struct {
 	PublicKey ed25519.PublicKey `json:"-" yaml:"-"`
 	Issuer    string            `json:"issuer,omitempty" yaml:"issuer,omitempty"`
 	RunnerID  string            `json:"runner_id,omitempty" yaml:"runner_id,omitempty"`
+	Verifier  string            `json:"verifier,omitempty" yaml:"verifier,omitempty"`
 }
 
 // SandboxAttestation captures cryptographically bound evidence of sandbox isolation (SAR-006 / second-thought audit #22398, #22431).

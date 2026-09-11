@@ -100,9 +100,29 @@ func ListStaged(memDir string) ([]StagedProposal, error) {
 	return out, nil
 }
 
+// ValidateStagingID ensures stagingID is safe against directory traversal and path manipulation.
+func ValidateStagingID(stagingID string) error {
+	if stagingID == "" {
+		return errors.New("staging ID cannot be empty")
+	}
+	if stagingID == "." || stagingID == ".." {
+		return errors.New("invalid staging ID")
+	}
+	if strings.HasPrefix(stagingID, ".") {
+		return errors.New("staging ID cannot start with dot")
+	}
+	if strings.ContainsAny(stagingID, `/\: *?"<>|` + "\x00") {
+		return errors.New("staging ID contains invalid characters or path separators")
+	}
+	return nil
+}
+
 // LoadStaged reads staging/<stagingID>/proposal.json and returns the parsed
 // envelope. Returns a wrapped error when the directory or file is missing.
 func LoadStaged(memDir, stagingID string) (*StagedProposal, error) {
+	if err := ValidateStagingID(stagingID); err != nil {
+		return nil, fmt.Errorf("LoadStaged %s: %w", stagingID, err)
+	}
 	path := filepath.Join(memDir, "staging", stagingID, "proposal.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -118,6 +138,9 @@ func LoadStaged(memDir, stagingID string) (*StagedProposal, error) {
 // LoadStagedTargets reads staging/<stagingID>/target-checksums.json. Used
 // by apply to re-verify drift policies against the current disk state.
 func LoadStagedTargets(memDir, stagingID string) ([]OperationTarget, error) {
+	if err := ValidateStagingID(stagingID); err != nil {
+		return nil, fmt.Errorf("LoadStagedTargets %s: %w", stagingID, err)
+	}
 	path := filepath.Join(memDir, "staging", stagingID, "target-checksums.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -133,6 +156,9 @@ func LoadStagedTargets(memDir, stagingID string) ([]OperationTarget, error) {
 // StagingExists reports whether staging/<stagingID>/ is a directory under
 // memDir. Cheap probe used by review/apply/reject before doing heavier work.
 func StagingExists(memDir, stagingID string) bool {
+	if err := ValidateStagingID(stagingID); err != nil {
+		return false
+	}
 	st, err := os.Stat(filepath.Join(memDir, "staging", stagingID))
 	return err == nil && st.IsDir()
 }
@@ -232,7 +258,10 @@ func ResolveStagingID(memDir, ref string) (string, error) {
 //
 //   RequireFilePresent: the file must exist. An absent file is drift.
 func CheckDrift(memDir string, t OperationTarget) (*DriftReport, error) {
-	abs := filepath.Join(memDir, filepath.FromSlash(t.Path))
+	abs, err := agentfs.ValidateMemoryPath(memDir, t.Path)
+	if err != nil {
+		return nil, fmt.Errorf("CheckDrift: invalid target path %q: %w", t.Path, err)
+	}
 
 	switch t.Policy {
 	case RequireFileAbsent:
@@ -344,6 +373,9 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 	if deps.Manifest == nil || deps.Schema == nil || deps.MemoryDir == "" {
 		return nil, errors.New("ApplyStaged: deps.Manifest, deps.Schema, deps.MemoryDir are required")
 	}
+	if err := ValidateStagingID(stagingID); err != nil {
+		return nil, fmt.Errorf("ApplyStaged: %w", err)
+	}
 	if !StagingExists(deps.MemoryDir, stagingID) {
 		return &ApplyResult{
 			StagingID: stagingID,
@@ -381,6 +413,11 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 	proposal, err := LoadStaged(deps.MemoryDir, stagingID)
 	if err != nil {
 		return nil, fmt.Errorf("ApplyStaged: load proposal: %w", err)
+	}
+	for _, rel := range proposal.Files {
+		if _, err := agentfs.ValidateMemoryPath(deps.MemoryDir, rel); err != nil {
+			return nil, fmt.Errorf("ApplyStaged: invalid proposal file %q: %w", rel, err)
+		}
 	}
 	targets, err := LoadStagedTargets(deps.MemoryDir, stagingID)
 	if err != nil {
@@ -430,15 +467,24 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 		}
 	}
 
-	rollback := func(appliedCount int) {
+	rollback := func(appliedCount int) error {
+		var errs []string
 		for i := 0; i < appliedCount; i++ {
 			b := backups[i]
 			if b.existed {
-				_ = agentfs.WriteAtomic(b.abs, b.orig, b.perm)
+				if werr := atomicWriteFile(b.abs, b.orig, b.perm); werr != nil {
+					errs = append(errs, fmt.Sprintf("restore %s: %v", b.abs, werr))
+				}
 			} else {
-				_ = os.Remove(b.abs)
+				if rerr := os.Remove(b.abs); rerr != nil && !os.IsNotExist(rerr) {
+					errs = append(errs, fmt.Sprintf("remove %s: %v", b.abs, rerr))
+				}
 			}
 		}
+		if len(errs) > 0 {
+			return errors.New(strings.Join(errs, "; "))
+		}
+		return nil
 	}
 
 	for i, rel := range proposal.Files {
@@ -446,15 +492,21 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 		dstAbs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
 		body, err := os.ReadFile(srcAbs)
 		if err != nil {
-			rollback(i)
+			if rerr := rollback(i); rerr != nil {
+				return nil, fmt.Errorf("ApplyStaged: read staged %s: %w; rollback incomplete: %v", rel, err, rerr)
+			}
 			return nil, fmt.Errorf("ApplyStaged: read staged %s: %w", rel, err)
 		}
 		if err := os.MkdirAll(filepath.Dir(dstAbs), 0755); err != nil {
-			rollback(i)
+			if rerr := rollback(i); rerr != nil {
+				return nil, fmt.Errorf("ApplyStaged: mkdir %s: %w; rollback incomplete: %v", filepath.Dir(dstAbs), err, rerr)
+			}
 			return nil, fmt.Errorf("ApplyStaged: mkdir %s: %w", filepath.Dir(dstAbs), err)
 		}
-		if err := agentfs.WriteAtomic(dstAbs, body, 0644); err != nil {
-			rollback(i)
+		if err := atomicWriteFile(dstAbs, body, 0644); err != nil {
+			if rerr := rollback(i); rerr != nil {
+				return nil, fmt.Errorf("ApplyStaged: write %s: %w; rollback incomplete: %v", rel, err, rerr)
+			}
 			return nil, fmt.Errorf("ApplyStaged: write %s: %w", rel, err)
 		}
 	}
@@ -518,6 +570,9 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 // undo the removal. See sweep.go for the shared rejectStagedWithReason
 // helper that also serves the TTL sweeper.
 func RejectStaged(memDir, stagingID string) (*ApplyResult, error) {
+	if err := ValidateStagingID(stagingID); err != nil {
+		return nil, fmt.Errorf("RejectStaged: %w", err)
+	}
 	if !StagingExists(memDir, stagingID) {
 		return &ApplyResult{
 			StagingID: stagingID,

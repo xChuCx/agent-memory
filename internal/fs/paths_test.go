@@ -145,12 +145,12 @@ func TestValidateMemoryPath_RootPrefixCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// isSubpath must reject memory-evil against memory
-	if isSubpath(root, filepath.Join(evilDir, "secret.md")) {
-		t.Errorf("isSubpath allowed memory-evil to match memory prefix")
+	// IsSubpath must reject memory-evil against memory
+	if IsSubpath(root, filepath.Join(evilDir, "secret.md")) {
+		t.Errorf("IsSubpath allowed memory-evil to match memory prefix")
 	}
-	if !isSubpath(root, filepath.Join(root, "valid.md")) {
-		t.Errorf("isSubpath rejected legitimate child of memory")
+	if !IsSubpath(root, filepath.Join(root, "valid.md")) {
+		t.Errorf("IsSubpath rejected legitimate child of memory")
 	}
 }
 

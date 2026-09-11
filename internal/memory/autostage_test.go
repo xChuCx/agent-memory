@@ -150,6 +150,9 @@ func gitRepoFixture(t *testing.T) (root string, deps UpdateDeps) {
 	mf, sch := makeMemoryDir(t, memDir)
 	mf.Git.AutoStageChanges = true
 	mf.Git.AutoCommit = true
+	t.Cleanup(func() {
+		_ = DefaultNonceStore.Close()
+	})
 	deps = UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir}
 	return root, deps
 }

@@ -160,27 +160,45 @@ func VerifyReceiptWithAllowlist(spec *TaskSpec, receipt *TaskReceipt, actualStdo
 	}
 
 	// Oracle assertions check: receipt executed assertions must satisfy declared spec assertions.
-	// If identifiable AssertionResults are provided, each declared assertion must be reported passed.
-	// Otherwise, fallback to verifying coverage count.
+	// Identifiable AssertionResults are mandatory when spec declares assertions.
 	if len(spec.Oracle.Assertions) > 0 {
-		if len(receipt.Execution.AssertionResults) > 0 {
-			passedMap := make(map[string]bool, len(receipt.Execution.AssertionResults))
-			for _, ar := range receipt.Execution.AssertionResults {
-				if ar.Passed {
-					passedMap[ar.ID] = true
-				}
-			}
-			for _, expected := range spec.Oracle.Assertions {
-				if !passedMap[expected] {
-					verify.Verdict = "FAIL"
-					verify.Basis = "UNSATISFIED_ASSERTIONS"
-					return verify, nil
-				}
-			}
-		} else if receipt.Execution.ExecutedAssertions < len(spec.Oracle.Assertions) {
+		if len(receipt.Execution.AssertionResults) == 0 {
 			verify.Verdict = "FAIL"
 			verify.Basis = "UNSATISFIED_ASSERTIONS"
 			return verify, nil
+		}
+
+		expectedMap := make(map[string]bool, len(spec.Oracle.Assertions))
+		for _, expected := range spec.Oracle.Assertions {
+			expectedMap[expected] = true
+		}
+
+		seen := make(map[string]bool, len(receipt.Execution.AssertionResults))
+		for _, ar := range receipt.Execution.AssertionResults {
+			if !expectedMap[ar.ID] {
+				verify.Verdict = "FAIL"
+				verify.Basis = "UNKNOWN_ASSERTION_ID"
+				return verify, nil
+			}
+			if seen[ar.ID] {
+				verify.Verdict = "FAIL"
+				verify.Basis = "DUPLICATE_ASSERTION_RESULT"
+				return verify, nil
+			}
+			if !ar.Passed {
+				verify.Verdict = "FAIL"
+				verify.Basis = "UNSATISFIED_ASSERTIONS"
+				return verify, nil
+			}
+			seen[ar.ID] = true
+		}
+
+		for _, expected := range spec.Oracle.Assertions {
+			if !seen[expected] {
+				verify.Verdict = "FAIL"
+				verify.Basis = "UNSATISFIED_ASSERTIONS"
+				return verify, nil
+			}
 		}
 	}
 
@@ -548,6 +566,13 @@ func SettleTaskWithAllowlist(spec *TaskSpec, verify *TaskVerify, payer, payee st
 		pubKey, ok := allowlist.PublicKeys[verify.VerifierKeyID]
 		if !ok {
 			return nil, fmt.Errorf("cannot settle: verifier key %q not found in allowlist", verify.VerifierKeyID)
+		}
+		if allowlist.KeyBindings != nil {
+			if binding, ok := allowlist.KeyBindings[verify.VerifierKeyID]; ok {
+				if binding.Verifier != "" && verify.Verifier != "" && binding.Verifier != verify.Verifier {
+					return nil, fmt.Errorf("cannot settle: verifier key %q is bound to verifier %q, but verification claims %q", verify.VerifierKeyID, binding.Verifier, verify.Verifier)
+				}
+			}
 		}
 		valid, err := VerifyTaskVerifySignature(verify, pubKey)
 		if err != nil || !valid {

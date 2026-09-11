@@ -1,16 +1,17 @@
 package memory
 
 import (
-	"encoding/json"
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"strings"
 	"sync"
 	"time"
 
-	agentfs "github.com/xChuCx/agent-memory/internal/fs"
+	_ "modernc.org/sqlite"
 )
 
 var (
@@ -22,23 +23,15 @@ var (
 	ErrDigestMismatch = errors.New("pack_digest does not match issued context pack")
 )
 
-// NonceRecord tracks an issued proof-of-ingestion capability.
-type NonceRecord struct {
-	Nonce      string    `json:"nonce"`
-	PackDigest string    `json:"pack_digest"`
-	IssuedAt   time.Time `json:"issued_at"`
-	Consumed   bool      `json:"consumed"`
-}
-
 const (
 	DefaultNonceTTL    = 10 * time.Minute
 	DefaultNonceMaxCap = 1000
 )
 
-// NonceStore provides thread-safe and repo-scoped persistent lifecycle tracking for SAR-008 freshness tokens.
+// NonceStore provides SQLite-backed atomic cross-process single-use token tracking (SAR-008).
 type NonceStore struct {
 	mu          sync.Mutex
-	nonces      map[string]*NonceRecord
+	db          *sql.DB
 	ttl         time.Duration
 	storagePath string
 	maxCapacity int
@@ -49,135 +42,226 @@ func NewNonceStore(ttl time.Duration) *NonceStore {
 	if ttl <= 0 {
 		ttl = DefaultNonceTTL
 	}
-	return &NonceStore{
-		nonces:      make(map[string]*NonceRecord),
+	s := &NonceStore{
 		ttl:         ttl,
 		maxCapacity: DefaultNonceMaxCap,
 	}
+	db, err := openNonceDB(":memory:")
+	if err == nil {
+		s.db = db
+	}
+	return s
 }
 
-// DefaultNonceStore is the active token registry.
+// openNonceDB opens an SQLite database with WAL mode, busy timeout, and the nonces schema.
+func openNonceDB(dsn string) (*sql.DB, error) {
+	connStr := dsn
+	if !strings.Contains(connStr, "_txlock=") {
+		if strings.Contains(connStr, "?") {
+			connStr += "&_txlock=immediate"
+		} else {
+			connStr += "?_txlock=immediate"
+		}
+	}
+	db, err := sql.Open("sqlite", connStr)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite %s: %w", dsn, err)
+	}
+	db.SetMaxOpenConns(1)
+
+	pragmas := []string{
+		"PRAGMA busy_timeout = 5000;",
+		"PRAGMA journal_mode = WAL;",
+		"PRAGMA synchronous = NORMAL;",
+	}
+	for _, p := range pragmas {
+		_, _ = db.Exec(p)
+	}
+
+	schema := `
+	CREATE TABLE IF NOT EXISTS nonces (
+		nonce       TEXT PRIMARY KEY,
+		pack_digest TEXT NOT NULL,
+		issued_at   INTEGER NOT NULL,
+		consumed_at INTEGER
+	);
+	CREATE INDEX IF NOT EXISTS idx_nonces_issued_at ON nonces(issued_at);
+	`
+	if _, err := db.Exec(schema); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("init nonces schema: %w", err)
+	}
+	return db, nil
+}
+
+// DefaultNonceStore is the active process token registry.
 var DefaultNonceStore = NewNonceStore(DefaultNonceTTL)
 
-// SetStorageDir configures the persistent store path within the given memory directory (.agent-memory/meta/nonces.json).
-func (s *NonceStore) SetStorageDir(memDir string) {
+// SetStorageDir binds the NonceStore to a persistent repo-scoped SQLite database (.agent-memory/meta/nonces.sqlite).
+func (s *NonceStore) SetStorageDir(memDir string) error {
 	if memDir == "" {
-		return
+		return nil
 	}
-	s.SetStoragePath(filepath.Join(memDir, "meta", "nonces.json"))
+	return s.SetStoragePath(filepath.Join(memDir, "meta", "nonces.sqlite"))
 }
 
-// SetStoragePath binds the NonceStore to a persistent repo-scoped file.
-func (s *NonceStore) SetStoragePath(path string) {
+// SetStoragePath binds the NonceStore to an explicit SQLite database path, closing any previous database.
+func (s *NonceStore) SetStoragePath(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.storagePath == path {
+		return nil
+	}
+
+	if s.db != nil {
+		_ = s.db.Close()
+		s.db = nil
+	}
 	s.storagePath = path
-	s.loadLocked()
-}
 
-func (s *NonceStore) loadLocked() {
-	if s.storagePath == "" {
-		return
-	}
-	data, err := os.ReadFile(s.storagePath)
-	if err != nil {
-		return
-	}
-	var stored map[string]*NonceRecord
-	if err := json.Unmarshal(data, &stored); err == nil && stored != nil {
-		now := time.Now()
-		for k, rec := range stored {
-			// Only keep unexpired records
-			if now.Sub(rec.IssuedAt) <= s.ttl {
-				s.nonces[k] = rec
-			}
+	if path != "" {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return fmt.Errorf("mkdir for nonces db: %w", err)
 		}
-	}
-}
-
-func (s *NonceStore) saveLocked() {
-	if s.storagePath == "" {
-		return
-	}
-	now := time.Now()
-	// Sweep expired
-	for k, rec := range s.nonces {
-		if now.Sub(rec.IssuedAt) > s.ttl {
-			delete(s.nonces, k)
+		db, err := openNonceDB(path)
+		if err != nil {
+			return err
 		}
+		_ = db.Close()
 	}
-	// Bound capacity
-	if len(s.nonces) > s.maxCapacity {
-		type kv struct {
-			k string
-			t time.Time
-		}
-		list := make([]kv, 0, len(s.nonces))
-		for k, rec := range s.nonces {
-			list = append(list, kv{k, rec.IssuedAt})
-		}
-		sort.Slice(list, func(i, j int) bool { return list[i].t.Before(list[j].t) })
-		excess := len(s.nonces) - s.maxCapacity
-		for i := 0; i < excess; i++ {
-			delete(s.nonces, list[i].k)
-		}
-	}
-
-	data, err := json.MarshalIndent(s.nonces, "", "  ")
-	if err != nil {
-		return
-	}
-	_ = os.MkdirAll(filepath.Dir(s.storagePath), 0755)
-	_ = agentfs.WriteAtomic(s.storagePath, data, 0644)
-}
-
-// Issue registers a new read nonce bound to a canonical pack digest and persists it to disk.
-func (s *NonceStore) Issue(nonce, packDigest string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.loadLocked()
-	s.nonces[nonce] = &NonceRecord{
-		Nonce:      nonce,
-		PackDigest: packDigest,
-		IssuedAt:   time.Now(),
-		Consumed:   false,
-	}
-	s.saveLocked()
-}
-
-// Consume validates and marks a nonce as consumed in a single atomic operation.
-// Returns an error if the nonce is missing, expired, already consumed, or digest mismatches.
-func (s *NonceStore) Consume(nonce, packDigest string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.loadLocked()
-
-	rec, ok := s.nonces[nonce]
-	if !ok {
-		return ErrNonceNotFound
-	}
-	if rec.Consumed {
-		return ErrNonceConsumed
-	}
-	if time.Since(rec.IssuedAt) > s.ttl {
-		delete(s.nonces, nonce)
-		s.saveLocked()
-		return ErrNonceNotFound
-	}
-	if rec.PackDigest != "" && packDigest != "" && rec.PackDigest != packDigest {
-		return fmt.Errorf("%w: expected %s, got %s", ErrDigestMismatch, rec.PackDigest, packDigest)
-	}
-	rec.Consumed = true
-	s.saveLocked()
 	return nil
 }
 
-// InvalidateAll flushes all pending nonces when memory is mutated and clears disk state.
-func (s *NonceStore) InvalidateAll() {
+func (s *NonceStore) withDB(fn func(db *sql.DB) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.nonces = make(map[string]*NonceRecord)
-	if s.storagePath != "" {
-		_ = os.Remove(s.storagePath)
+
+	if s.storagePath == "" {
+		if s.db == nil {
+			db, err := openNonceDB(":memory:")
+			if err != nil {
+				return err
+			}
+			s.db = db
+		}
+		return fn(s.db)
 	}
+
+	db, err := openNonceDB(s.storagePath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	return fn(db)
+}
+
+// Issue registers a new read nonce bound to a canonical pack digest and persists it.
+func (s *NonceStore) Issue(nonce, packDigest string) error {
+	return s.withDB(func(db *sql.DB) error {
+		now := time.Now().UnixNano()
+		minIssuedAt := now - s.ttl.Nanoseconds()
+
+		// Sweep expired entries
+		_, _ = db.Exec("DELETE FROM nonces WHERE issued_at < ?", minIssuedAt)
+
+		// Enforce bounded capacity
+		_, _ = db.Exec(`
+			DELETE FROM nonces 
+			WHERE nonce NOT IN (
+				SELECT nonce FROM nonces ORDER BY issued_at DESC LIMIT ?
+			)`, s.maxCapacity)
+
+		_, err := db.Exec(
+			"INSERT OR REPLACE INTO nonces (nonce, pack_digest, issued_at, consumed_at) VALUES (?, ?, ?, NULL)",
+			nonce, packDigest, now,
+		)
+		if err != nil {
+			return fmt.Errorf("issue nonce: %w", err)
+		}
+		return nil
+	})
+}
+
+// Consume validates and marks a nonce as consumed in an atomic cross-process transaction.
+// Returns an error if the nonce is missing, expired, already consumed, or digest mismatches.
+func (s *NonceStore) Consume(nonce, packDigest string) error {
+	return s.withDB(func(db *sql.DB) error {
+		now := time.Now().UnixNano()
+		minIssuedAt := now - s.ttl.Nanoseconds()
+
+		tx, err := db.BeginTx(context.Background(), nil)
+		if err != nil {
+			return fmt.Errorf("begin immediate tx: %w", err)
+		}
+		defer tx.Rollback()
+
+		var rowDigest string
+		var issuedAt int64
+		var consumedAt sql.NullInt64
+
+		err = tx.QueryRow(
+			"SELECT pack_digest, issued_at, consumed_at FROM nonces WHERE nonce = ?",
+			nonce,
+		).Scan(&rowDigest, &issuedAt, &consumedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNonceNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("query nonce: %w", err)
+		}
+
+		if issuedAt < minIssuedAt {
+			return ErrNonceNotFound
+		}
+		if consumedAt.Valid {
+			return ErrNonceConsumed
+		}
+		if rowDigest != packDigest {
+			return ErrDigestMismatch
+		}
+
+		res, err := tx.Exec("UPDATE nonces SET consumed_at = ? WHERE nonce = ? AND consumed_at IS NULL", now, nonce)
+		if err != nil {
+			return fmt.Errorf("consume update: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("rows affected: %w", err)
+		}
+		if affected != 1 {
+			return ErrNonceConsumed
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit consume: %w", err)
+		}
+		return nil
+	})
+}
+
+// InvalidateAll deletes all recorded nonces upon memory mutation.
+func (s *NonceStore) InvalidateAll() error {
+	return s.withDB(func(db *sql.DB) error {
+		_, err := db.Exec("DELETE FROM nonces")
+		if err != nil {
+			return fmt.Errorf("invalidate all nonces: %w", err)
+		}
+		return nil
+	})
+}
+
+// Close releases the underlying SQLite database resources.
+func (s *NonceStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.storagePath = ""
+	if s.db != nil {
+		err := s.db.Close()
+		s.db = nil
+		return err
+	}
+	return nil
 }

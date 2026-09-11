@@ -18,6 +18,7 @@ package memory
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
@@ -270,8 +271,10 @@ func computeProofOfIngestion(packStr string) (string, string) {
 	packBytes := []byte(packStr)
 	h := sha256.Sum256(packBytes)
 	digest := fmt.Sprintf("sha256:%x", h)
-	nonce := fmt.Sprintf("poi-%x-%d", h[:8], time.Now().UnixNano())
-	DefaultNonceStore.Issue(nonce, digest)
+	randBytes := make([]byte, 4)
+	_, _ = rand.Read(randBytes)
+	nonce := fmt.Sprintf("poi-%x-%d-%x", h[:8], time.Now().UnixNano(), randBytes)
+	_ = DefaultNonceStore.Issue(nonce, digest)
 	return digest, nonce
 }
 
