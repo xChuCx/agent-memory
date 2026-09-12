@@ -195,7 +195,7 @@ func (s *NonceStore) Consume(nonce, packDigest string) error {
 		if err != nil {
 			return fmt.Errorf("begin immediate tx: %w", err)
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		var rowDigest string
 		var issuedAt int64

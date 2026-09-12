@@ -572,7 +572,11 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (re
 
 	// (7.1) Validate and consume one-shot Proof-of-Grounding capability if provided (SAR-008).
 	if req.Grounding != nil && req.Grounding.ReadNonce != "" {
-		DefaultNonceStore.SetStorageDir(deps.MemoryDir)
+		if err := DefaultNonceStore.SetStorageDir(deps.MemoryDir); err != nil {
+			return rejectWithProvViolations(ReasonProvenanceViolation,
+				fmt.Sprintf("grounding verification failed: %v", err),
+				[]string{err.Error()}), nil
+		}
 		if err := DefaultNonceStore.Consume(req.Grounding.ReadNonce, req.Grounding.PackDigest); err != nil {
 			return rejectWithProvViolations(ReasonProvenanceViolation,
 				fmt.Sprintf("grounding verification failed: %v", err),
@@ -704,8 +708,8 @@ func applyImmediately(
 	}
 
 	// Invalidate pending read nonces now that durable memory state has mutated (SAR-008).
-	DefaultNonceStore.SetStorageDir(deps.MemoryDir)
-	DefaultNonceStore.InvalidateAll()
+	_ = DefaultNonceStore.SetStorageDir(deps.MemoryDir)
+	_ = DefaultNonceStore.InvalidateAll()
 
 	// Re-index touched files. Errors here do NOT roll back the write — the
 	// bytes are durable and the index can be rebuilt via `rebuild-index`.

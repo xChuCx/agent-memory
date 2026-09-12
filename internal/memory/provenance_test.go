@@ -254,7 +254,9 @@ func TestNonceStore_Lifecycle(t *testing.T) {
 	digest := "sha256:abcd"
 
 	// 1. Issue
-	store.Issue(nonce, digest)
+	if err := store.Issue(nonce, digest); err != nil {
+		t.Fatalf("unexpected issue error: %v", err)
+	}
 
 	// 2. Consume with wrong digest fails
 	if err := store.Consume(nonce, "sha256:wrong"); err == nil {
@@ -272,8 +274,12 @@ func TestNonceStore_Lifecycle(t *testing.T) {
 	}
 
 	// 5. InvalidateAll clears everything
-	store.Issue("poi-2", "sha256:2222")
-	store.InvalidateAll()
+	if err := store.Issue("poi-2", "sha256:2222"); err != nil {
+		t.Fatalf("unexpected issue error: %v", err)
+	}
+	if err := store.InvalidateAll(); err != nil {
+		t.Fatalf("unexpected invalidate error: %v", err)
+	}
 	if err := store.Consume("poi-2", "sha256:2222"); err != ErrNonceNotFound {
 		t.Fatalf("expected ErrNonceNotFound after InvalidateAll, got %v", err)
 	}
@@ -341,9 +347,11 @@ func TestNonceStore_Persistent_CrossProcessSyncAndSweep(t *testing.T) {
 	sweepStore := NewNonceStore(50 * time.Millisecond)
 	sweepPath := filepath.Join(tempDir, "meta", "sweep.sqlite")
 	_ = sweepStore.SetStoragePath(sweepPath)
-	defer sweepStore.Close()
+	defer func() { _ = sweepStore.Close() }()
 
-	sweepStore.Issue("poi-short-lived", "sha256:2222")
+	if err := sweepStore.Issue("poi-short-lived", "sha256:2222"); err != nil {
+		t.Fatalf("unexpected issue error: %v", err)
+	}
 	time.Sleep(150 * time.Millisecond)
 	if err := sweepStore.Consume("poi-short-lived", "sha256:2222"); err != ErrNonceNotFound {
 		t.Fatalf("expected ErrNonceNotFound after TTL expiry, got %v", err)
@@ -358,7 +366,7 @@ func TestNonceStore_InvalidateAll_RejectsStalePostMutation(t *testing.T) {
 	if err := store.SetStoragePath(storePath); err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := store.Issue("poi-context-a", "sha256:aaaa"); err != nil {
 		t.Fatal(err)

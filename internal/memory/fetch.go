@@ -167,7 +167,7 @@ func (d FetchDeps) log() *slog.Logger {
 // into FetchResponse.
 func BuildContextPack(ctx context.Context, req FetchRequest, deps FetchDeps) (resp *FetchResponse, err error) {
 	if deps.MemoryDir != "" {
-		DefaultNonceStore.SetStorageDir(deps.MemoryDir)
+		_ = DefaultNonceStore.SetStorageDir(deps.MemoryDir)
 	}
 	budget := req.Budget
 	if budget <= 0 {

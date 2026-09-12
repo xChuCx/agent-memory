@@ -512,8 +512,8 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 	}
 
 	// Invalidate pending read nonces now that durable memory state has mutated (SAR-008).
-	DefaultNonceStore.SetStorageDir(deps.MemoryDir)
-	DefaultNonceStore.InvalidateAll()
+	_ = DefaultNonceStore.SetStorageDir(deps.MemoryDir)
+	_ = DefaultNonceStore.InvalidateAll()
 
 	// Best-effort re-index. Index errors don't roll back the writes — bytes
 	// are durable and rebuild-index can repair.
