@@ -60,25 +60,28 @@ agent-memory is the *durable, searchable, reviewed knowledge* behind it.
 
 ## Status
 
-**Release 0.5.4** — the **Verifiable Task Protocol (VTP-1) & Swarm Consensus** release:
-bridges durable memory with verifiable autonomous multi-agent execution. Agents in a swarm
-no longer rely on unverified claims; work is proven by machine-executable receipts,
-CRLF-invariant SHA-256 Merkle roots, and independent dual-oracle verification.
+**Release 0.6.0** — the **Proof of Memory Consumption & Anti-Ornamental Hardening** release:
+bridges durable memory with verifiable autonomous execution and strict fail-closed security invariants:
 
-- **VTP-1 Protocol Engine (`internal/vtp`)** — 5-phase contract lifecycle (`TASK-SPEC`,
-  `TASK-CLAIM`, `TASK-RECEIPT`, `TASK-VERIFY`, `TASK-SETTLE`).
-- **SAR-002 LF Normalization** — Cross-platform byte-level digest parity across Windows NTFS,
-  macOS, and Linux runners (`\r\n` stripped before hashing).
-- **Workpool/0 Clause B Disjoint Seat Enforcement** — Verifications fail closed unless
-  executed on an isolated seat physically or logically distinct from the task worker.
-- **`agent-memory vtp` CLI** — `digest`, `verify`, and `settle` subcommands built into
-  the main binary.
-- **`agent-memory digest` (0.5.2)** — Deterministic SHA-256 Merkle root of active memory
-  for cryptographic state attestation.
+- **SAR-008 Grounding Gating & Single-Use Read Nonces (`internal/memory`)** — Resolves the
+  "Decorative Memory Paradox". `fetch_context` emits content-addressable `pack_digest` and
+  episodic continuity `read_nonce` (`poi-<hash[:8]>-<timestamp_ns>`). `propose_update` requires
+  a `GroundingReceipt` citing an active anchor, rejecting ungrounded proposals under `provenance_violation`.
+- **RFC 8785 (JCS) Determinism (`internal/vtp`)** — Strict JSON Canonicalization Scheme compliance
+  passing all 26 official RFC 8785 Appendix B test vectors, ECMAScript float formatting (`1e+21`),
+  lone surrogate rejection, and recursive UTF-8 validation.
+- **Fail-Closed Cross-Process SQLite NonceStore (`internal/memory/nonce.go`)** — Persistent
+  repo-scoped store using the `withDB` pattern to eliminate Windows file descriptor locks,
+  providing zero-drift atomic validation and auto-sweeping expired nonces.
+- **Two-Phase Staging & Compound Rollback (`internal/memory/staging.go`)** — Strict path traversal
+  sanitization (`ValidateStagingID`, `agentfs.ValidateMemoryPath`), symlink containment, and
+  atomic multi-file rollback reporting `RollbackIncomplete` compound errors on partial failure.
+- **VTP-1 Strict Assertion Identification & Dual-Oracle Settlement (`internal/vtp`)** — Mandatory
+  identifiable `AssertionResults` matching declared assertion IDs, verifier key binding validation,
+  and Workpool/0 Clause B disjoint seat enforcement.
 
-It builds on **0.5.0** (the **federation** release: referenced landscape stores, `meta/stores.lock`,
-`agent-memory sync`, multi-store FTS5 search) and **0.4** (team-and-launch release: section-aware git merge
-driver, offline retrieval-quality eval at recall@5 0.98, Apache-2.0 open-source packaging).
+It builds on **0.5.4** (VTP-1 initial protocol engine, Clause B disjoint seats), **0.5.0** (federation,
+referenced landscape stores, `meta/stores.lock`), and **0.4** (section merge driver, offline eval at recall@5 0.98).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full changelist.
 

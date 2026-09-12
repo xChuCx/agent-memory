@@ -41,6 +41,13 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - Aligned SAR-006 to Six-Signal Skill Evaluation & Hermeticity Contract.
   - Formalized multi-store retrieval evaluation in `internal/eval/federation_test.go` (PR6).
 
+- **Round 3 Comprehensive Security Hardening (`internal/vtp`, `internal/memory`, `internal/fs`).**
+  - **RFC 8785 Appendix B Full Conformance (`internal/vtp/jcs.go`, `jcs_test.go`):** Implemented strict ECMAScript float formatting (`1e+21`, `1e+30`), IEEE-754 double conversion, lone surrogate rejection (`\uD800`–`\uDFFF`), and recursive UTF-8 validation across arbitrary JSON structures. All 26 official RFC 8785 Appendix B test vectors passing.
+  - **VTP-1 Strict Assertion Identification & Key Binding (`internal/vtp/vtp.go`):** Mandated identifiable `AssertionResults` when oracle assertions declared; fail-closed rejection of duplicates (`DUPLICATE_ASSERTION_RESULT`), unknowns (`UNKNOWN_ASSERTION_ID`), and failed checks (`ASSERTION_FAILED`); verifier key binding validation (`binding.Verifier == verify.Verifier`).
+  - **Cross-Process SQLite NonceStore (`internal/memory/nonce.go`):** Implemented `withDB` pattern that opens and closes connections per operation on disk, completely eliminating Windows file descriptor locks. Added 4-byte crypto random hex suffix in `computeProofOfIngestion`.
+  - **FS & Symlink Security (`internal/fs/paths.go`):** Fail-closed `checkSymlinkContainment` on `filepath.EvalSymlinks(root)` error; exported `IsSubpath`; protected `meta/nonces.sqlite` from derived path collisions.
+  - **Staging Hardening & Compound Rollback (`internal/memory/staging.go`, `staging_test.go`):** Implemented `ValidateStagingID` preventing path traversal (`../`, separators, dots); validated all proposal files and target paths via `agentfs.ValidateMemoryPath`; compound error reporting (`RollbackIncomplete`) on partial rollback failures with failure-injection test coverage.
+
 ## [0.5.4] — 2026-09-06
 
 ### Fixed
