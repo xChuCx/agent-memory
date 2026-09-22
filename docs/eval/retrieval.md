@@ -15,11 +15,24 @@ and gold labels are in the harness — audit them):
 | Config | recall@5 | hit@1 | MRR | nDCG@5 |
 |---|---|---|---|---|
 | match-all (AND) — *prior behaviour* | 0.071 | 0.071 | 0.071 | 0.071 |
-| **match-any (OR) — shipped** | **0.982** | **0.964** | **0.973** | **0.966** |
-| **lift** | **+0.911** | **+0.893** | **+0.902** | **+0.894** |
+| **match-any (OR) + stopword filter — shipped** | **0.982** | **0.929** | **0.955** | **0.953** |
+| **lift** | **+0.911** | **+0.857** | **+0.884** | **+0.881** |
 
 Read: on this set the shipped retrieval puts a relevant section in the top
-5 for **98%** of queries and as the very first hit for **96%**.
+5 for **98%** of queries and as the very first hit for **93%**.
+
+### Negative Probes & Precision (Issue #8)
+
+An eval with only positive queries has a blind spot: unconstrained OR-matching can fan out across high-frequency grammatical words (*how*, *do*, *the*, *to*, *from*), causing off-topic natural-language questions to flood the agent's context budget.
+
+To guard against false-positive corpus pollution, `buildFTSQuery` filters grammatical stopwords when content terms are present (falling back to all terms if a query consists purely of stopwords). The harness runs automated negative probes with a strict 0-hit ceiling:
+
+| Negative Probe (Off-Topic Query) | Raw OR Hits (Issue #8) | Shipped `buildFTSQuery` Hits | Status |
+|---|---|---|---|
+| `"how do we get to the airport from the hotel"` | 21 / 28 | **0** | PASS |
+| `"can you tell me about the weather in the morning"` | 20 / 28 | **0** | PASS |
+| `"cooking recipe for homemade chocolate chip cookies"` | 18 / 28 | **0** | PASS |
+| `"quantum entanglement in condensed matter physics"` | 12 / 28 | **0** | PASS |
 
 ## What this means (and doesn't)
 
