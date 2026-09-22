@@ -50,7 +50,7 @@ var ErrNotFound = errors.New("index: row not found")
 // no alphanumeric tokens returns no results without error — callers (the
 // fetch pipeline) handle the empty case by returning the bootstrap pack.
 func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
-	match := sanitizeFTSMatch(query)
+	match := buildFTSQuery(query)
 	if match == "" {
 		return nil, nil
 	}
@@ -80,7 +80,7 @@ func (i *Index) Search(ctx context.Context, query string, limit int) ([]SearchRe
 // multiplier. An empty stores slice, or a query with no alphanumeric tokens,
 // returns nil. Unknown store names simply contribute no rows.
 func (i *Index) SearchPerStore(ctx context.Context, query string, kPerStore int, stores []string) ([]SearchResult, error) {
-	match := sanitizeFTSMatch(query)
+	match := buildFTSQuery(query)
 	if match == "" || len(stores) == 0 {
 		return nil, nil
 	}
@@ -147,8 +147,73 @@ func scanSearchRows(rows *sql.Rows) ([]SearchResult, error) {
 // ranking. Implicit-AND made multi-word queries match almost nothing, which
 // dogfooding flagged as the main recall problem.
 //
-// Terms contain only [\p{L}\p{N}] by construction, so there are no embedded
-// double quotes to escape.
+// defaultStopwords are common English words with low discriminant value in OR queries.
+// When an agent submits a natural-language query ("how do we get to the airport"),
+// unfiltered OR matching causes high-frequency stopwords ("how", "do", "we", "to", "the")
+// to match virtually the entire corpus (Issue #8).
+// Filtering them keeps only content terms. If a query consists entirely of stopwords,
+// all terms are kept as fallback.
+var defaultStopwords = map[string]struct{}{
+	"a": {}, "about": {}, "an": {}, "and": {}, "are": {}, "as": {}, "at": {}, "be": {},
+	"but": {}, "by": {}, "can": {}, "could": {}, "did": {}, "do": {}, "does": {},
+	"for": {}, "from": {}, "get": {}, "how": {}, "if": {}, "in": {}, "into": {},
+	"is": {}, "it": {}, "no": {}, "not": {}, "of": {}, "on": {}, "or": {}, "such": {},
+	"that": {}, "the": {}, "their": {}, "then": {}, "there": {}, "these": {},
+	"they": {}, "this": {}, "to": {}, "was": {}, "we": {}, "what": {}, "when": {},
+	"where": {}, "which": {}, "who": {}, "why": {}, "will": {}, "with": {}, "would": {}, "you": {},
+}
+
+// buildFTSQuery prepares a safe and discriminant FTS5 MATCH expression.
+// It extracts tokens, strips grammatical stopwords when discriminant content
+// terms exist (preventing off-topic corpus flooding; Issue #8), and quotes
+// each term into a safe OR-joined disjunction.
+func buildFTSQuery(query string) string {
+	var terms []string
+	var term strings.Builder
+	for _, r := range query {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			term.WriteRune(r)
+			continue
+		}
+		if term.Len() > 0 {
+			terms = append(terms, term.String())
+			term.Reset()
+		}
+	}
+	if term.Len() > 0 {
+		terms = append(terms, term.String())
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+
+	var contentTerms []string
+	for _, t := range terms {
+		lower := strings.ToLower(t)
+		if _, isStop := defaultStopwords[lower]; !isStop {
+			contentTerms = append(contentTerms, t)
+		}
+	}
+
+	selected := contentTerms
+	if len(selected) == 0 {
+		selected = terms
+	}
+
+	var b strings.Builder
+	for i, t := range selected {
+		if i > 0 {
+			b.WriteString(" OR ")
+		}
+		b.WriteByte('"')
+		b.WriteString(t)
+		b.WriteByte('"')
+	}
+	return b.String()
+}
+
+// sanitizeFTSMatch turns an arbitrary natural-language query into a safe
+// FTS5 MATCH expression without stopword filtering.
 func sanitizeFTSMatch(query string) string {
 	var (
 		b     strings.Builder

@@ -205,6 +205,33 @@ func TestRetrievalEval(t *testing.T) {
 	}
 }
 
+// TestRetrievalEval_NegativeCases verifies that off-topic natural language queries
+// worded with common grammatical tokens do NOT match large portions of the corpus (Issue #8).
+func TestRetrievalEval_NegativeCases(t *testing.T) {
+	idx, ctx := buildEvalIndex(t)
+
+	negativeProbes := []struct {
+		query   string
+		maxHits int
+	}{
+		{"how do we get to the airport from the hotel", 0},
+		{"can you tell me about the weather in the morning", 0},
+		{"cooking recipe for homemade chocolate chip cookies", 0},
+		{"quantum entanglement in condensed matter physics", 0},
+	}
+
+	for _, tc := range negativeProbes {
+		res, err := idx.Search(ctx, tc.query, 50)
+		if err != nil {
+			t.Fatalf("search %q: %v", tc.query, err)
+		}
+		if len(res) > tc.maxHits {
+			t.Errorf("off-topic query %q yielded %d hits (top: %v), want <= %d",
+				tc.query, len(res), topIDs(res, 3), tc.maxHits)
+		}
+	}
+}
+
 // metrics is the mean of each IR metric across all gold queries.
 type metrics struct{ recall, hit1, mrr, ndcg float64 }
 
