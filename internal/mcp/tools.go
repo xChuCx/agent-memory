@@ -93,7 +93,8 @@ func runFetchContext(ctx context.Context, root string, logger *slog.Logger, inpu
 		return nil, fmt.Errorf("memory.fetch_context: init index: %w", err)
 	}
 	if n, err := idx.CountSections(ctx); err == nil && n == 0 {
-		if err := idx.RebuildAll(ctx, memDir, sch, index.RebuildOpts{AssignMissingIDs: true}); err != nil {
+		// Read operations must never mutate canonical markdown files on disk (AM-007).
+		if err := idx.RebuildAll(ctx, memDir, sch, index.RebuildOpts{AssignMissingIDs: false}); err != nil {
 			return nil, fmt.Errorf("memory.fetch_context: rebuild index: %w", err)
 		}
 	}

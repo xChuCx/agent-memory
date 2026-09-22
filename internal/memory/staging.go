@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,11 +21,12 @@ import (
 // stageProposal and read back by review/apply. Public so CLI renderers and
 // test fixtures can inspect fields without re-parsing JSON themselves.
 type StagedProposal struct {
-	StagingID string         `json:"staging_id"`
-	StagedAt  string         `json:"staged_at"`
-	Request   ProposeRequest `json:"request"`
-	Routing   Routing        `json:"routing"`
-	Files     []string       `json:"files"`
+	StagingID string            `json:"staging_id"`
+	StagedAt  string            `json:"staged_at"`
+	Request   ProposeRequest    `json:"request"`
+	Routing   Routing           `json:"routing"`
+	Files     []string          `json:"files"`
+	PreHashes map[string]string `json:"pre_hashes,omitempty"`
 }
 
 // ApplyResult is what ApplyStaged returns. Status is one of
@@ -434,6 +436,43 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 			drifts = append(drifts, *report)
 		}
 	}
+
+	// File-level pre-state CAS (AM-002): verify that the destination file was not
+	// modified concurrently (e.g. in adjacent sections) between stage and apply.
+	for rel, expHash := range proposal.PreHashes {
+		dstAbs := filepath.Join(deps.MemoryDir, filepath.FromSlash(rel))
+		if expHash == "none" {
+			if _, err := os.Stat(dstAbs); err == nil {
+				drifts = append(drifts, DriftReport{
+					Path:     rel,
+					Policy:   "file_prestate_cas",
+					Expected: "absent",
+					Found:    "present",
+				})
+			}
+		} else {
+			curBytes, err := os.ReadFile(dstAbs)
+			if err != nil {
+				drifts = append(drifts, DriftReport{
+					Path:     rel,
+					Policy:   "file_prestate_cas",
+					Expected: expHash,
+					Found:    "missing",
+				})
+			} else {
+				curHash := fmt.Sprintf("sha256:%x", sha256.Sum256(curBytes))
+				if curHash != expHash {
+					drifts = append(drifts, DriftReport{
+						Path:     rel,
+						Policy:   "file_prestate_cas",
+						Expected: expHash,
+						Found:    curHash,
+					})
+				}
+			}
+		}
+	}
+
 	if len(drifts) > 0 {
 		return &ApplyResult{
 			StagingID: stagingID,

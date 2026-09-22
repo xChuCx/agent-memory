@@ -584,10 +584,10 @@ func ProposeUpdate(ctx context.Context, req ProposeRequest, deps UpdateDeps) (re
 		}
 	}
 
-	// (8) Routing — combine per-op routings.
-	routings := make([]Routing, 0, len(ops))
-	for _, op := range ops {
-		r, rerr := DecideRouting(req.Intent, op, deps.Manifest)
+	// (8) Routing — combine per-op routings taking target file category into account (AM-001).
+	routings := make([]Routing, 0, len(resolved))
+	for _, oc := range resolved {
+		r, rerr := DecideRoutingWithCategory(req.Intent, oc.op, oc.category, deps.Manifest)
 		if rerr != nil {
 			return reject(ReasonInvalidIntent, rerr.Error()), nil
 		}
@@ -900,6 +900,16 @@ func stageProposal(
 		return nil, fmt.Errorf("stageProposal: write target-checksums.json: %w", err)
 	}
 
+	// File-level pre-state hashes for lost update prevention (AM-002).
+	preHashes := make(map[string]string, len(fileOrder))
+	for _, rel := range fileOrder {
+		if pre, ok := preState[rel]; ok && pre != nil {
+			preHashes[rel] = fmt.Sprintf("sha256:%x", sha256.Sum256(pre))
+		} else {
+			preHashes[rel] = "none"
+		}
+	}
+
 	// proposal.json: archived for audit + replay.
 	envelope := StagedProposal{
 		StagingID: stagingID,
@@ -907,6 +917,7 @@ func stageProposal(
 		Request:   req,
 		Routing:   routing,
 		Files:     fileOrder,
+		PreHashes: preHashes,
 	}
 	pbytes, err := json.MarshalIndent(envelope, "", "  ")
 	if err != nil {

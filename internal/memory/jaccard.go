@@ -78,11 +78,35 @@ func jaccardSimilarity(a, b map[string]struct{}) float64 {
 	return float64(inter) / float64(union)
 }
 
+// criticalQualifiers are semantic tokens that invert or strictly alter policy/instructions.
+// If two candidate sections differ on any of these qualifier tokens (e.g. "must retry" vs "must not retry"),
+// they must NEVER be treated as near-duplicates, regardless of high lexical Jaccard overlap (AM-005).
+var criticalQualifiers = map[string]struct{}{
+	"not": {}, "never": {}, "no": {}, "forbidden": {}, "cannot": {},
+	"mustnt": {}, "dont": {}, "wont": {}, "prohibit": {}, "prohibited": {},
+	"disallow": {}, "disallowed": {}, "deny": {}, "denied": {}, "reject": {},
+}
+
+func differsOnQualifiers(a, b map[string]struct{}) bool {
+	for q := range criticalQualifiers {
+		_, inA := a[q]
+		_, inB := b[q]
+		if inA != inB {
+			return true
+		}
+	}
+	return false
+}
+
 // isNearDuplicate reports whether candidate is a near-duplicate of any token
 // set already accepted into the pack — i.e. its similarity to at least one
-// of them strictly exceeds dedupeJaccardThreshold.
+// of them strictly exceeds dedupeJaccardThreshold AND it does not differ on
+// critical semantic qualifiers (AM-005).
 func isNearDuplicate(candidate map[string]struct{}, accepted []map[string]struct{}) bool {
 	for _, prev := range accepted {
+		if differsOnQualifiers(candidate, prev) {
+			continue
+		}
 		if jaccardSimilarity(candidate, prev) > dedupeJaccardThreshold {
 			return true
 		}

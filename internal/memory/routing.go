@@ -116,6 +116,75 @@ func DecideRouting(intent Intent, op Operation, manifest *config.Manifest) (Rout
 	return Routing{}, fmt.Errorf("routing: unhandled intent %q", intent)
 }
 
+// CategoryApprovalPolicy determines the minimum required approval policy
+// enforced by the target file's schema category and operation kind (AM-001).
+// This ensures that caller-provided intent cannot weaken the approval requirements
+// of durable categories like conventions, decisions, or modules.
+func CategoryApprovalPolicy(cat schema.Category, op Operation, manifest *config.Manifest) (schema.ApprovalMode, string) {
+	if manifest == nil {
+		return schema.ApprovalStage, "nil manifest defaults to stage"
+	}
+	pol := manifest.Updates.Approval
+	switch cat.Name {
+	case "current":
+		return pol.Current, "category=current → updates.approval.current"
+	case "current_shared":
+		return pol.CurrentShared, "category=current_shared → updates.approval.current_shared"
+	case "sessions":
+		return pol.Sessions, "category=sessions → updates.approval.sessions"
+	case "pitfalls":
+		if op != nil && op.Kind() == "append_to_section" {
+			return pol.PitfallsAppend, "category=pitfalls op=append_to_section → updates.approval.pitfalls_append"
+		}
+		return pol.PitfallsReplace, "category=pitfalls op≠append_to_section → updates.approval.pitfalls_replace"
+	case "decisions":
+		return pol.Decisions, "category=decisions → updates.approval.decisions"
+	case "modules":
+		return pol.Modules, "category=modules → updates.approval.modules"
+	case "conventions":
+		return pol.Conventions, "category=conventions → updates.approval.conventions"
+	case "archive":
+		return pol.Archive, "category=archive → updates.approval.archive"
+	default:
+		if cat.GitTracked {
+			return schema.ApprovalStage, fmt.Sprintf("durable category %q defaults to stage", cat.Name)
+		}
+		return schema.ApprovalApply, fmt.Sprintf("ephemeral category %q defaults to apply", cat.Name)
+	}
+}
+
+// DecideRoutingWithCategory resolves the effective approval routing for an operation
+// by taking the stricter of the intent-based routing and the category-enforced policy (AM-001).
+// This guarantees that an agent submitting e.g. intent=update_current cannot bypass human review
+// when mutating a conventions or decisions file.
+func DecideRoutingWithCategory(intent Intent, op Operation, cat schema.Category, manifest *config.Manifest) (Routing, error) {
+	intentRouting, err := DecideRouting(intent, op, manifest)
+	if err != nil {
+		return Routing{}, err
+	}
+
+	catMode, catReason := CategoryApprovalPolicy(cat, op, manifest)
+
+	// Enforce strictest mode: server_only > stage > apply.
+	effectiveMode := intentRouting.Mode
+	reason := intentRouting.Reason
+
+	if catMode == schema.ApprovalServerOnly {
+		effectiveMode = schema.ApprovalServerOnly
+		reason += fmt.Sprintf("; enforced to server_only by target category %q (%s)", cat.Name, catReason)
+	} else if catMode == schema.ApprovalStage && effectiveMode != schema.ApprovalServerOnly {
+		if effectiveMode == schema.ApprovalApply {
+			effectiveMode = schema.ApprovalStage
+			reason += fmt.Sprintf("; enforced to stage by target category %q (%s)", cat.Name, catReason)
+		}
+	}
+
+	return Routing{
+		Mode:   effectiveMode,
+		Reason: reason,
+	}, nil
+}
+
 // CombineRoutings merges per-op Routings into a single proposal-level
 // decision. Rules (most restrictive wins):
 //

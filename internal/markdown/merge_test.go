@@ -101,8 +101,9 @@ func TestMerge3Way_BothModifySameSectionConflicts(t *testing.T) {
 	}
 }
 
-func TestMerge3Way_DeleteKeepsSurviving(t *testing.T) {
-	// ours removes the postgres section; theirs leaves it untouched.
+func TestMerge3Way_DeleteVsUnchanged_CleanlyDeletes(t *testing.T) {
+	// ours removes the postgres section; theirs leaves it untouched (AM-008).
+	// In canonical 3-way merge, deletion cleanly wins and does not resurrect stale rules.
 	ours := `# Decisions
 <!-- @id: decisions -->
 
@@ -113,13 +114,34 @@ Project decisions land here.
 		t.Fatal(err)
 	}
 	if conf {
-		t.Error("delete-vs-unchanged should not hard-conflict (memory is retained)")
+		t.Error("delete-vs-unchanged must not conflict")
 	}
-	if !strings.Contains(string(got), "@id: postgres") {
-		t.Errorf("deleted-on-one-side section must be retained:\n%s", got)
+	if strings.Contains(string(got), "@id: postgres") {
+		t.Errorf("deleted section must be cleanly dropped, not resurrected:\n%s", got)
+	}
+	if len(warns) != 0 {
+		t.Errorf("unexpected warnings: %v", warns)
+	}
+}
+
+func TestMerge3Way_DeleteVsModified_Conflicts(t *testing.T) {
+	// ours removes the postgres section; theirs modifies it.
+	// This represents concurrent delete vs edit: must conflict!
+	ours := `# Decisions
+<!-- @id: decisions -->
+
+Project decisions land here.
+`
+	theirs := strings.Replace(mergeBase, "Chose Postgres for transactional storage.", "Chose Postgres; updated in parallel.", 1)
+	_, conf, warns, err := Merge3Way([]byte(mergeBase), []byte(ours), []byte(theirs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !conf {
+		t.Error("delete-vs-modified must conflict")
 	}
 	if len(warns) == 0 {
-		t.Error("expected a warning about retaining a deleted section")
+		t.Error("expected warning on delete-vs-modified conflict")
 	}
 }
 

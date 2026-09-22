@@ -87,6 +87,23 @@ func TestIsNearDuplicate(t *testing.T) {
 	if isNearDuplicate(tokenize("anything at all"), nil) {
 		t.Error("duplicate against empty accepted set")
 	}
+
+	// Contradictory instruction with negation (AM-005).
+	// "must retry" vs "must not retry": despite lexical Jaccard > 0.90, the negation "not"
+	// must prevent deduplication suppression!
+	retryAccepted := []map[string]struct{}{
+		tokenize("The payments service must retry on 503 error"),
+	}
+	notRetryCandidate := tokenize("The payments service must not retry on 503 error")
+	if isNearDuplicate(notRetryCandidate, retryAccepted) {
+		t.Error("contradictory instruction with 'not' was wrongly suppressed as duplicate (AM-005)")
+	}
+
+	// Other critical qualifiers
+	forbiddenCandidate := tokenize("The payments service is forbidden to retry on 503 error")
+	if isNearDuplicate(forbiddenCandidate, retryAccepted) {
+		t.Error("instruction with 'forbidden' was wrongly suppressed as duplicate (AM-005)")
+	}
 }
 
 // TestBuildContextPack_DeduplicatesNearIdenticalSections is the end-to-end

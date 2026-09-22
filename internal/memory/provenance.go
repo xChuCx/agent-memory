@@ -27,15 +27,26 @@ func ValidateGrounding(g *GroundingReceipt, requireLocator bool) []string {
 		return nil
 	}
 	var viols []string
+
+	if requireLocator {
+		if g.PackDigest == "" {
+			viols = append(viols, "grounding: pack_digest is required when grounding is required")
+		}
+		if g.ReadNonce == "" {
+			viols = append(viols, "grounding: read_nonce is required when grounding is required")
+		}
+		if g.Locator == "" {
+			viols = append(viols, "grounding: locator is required to bind proposal to specific pack content")
+		}
+	}
+
 	if g.PackDigest != "" && !strings.HasPrefix(g.PackDigest, "sha256:") {
 		viols = append(viols, fmt.Sprintf("grounding: pack_digest %q must have 'sha256:' prefix", g.PackDigest))
 	}
 	if g.ReadNonce != "" && !strings.HasPrefix(g.ReadNonce, "poi-") {
 		viols = append(viols, fmt.Sprintf("grounding: read_nonce %q must have 'poi-' prefix", g.ReadNonce))
 	}
-	if requireLocator && g.Locator == "" {
-		viols = append(viols, "grounding: locator is required to bind proposal to specific pack content")
-	}
+
 	return viols
 }
 

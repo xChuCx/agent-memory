@@ -161,3 +161,38 @@ func TestIsValidIntent(t *testing.T) {
 		t.Error("empty intent reported valid")
 	}
 }
+
+func TestDecideRoutingWithCategory_CannotDowngradeDurableCategory(t *testing.T) {
+	man := config.DefaultManifest()
+
+	// IntentUpdateCurrent maps to apply.
+	// But conventions is a durable category whose policy in manifest is stage.
+	convCat := schema.Category{
+		Name:       "conventions",
+		GitTracked: true,
+	}
+
+	r, err := DecideRoutingWithCategory(IntentUpdateCurrent, mkOp("append_to_section"), convCat, man)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if r.Mode != schema.ApprovalStage {
+		t.Errorf("Mode = %q, want stage (category conventions must not be downgraded by intent=update_current)", r.Mode)
+	}
+	if !strings.Contains(r.Reason, "enforced to stage by target category") {
+		t.Errorf("Reason = %q, want mention of enforcement by target category", r.Reason)
+	}
+
+	// For an actual current category, intent=update_current stays apply.
+	curCat := schema.Category{
+		Name:       "current",
+		GitTracked: false,
+	}
+	rCur, err := DecideRoutingWithCategory(IntentUpdateCurrent, mkOp("append_to_section"), curCat, man)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if rCur.Mode != schema.ApprovalApply {
+		t.Errorf("Mode = %q, want apply for category current", rCur.Mode)
+	}
+}

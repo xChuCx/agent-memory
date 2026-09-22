@@ -613,3 +613,39 @@ func TestApplyStaged_RollbackIncomplete_CompoundError(t *testing.T) {
 	}
 }
 
+func TestApplyStaged_LostUpdateProtection_AdjacentSectionModified(t *testing.T) {
+	memDir, id, deps := stageDecision(t)
+
+	// Simulate concurrent modification to decisions.md in an adjacent section
+	decisionsPath := filepath.Join(memDir, "decisions.md")
+	curBytes, err := os.ReadFile(decisionsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modifiedBytes := append(curBytes, []byte("\n## Concurrent Decision\n<!-- @id: concurrent -->\n\nIndependent edit.\n")...)
+	if err := os.WriteFile(decisionsPath, modifiedBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now attempt ApplyStaged. It must reject due to file_prestate_cas drift.
+	res, err := ApplyStaged(context.Background(), id, deps)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Status != StatusRejected {
+		t.Fatalf("Status = %q, want %q", res.Status, StatusRejected)
+	}
+	if res.Reason != ReasonTargetDrift {
+		t.Errorf("Reason = %q, want %q", res.Reason, ReasonTargetDrift)
+	}
+
+	// Verify that the concurrent writer's edit was preserved!
+	afterBytes, err := os.ReadFile(decisionsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(afterBytes), "Concurrent Decision") {
+		t.Errorf("concurrent edit was clobbered by staged apply!\n%s", afterBytes)
+	}
+}
+

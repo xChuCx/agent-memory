@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -372,6 +373,28 @@ func rebaseReplan(
 		tcBytes, 0644,
 	); err != nil {
 		return nil, fmt.Errorf("rebaseReplan: write target-checksums.json: %w", err)
+	}
+
+	// Refresh pre-state hashes from current disk state for proposal.json (AM-002).
+	newPreHashes := make(map[string]string, len(fileOrder))
+	for _, rel := range fileOrder {
+		curBytes, err := os.ReadFile(filepath.Join(deps.MemoryDir, filepath.FromSlash(rel)))
+		if err == nil {
+			newPreHashes[rel] = fmt.Sprintf("sha256:%x", sha256.Sum256(curBytes))
+		} else {
+			newPreHashes[rel] = "none"
+		}
+	}
+	proposal.PreHashes = newPreHashes
+	pbytes, err := json.MarshalIndent(proposal, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("rebaseReplan: marshal proposal.json: %w", err)
+	}
+	if err := agentfs.WriteAtomic(
+		filepath.Join(deps.MemoryDir, "staging", stagingID, "proposal.json"),
+		pbytes, 0644,
+	); err != nil {
+		return nil, fmt.Errorf("rebaseReplan: write proposal.json: %w", err)
 	}
 
 	return &RebaseResult{

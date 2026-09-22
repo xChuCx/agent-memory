@@ -411,6 +411,17 @@ func TestValidateProvenance_GroundingRequiredPolicy(t *testing.T) {
 		t.Fatalf("expected locator is required error, got %v", viols2)
 	}
 
+	// Grounding receipt with locator only (empty digest and nonce) must fail (AM-006)
+	violsLocatorOnly := ValidateProvenance(policy, ProvenanceContext{
+		Sources: []Source{{Type: "file", Ref: "x.go"}},
+		Grounding: &GroundingReceipt{
+			Locator: "decisions.md#ADR-004",
+		},
+	})
+	if !containsSubstr(violsLocatorOnly, "pack_digest is required") || !containsSubstr(violsLocatorOnly, "read_nonce is required") {
+		t.Fatalf("expected missing digest and nonce errors, got %v", violsLocatorOnly)
+	}
+
 	// Complete grounding receipt succeeds
 	viols3 := ValidateProvenance(policy, ProvenanceContext{
 		Sources: []Source{{Type: "file", Ref: "x.go"}},

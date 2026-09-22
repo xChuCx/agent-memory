@@ -62,6 +62,24 @@ type mnode struct {
 	children []mnode
 }
 
+func mnodeEqual(a, b *mnode) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if !bytes.Equal(a.own, b.own) {
+		return false
+	}
+	if len(a.children) != len(b.children) {
+		return false
+	}
+	for i := range a.children {
+		if !mnodeEqual(&a.children[i], &b.children[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func preamble(src []byte, secs []Section) []byte {
 	if len(secs) == 0 {
 		return src
@@ -170,15 +188,37 @@ func mergeForest(base, ours, theirs []mnode) ([]mnode, []string, bool) {
 			conflicted = conflicted || ownConf || kidConf
 		case o != nil && t == nil:
 			// theirs dropped it.
-			out = append(out, *o)
 			if b != nil {
-				warns = append(warns, fmt.Sprintf("kept %s (deleted on the other side, retained from ours)", key))
+				// Existed in base, theirs deleted it.
+				// If ours did NOT modify it, deletion cleanly wins (AM-008).
+				if mnodeEqual(o, b) {
+					// Clean deletion: theirs deleted, ours untouched → drop!
+				} else {
+					// Ours modified while theirs deleted: conflict!
+					conflicted = true
+					out = append(out, *o)
+					warns = append(warns, fmt.Sprintf("conflict on %s: deleted on other side but modified in ours", key))
+				}
+			} else {
+				// b == nil: ours added it, theirs didn't have it → keep ours addition.
+				out = append(out, *o)
 			}
 		case o == nil && t != nil:
 			// ours dropped it.
-			out = append(out, *t)
 			if b != nil {
-				warns = append(warns, fmt.Sprintf("kept %s (deleted on this side, retained from theirs)", key))
+				// Existed in base, ours deleted it.
+				// If theirs did NOT modify it, deletion cleanly wins (AM-008).
+				if mnodeEqual(t, b) {
+					// Clean deletion: ours deleted, theirs untouched → drop!
+				} else {
+					// Theirs modified while ours deleted: conflict!
+					conflicted = true
+					out = append(out, *t)
+					warns = append(warns, fmt.Sprintf("conflict on %s: deleted on this side but modified on other side", key))
+				}
+			} else {
+				// b == nil: theirs added it, ours didn't have it → keep theirs addition.
+				out = append(out, *t)
 			}
 			// o == nil && t == nil: present only in base → both deleted → drop.
 		}
