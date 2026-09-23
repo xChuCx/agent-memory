@@ -345,6 +345,35 @@ func TestProposeUpdate_RejectsServerManagedCategory(t *testing.T) {
 	}
 }
 
+func TestProposeUpdate_RejectsManifestTamperingAndRootBypass(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+	deps := UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir}
+
+	// 1. Direct attempt to modify manifest.yaml via create_file
+	resp, _ := ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent: IntentUpdateConventions,
+			Operations: []OperationInput{
+				{Op: "create_file", Path: "meta/manifest.yaml", Content: "version: 1\n", IfExists: "replace"},
+			},
+		}, deps)
+	if resp.Reason != ReasonUnknownCategory {
+		t.Errorf("manifest tampering Reason = %q, want %q", resp.Reason, ReasonUnknownCategory)
+	}
+
+	// 2. Traversal attempt to escape or tamper control plane
+	resp, _ = ProposeUpdate(context.Background(),
+		ProposeRequest{
+			Intent: IntentUpdateConventions,
+			Operations: []OperationInput{
+				{Op: "create_file", Path: "../meta/manifest.yaml", Content: "version: 1\n", IfExists: "replace"},
+			},
+		}, deps)
+	if resp.Reason != ReasonInvalidPath {
+		t.Errorf("traversal Reason = %q, want %q", resp.Reason, ReasonInvalidPath)
+	}
+}
+
 func TestProposeUpdate_RejectsSecretDetected(t *testing.T) {
 	memDir, mf, sch := updateFixture(t)
 	resp, _ := ProposeUpdate(context.Background(),
