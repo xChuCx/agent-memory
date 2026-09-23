@@ -5,6 +5,42 @@ All notable changes to **agent-memory** are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-09-23
+
+### Added
+
+- **Metamorphic Rebase & Whole-File Pre-Hash Drift Detection (`internal/memory/rebase.go`, `rebase_test.go`).**
+  - Fixes false-clean skip in `RebaseStaged` when neighboring sections of the same file are concurrently edited.
+  - Added metamorphic composition test `TestMetamorphic_StageDelete_ConcurrentNeighborEdit_RebaseApply` verifying stage $\rightarrow$ concurrent external edit $\rightarrow$ CAS pre-hash drift $\rightarrow$ rebase $\rightarrow$ clean apply.
+- **Control-Plane Manifest Isolation & Root Bypass Defense (`internal/memory/update_test.go`).**
+  - Added regression test `TestProposeUpdate_RejectsManifestTamperingAndRootBypass` proving that `.agent-memory/meta/manifest.yaml` cannot be targeted or downgraded via `propose_update` (`ReasonUnknownCategory`), and path traversal / symlink escapes fail-closed (`ReasonInvalidPath`).
+- **SAR-009 Runtime Isolation & Resilient Atomic File Replacement (`internal/fs/atomic.go`, `docs/sar/sar-009-runtime-isolation-contract.md`).**
+  - Added multi-attempt atomic replace with exponential backoff on Windows NTFS file lock contention.
+- **SAR-010 Unicode Normalization & Multi-Alphabet Collation Invariant (`internal/index`, `docs/sar/sar-010-unicode-canonicalization-contract.md`).**
+  - Added `TestSAR010_UnicodeMultiLingualIndexingAndBinaryKeyCollation` ensuring cross-platform NFC normalization, binary SQLite primary key constraints, and multi-lingual FTS5 `unicode61` indexing.
+- **Grammatical Stopwords Filtering in Retrieval (`internal/index/query.go`).**
+  - Filtered high-frequency grammatical stopwords in FTS5 query builder, eliminating noisy empty token queries.
+
+### Fixed
+
+- **Astra Pro External Audit Hardening (AM-001, AM-002, AM-005, AM-006, AM-007, AM-008).**
+  - **Category-Enforced Approval Routing (AM-001, `internal/memory/routing.go`):** Implemented `DecideRoutingWithCategory` preventing caller-specified `intent` from downgrading durable category write policies (`conventions`, `decisions`, `modules`).
+  - **File-Level Pre-State CAS in Staging & Rebase (AM-002, `internal/memory/staging.go`, `internal/memory/update.go`, `internal/memory/rebase.go`):** Added `PreHashes` (SHA-256 of entire destination files) to `StagedProposal`, checking strict file-level CAS before staged apply to eliminate lost updates from concurrent edits to adjacent sections.
+  - **Polarity & Negation Qualifier Preservation in Jaccard Dedup (AM-005, `internal/memory/jaccard.go`):** Added `criticalQualifiers` (`not`, `never`, `forbidden`, `cannot`, etc.) to prevent high-lexical-overlap suppression of inverted/contradictory directives.
+  - **Fail-Closed Proof-of-Grounding Validation (AM-006, `internal/memory/provenance.go`):** Mandated non-empty `pack_digest` and `read_nonce` whenever `grounding_required` policy is active.
+  - **Idempotent Pure Read-Only Context Fetching (AM-007, `internal/mcp/tools.go`):** Disabled `AssignMissingIDs` during cold-start index rebuilding in `fetch_context`, preventing unintended disk mutations during read operations.
+  - **Canonical 3-Way Merge Deletion Semantics (AM-008, `internal/markdown/merge.go`):** Enforced canonical `delete vs unchanged -> delete` to stop resurrecting pruned/stale memory sections across git branches, while maintaining conflict reporting for `delete vs modified`.
+- **RFC 8785 Appendix B Full Conformance & JCS Engine (`internal/vtp/jcs.go`, `jcs_test.go`).**
+  - Strict ECMAScript float formatting (`1e+21`, `1e+30`), IEEE-754 double conversion, lone surrogate rejection (`\uD800`–`\uDFFF`), and recursive UTF-8 validation across arbitrary JSON structures. All 26 official RFC 8785 Appendix B test vectors passing.
+- **Cross-Process SQLite NonceStore & Windows File Lock Elimination (`internal/memory/nonce.go`).**
+  - Implemented `withDB` pattern that opens and closes connections per operation on disk, completely eliminating lingering Windows file descriptor locks. Added 4-byte crypto random hex suffix in `computeProofOfIngestion`.
+- **FS & Symlink Security (`internal/fs/paths.go`).**
+  - Fail-closed `checkSymlinkContainment` on `filepath.EvalSymlinks(root)` error; exported `IsSubpath`; protected `meta/nonces.sqlite` from derived path collisions.
+- **Staging Hardening & Compound Rollback (`internal/memory/staging.go`, `staging_test.go`).**
+  - Implemented `ValidateStagingID` preventing path traversal (`../`, separators, dots); validated all proposal files and target paths via `agentfs.ValidateMemoryPath`; compound error reporting (`RollbackIncomplete`) on partial rollback failures with failure-injection test coverage.
+- **VTP-1 Strict Assertion Identification & Key Binding (`internal/vtp/vtp.go`).**
+  - Mandated identifiable `AssertionResults` when oracle assertions declared; fail-closed rejection of duplicates (`DUPLICATE_ASSERTION_RESULT`), unknowns (`UNKNOWN_ASSERTION_ID`), and failed checks (`ASSERTION_FAILED`); verifier key binding validation (`binding.Verifier == verify.Verifier`).
+
 ## [0.6.0] — 2026-09-08
 
 ### Added
@@ -40,23 +76,6 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - Canonical standards covering SAR-001 through SAR-008 with cross-agent consensus thread citations.
   - Aligned SAR-006 to Six-Signal Skill Evaluation & Hermeticity Contract.
   - Formalized multi-store retrieval evaluation in `internal/eval/federation_test.go` (PR6).
-
-- **Round 3 Comprehensive Security Hardening (`internal/vtp`, `internal/memory`, `internal/fs`).**
-  - **RFC 8785 Appendix B Full Conformance (`internal/vtp/jcs.go`, `jcs_test.go`):** Implemented strict ECMAScript float formatting (`1e+21`, `1e+30`), IEEE-754 double conversion, lone surrogate rejection (`\uD800`–`\uDFFF`), and recursive UTF-8 validation across arbitrary JSON structures. All 26 official RFC 8785 Appendix B test vectors passing.
-  - **VTP-1 Strict Assertion Identification & Key Binding (`internal/vtp/vtp.go`):** Mandated identifiable `AssertionResults` when oracle assertions declared; fail-closed rejection of duplicates (`DUPLICATE_ASSERTION_RESULT`), unknowns (`UNKNOWN_ASSERTION_ID`), and failed checks (`ASSERTION_FAILED`); verifier key binding validation (`binding.Verifier == verify.Verifier`).
-  - **Cross-Process SQLite NonceStore (`internal/memory/nonce.go`):** Implemented `withDB` pattern that opens and closes connections per operation on disk, completely eliminating Windows file descriptor locks. Added 4-byte crypto random hex suffix in `computeProofOfIngestion`.
-  - **FS & Symlink Security (`internal/fs/paths.go`):** Fail-closed `checkSymlinkContainment` on `filepath.EvalSymlinks(root)` error; exported `IsSubpath`; protected `meta/nonces.sqlite` from derived path collisions.
-  - **Staging Hardening & Compound Rollback (`internal/memory/staging.go`, `staging_test.go`):** Implemented `ValidateStagingID` preventing path traversal (`../`, separators, dots); validated all proposal files and target paths via `agentfs.ValidateMemoryPath`; compound error reporting (`RollbackIncomplete`) on partial rollback failures with failure-injection test coverage.
-
-### Fixed
-
-- **Astra Pro Audit Hardening (AM-001, AM-002, AM-005, AM-006, AM-007, AM-008).**
-  - **Category-Enforced Approval Routing (AM-001, `internal/memory/routing.go`):** Implemented `DecideRoutingWithCategory` preventing caller-specified `intent` from downgrading durable category write policies (`conventions`, `decisions`, `modules`).
-  - **File-Level Pre-State CAS in Staging & Rebase (AM-002, `internal/memory/staging.go`, `internal/memory/update.go`, `internal/memory/rebase.go`):** Added `PreHashes` (SHA-256 of entire destination files) to `StagedProposal`, checking strict file-level CAS before staged apply to eliminate lost updates from concurrent edits to adjacent sections.
-  - **Polarity & Negation Qualifier Preservation in Jaccard Dedup (AM-005, `internal/memory/jaccard.go`):** Added `criticalQualifiers` (`not`, `never`, `forbidden`, `cannot`, etc.) to prevent high-lexical-overlap suppression of inverted/contradictory directives.
-  - **Fail-Closed Proof-of-Grounding Validation (AM-006, `internal/memory/provenance.go`):** Mandated non-empty `pack_digest` and `read_nonce` whenever `grounding_required` policy is active.
-  - **Idempotent Pure Read-Only Context Fetching (AM-007, `internal/mcp/tools.go`):** Disabled `AssignMissingIDs` during cold-start index rebuilding in `fetch_context`, preventing unintended disk mutations during read operations.
-  - **Canonical 3-Way Merge Deletion Semantics (AM-008, `internal/markdown/merge.go`):** Enforced canonical `delete vs unchanged -> delete` to stop resurrecting pruned/stale memory sections across git branches, while maintaining conflict reporting for `delete vs modified`.
 
 ## [0.5.4] — 2026-09-06
 

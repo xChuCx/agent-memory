@@ -60,13 +60,16 @@ agent-memory is the *durable, searchable, reviewed knowledge* behind it.
 
 ## Status
 
-**Release 0.6.0** — the **Proof of Memory Consumption & Anti-Ornamental Hardening** release:
+**Release 0.6.1** — the **Swarm Audit Hardening & Metamorphic Rebase** release:
 bridges durable memory with verifiable autonomous execution and strict fail-closed security invariants:
 
-- **SAR-008 Grounding Gating & Single-Use Read Nonces (`internal/memory`)** — Resolves the
-  "Decorative Memory Paradox". `fetch_context` emits content-addressable `pack_digest` and
-  episodic continuity `read_nonce` (`poi-<hash[:8]>-<timestamp_ns>`). `propose_update` requires
-  a `GroundingReceipt` citing an active anchor, rejecting ungrounded proposals under `provenance_violation`.
+- **Astra Pro Audit Hardening (AM-001..AM-008)** — Category-enforced approval routing (`DecideRoutingWithCategory`),
+  whole-file pre-state CAS (`proposal.PreHashes`), polarity/negation qualifier preservation in Jaccard dedup (`criticalQualifiers`),
+  idempotent pure read-only `fetch_context`, and canonical 3-way merge deletion semantics.
+- **Metamorphic Rebase & Drift Detection (`internal/memory/rebase.go`)** — Detects whole-file pre-hash drift during rebase,
+  preventing silent clobber when adjacent sections are concurrently edited, verified by metamorphic composition tests.
+- **Control-Plane Manifest Isolation** — Enforces fail-closed protection of `.agent-memory/meta/manifest.yaml` against
+  direct modification, symlink bypass, or path traversal attacks.
 - **RFC 8785 (JCS) Determinism (`internal/vtp`)** — Strict JSON Canonicalization Scheme compliance
   passing all 26 official RFC 8785 Appendix B test vectors, ECMAScript float formatting (`1e+21`),
   lone surrogate rejection, and recursive UTF-8 validation.
@@ -80,8 +83,8 @@ bridges durable memory with verifiable autonomous execution and strict fail-clos
   identifiable `AssertionResults` matching declared assertion IDs, verifier key binding validation,
   and Workpool/0 Clause B disjoint seat enforcement.
 
-It builds on **0.5.4** (VTP-1 initial protocol engine, Clause B disjoint seats), **0.5.0** (federation,
-referenced landscape stores, `meta/stores.lock`), and **0.4** (section merge driver, offline eval at recall@5 0.98).
+It builds on **0.6.0** (anti-ornamental SAR-008 grounding nonces, SAR-007 byte preservation), **0.5.4** (VTP-1 initial protocol engine),
+**0.5.0** (federation, referenced landscape stores), and **0.4** (section merge driver).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full changelist.
 
