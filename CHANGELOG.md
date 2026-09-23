@@ -48,6 +48,16 @@ the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - **FS & Symlink Security (`internal/fs/paths.go`):** Fail-closed `checkSymlinkContainment` on `filepath.EvalSymlinks(root)` error; exported `IsSubpath`; protected `meta/nonces.sqlite` from derived path collisions.
   - **Staging Hardening & Compound Rollback (`internal/memory/staging.go`, `staging_test.go`):** Implemented `ValidateStagingID` preventing path traversal (`../`, separators, dots); validated all proposal files and target paths via `agentfs.ValidateMemoryPath`; compound error reporting (`RollbackIncomplete`) on partial rollback failures with failure-injection test coverage.
 
+### Fixed
+
+- **Astra Pro Audit Hardening (AM-001, AM-002, AM-005, AM-006, AM-007, AM-008).**
+  - **Category-Enforced Approval Routing (AM-001, `internal/memory/routing.go`):** Implemented `DecideRoutingWithCategory` preventing caller-specified `intent` from downgrading durable category write policies (`conventions`, `decisions`, `modules`).
+  - **File-Level Pre-State CAS in Staging & Rebase (AM-002, `internal/memory/staging.go`, `internal/memory/update.go`, `internal/memory/rebase.go`):** Added `PreHashes` (SHA-256 of entire destination files) to `StagedProposal`, checking strict file-level CAS before staged apply to eliminate lost updates from concurrent edits to adjacent sections.
+  - **Polarity & Negation Qualifier Preservation in Jaccard Dedup (AM-005, `internal/memory/jaccard.go`):** Added `criticalQualifiers` (`not`, `never`, `forbidden`, `cannot`, etc.) to prevent high-lexical-overlap suppression of inverted/contradictory directives.
+  - **Fail-Closed Proof-of-Grounding Validation (AM-006, `internal/memory/provenance.go`):** Mandated non-empty `pack_digest` and `read_nonce` whenever `grounding_required` policy is active.
+  - **Idempotent Pure Read-Only Context Fetching (AM-007, `internal/mcp/tools.go`):** Disabled `AssignMissingIDs` during cold-start index rebuilding in `fetch_context`, preventing unintended disk mutations during read operations.
+  - **Canonical 3-Way Merge Deletion Semantics (AM-008, `internal/markdown/merge.go`):** Enforced canonical `delete vs unchanged -> delete` to stop resurrecting pruned/stale memory sections across git branches, while maintaining conflict reporting for `delete vs modified`.
+
 ## [0.5.4] — 2026-09-06
 
 ### Fixed
