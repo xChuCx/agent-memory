@@ -314,3 +314,103 @@ func TestRebaseStaged_NewBaseWithSecretIsRejected(t *testing.T) {
 		t.Errorf("staged file now contains the leaked token — rebase wrote despite secret rejection")
 	}
 }
+
+// =============================================================================
+// Metamorphic Composition Test (AM-002 + AM-008):
+// Stage an edit/deletion -> concurrent writer edits neighbor section ->
+// Apply fails with CAS target_drift -> Rebase incorporates neighbor edit ->
+// Apply succeeds, preserving neighbor edit without resurrecting deleted content.
+// =============================================================================
+
+func TestMetamorphic_StageDelete_ConcurrentNeighborEdit_RebaseApply(t *testing.T) {
+	memDir, mf, sch := updateFixture(t)
+	deps := UpdateDeps{Manifest: mf, Schema: sch, MemoryDir: memDir}
+
+	initial := `# Pitfalls
+
+## Stale Lock
+<!-- @id: stale-lock -->
+
+Watch out for stale lock.
+
+## Port Clash
+<!-- @id: port-clash -->
+
+Port 8080 conflicts with devserver.
+`
+	if err := os.WriteFile(filepath.Join(memDir, "pitfalls.md"), []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Step 1: Stage a proposal that updates "stale-lock".
+	req := ProposeRequest{
+		Intent:    IntentAddPitfall,
+		Rationale: "Rewrite stale-lock",
+		Operations: []OperationInput{
+			{
+				Op:        "replace_section_content",
+				Path:      "pitfalls.md",
+				SectionID: "stale-lock",
+				Content:   "New stale-lock content.\n",
+			},
+		},
+	}
+	res, err := ProposeUpdate(context.Background(), req, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != StatusStaged {
+		t.Fatalf("expected status staged, got %s: %s", res.Status, res.Message)
+	}
+	id := res.StagingID
+
+	// Step 2: Concurrent writer modifies neighbor section "port-clash"
+	concurrentBody := strings.Replace(initial, "Port 8080 conflicts with devserver.", "Port 8080 conflicts with devserver; use port 8081.", 1)
+	if err := os.WriteFile(filepath.Join(memDir, "pitfalls.md"), []byte(concurrentBody), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Step 3: ApplyStaged fails due to AM-002 file-level pre-state CAS drift
+	applyRes, err := ApplyStaged(context.Background(), id, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applyRes.Status != StatusRejected || applyRes.Reason != ReasonTargetDrift {
+		t.Fatalf("expected ApplyStaged to fail with target_drift, got status=%s reason=%s", applyRes.Status, applyRes.Reason)
+	}
+
+	// Step 4: RebaseStaged with force=true incorporates new disk state
+	rebRes, err := RebaseStaged(context.Background(), id, deps, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rebRes.Status != StatusRebased {
+		t.Fatalf("expected StatusRebased, got %s: %s", rebRes.Status, rebRes.Message)
+	}
+
+	// Step 5: Post-rebase ApplyStaged succeeds
+	applyRes2, err := ApplyStaged(context.Background(), id, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applyRes2.Status != StatusApplied {
+		t.Fatalf("expected post-rebase apply to succeed, got %s: %s", applyRes2.Status, applyRes2.Message)
+	}
+
+	// Step 6: Verify final on-disk state
+	finalBytes, err := os.ReadFile(filepath.Join(memDir, "pitfalls.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalStr := string(finalBytes)
+
+	// Neighbor section's concurrent edit MUST be preserved (AM-002)
+	if !strings.Contains(finalStr, "use port 8081") {
+		t.Errorf("lost update: concurrent neighbor edit was wiped out:\n%s", finalStr)
+	}
+
+	// Proposal's edit MUST be applied
+	if !strings.Contains(finalStr, "New stale-lock content.") {
+		t.Errorf("expected proposal content to be applied:\n%s", finalStr)
+	}
+}

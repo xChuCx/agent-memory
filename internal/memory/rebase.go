@@ -170,6 +170,32 @@ func RebaseStaged(ctx context.Context, stagingID string, deps UpdateDeps, force 
 		}
 	}
 
+	// (3b) check file-level pre-state drift (AM-002)
+	for rel, preHash := range proposal.PreHashes {
+		curBytes, err := os.ReadFile(filepath.Join(deps.MemoryDir, filepath.FromSlash(rel)))
+		curHash := "none"
+		if err == nil {
+			curHash = fmt.Sprintf("sha256:%x", sha256.Sum256(curBytes))
+		}
+		if curHash != preHash {
+			alreadyReported := false
+			for _, d := range drifts {
+				if filepath.ToSlash(d.Path) == rel {
+					alreadyReported = true
+					break
+				}
+			}
+			if !alreadyReported {
+				drifts = append(drifts, DriftReport{
+					Path:     rel,
+					Policy:   RequireSectionContentMatch.String(),
+					Expected: preHash,
+					Found:    curHash,
+				})
+			}
+		}
+	}
+
 	// (4) no drift
 	if len(drifts) == 0 {
 		return &RebaseResult{
