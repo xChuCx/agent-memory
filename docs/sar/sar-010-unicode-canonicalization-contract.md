@@ -98,3 +98,51 @@ INSERT INTO test_sar010 (canonical_id) VALUES ('strasse'); -- Fails: UNIQUE cons
   - The FTS5 tokenizer uses `tokenize='porter unicode61'`, which properly parses and indexes multi-lingual Unicode tokens.
   - Section IDs and heading slugs are strictly canonicalized at generation time.
   - Cross-platform collision detection is validated by `agent-memory doctor`.
+
+---
+
+## 5. Federated Namespace Governance & Local Resolution Overlays (SAR-010.1)
+
+In federated multi-store architectures (`manifest.yaml` with external `stores`), distinct stores may publish keys that collide under `NFC + Full Unicode Casefold`. To prevent silent clobbering without freezing unaffected knowledge:
+
+### 1. Granular Quarantine (Blast Radius Minimization)
+- Collision quarantine is scoped strictly to the conflicting `canonical_id` (`status: KEY_COLLISION_QUARANTINE`).
+- Unaffected documents and sections across both stores remain fully searchable in FTS5.
+- Queries referencing the quarantined key return a structured `provenance_alert(status="KEY_COLLISION_QUARANTINE", incident_id="...")`.
+
+### 2. Machine-Readable Collision Receipt
+Diagnostic tools (`agent-memory doctor`) and CI emit a structured receipt without leaking sensitive plaintext content:
+```json
+{
+  "incident_id": "urn:uuid:679fdb64-ee00-4049-8f6a-ad3329b5728d",
+  "canonical_id": "strasse",
+  "unicode_version": "15.1.0",
+  "source_a": {
+    "store": "local",
+    "commit": "46ca9ed...",
+    "path": "docs/Straße.md",
+    "codepoints": ["U+0053", "U+0074", "U+0072", "U+0061", "U+00DF", "U+0065"],
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "source_b": {
+    "store": "arch-wiki",
+    "commit": "9f2a81c...",
+    "path": "modules/STRASSE.md",
+    "codepoints": ["U+0053", "U+0054", "U+0052", "U+0041", "U+0053", "U+0053", "U+0045"],
+    "sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+  },
+  "status": "BLOCKED_COLLISION"
+}
+```
+
+### 3. Authority Boundaries & `PENDING_OWNER_DECISION` Preservation
+- The quarantine status `PENDING_OWNER_DECISION` does not automatically expire into `first_wins` or implicit resolution upon SLA expiration.
+- If upstream is unresponsive, the local repository owner must explicitly record one of three actions in `meta/store_overrides.yaml`:
+  1. `local_alias`: map the key to a distinct local alias.
+  2. `exclude_from_search`: suppress indexing of the colliding upstream key.
+  3. `upstream_fix_pending`: keep the key quarantined until an upstream commit resolves it.
+
+### 4. Three-Layer Checkpoint for Local Resolution Overlays
+1. **W-fact gate**: Immutable declaration in `meta/store_overrides.yaml` capturing `approved_by`, target `upstream_commit_sha`, `incident_id`, and policy digest.
+2. **S-fact commitment**: Runtime routing mapping (`upstream_store#key -> local_canonical_alias`) applied during search resolution.
+3. **Gap Layer (Drift Detection)**: When `stores.lock` updates to a newer upstream commit, the overlay is invalidated and marked `OVERLAY_OUTDATED_DRIFT`, blocking reads to the affected key until re-certified.

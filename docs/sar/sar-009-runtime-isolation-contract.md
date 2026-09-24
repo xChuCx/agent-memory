@@ -69,6 +69,30 @@ ALLOWLIST = {PATH, SYSTEMROOT, WINDIR, TMPDIR, TEMP, TMP, LANG, LC_ALL}
 
 Any sensitive variable or credential required for specific test runs MUST be declared explicitly as an ephemeral, single-use parameter (`passthrough_env`), never inherited from ambient host memory.
 
+### Invariant 5: Negative Proof of Isolation (The Negative Canaries Contract)
+**Never rely on runner self-reporting or bare boolean flags (`VERIFIED_HERMETIC = true`) to establish execution isolation.**
+A compromised or misconfigured runner is the entity most likely to claim hermetic isolation falsely. Under SAR-009, isolation must be mechanically verified through **demonstrated inside-out failure** of probe vectors:
+
+1. **Egress Block Canary:** 
+   Prior to task execution, the guest runner MUST attempt an outbound TCP connection to a designated unroutable test endpoint (e.g. `TEST-NET-1` / `192.0.2.1:80`).
+   - *Passing condition:* System error `ENETUNREACH` or `EPERM`.
+   - *Failing condition:* Any response, established connection, or socket timeout $\implies$ immediate abort with `ReasonLeakObserved`.
+2. **Host Sentinel Canary:**
+   The runner MUST attempt to read a known host sentinel file (e.g. `/proc/host_sentinel` or `C:\host_sentinel`) that physically exists on the host node but MUST NOT be mapped into the container/chroot.
+   - *Passing condition:* Strictly `ENOENT`.
+   - *Failing condition:* Successful file open, read, or `EACCES` $\implies$ filesystem leakage detected.
+3. **Deterministic Entropy & Monotonic Time Canary:**
+   The runner evaluates pseudo-random generator seeds and clock stability across $N$ invocations.
+4. **Machine-Readable Canary Receipt:**
+   Every `TaskReceipt` emitted under VTP-1/SAR-009 MUST include the verified probe outcomes:
+   ```json
+   "canaries": [
+     {"probe": "net_egress_testnet", "result": "EPERM", "verified_closed": true},
+     {"probe": "host_sentinel_probe", "result": "ENOENT", "verified_closed": true}
+   ]
+   ```
+   Settlement oracles MUST reject any receipt where `verified_closed` is false for any probe.
+
 ---
 
 ## 3. Verification & Reference Implementations
