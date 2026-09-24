@@ -38,6 +38,9 @@ func TestValidateStores_ViaManifestValidate(t *testing.T) {
 		{"unclean-path", []Store{{Name: "a", Source: "x", Path: "foo/../bar"}}, true},
 		{"backslash-path", []Store{{Name: "a", Source: "x", Path: `a\b`}}, true},
 		{"drive-path", []Store{{Name: "a", Source: "x", Path: "C:/x"}}, true},
+		{"valid-readback-strong", []Store{{Name: "a", Source: "x", ReadbackConsistency: "strong"}}, false},
+		{"valid-readback-eventual", []Store{{Name: "a", Source: "x", ReadbackConsistency: "eventual"}}, false},
+		{"bad-readback", []Store{{Name: "a", Source: "x", ReadbackConsistency: "weak"}}, true},
 		{"dot-path", []Store{{Name: "a", Source: "x", Path: "."}}, true},
 	}
 	for _, tc := range cases {
@@ -66,10 +69,13 @@ func TestStoreDefaults(t *testing.T) {
 	if s.EffectiveMode() != StoreModeReadOnly {
 		t.Errorf("EffectiveMode = %q, want %q", s.EffectiveMode(), StoreModeReadOnly)
 	}
+	if s.EffectiveReadbackConsistency() != ReadbackConsistencyStrong {
+		t.Errorf("EffectiveReadbackConsistency = %q, want %q", s.EffectiveReadbackConsistency(), ReadbackConsistencyStrong)
+	}
 	// Explicit overrides are honored.
-	s2 := Store{Name: "a", Source: "x", Path: "platform/.agent-memory", PriorityMultiplier: fptr(0.5)}
-	if s2.StorePath() != "platform/.agent-memory" || s2.Priority() != 0.5 {
-		t.Errorf("overrides not honored: path=%q prio=%v", s2.StorePath(), s2.Priority())
+	s2 := Store{Name: "a", Source: "x", Path: "platform/.agent-memory", PriorityMultiplier: fptr(0.5), ReadbackConsistency: "eventual"}
+	if s2.StorePath() != "platform/.agent-memory" || s2.Priority() != 0.5 || s2.EffectiveReadbackConsistency() != "eventual" {
+		t.Errorf("overrides not honored: path=%q prio=%v readback=%q", s2.StorePath(), s2.Priority(), s2.EffectiveReadbackConsistency())
 	}
 }
 

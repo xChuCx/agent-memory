@@ -38,14 +38,21 @@ var storeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // collide with the local store in the shadow index.
 const reservedLocalStoreName = "local"
 
+// Supported readback consistency modes for federated stores (SAR-010.1).
+const (
+	ReadbackConsistencyStrong   = "strong"
+	ReadbackConsistencyEventual = "eventual"
+)
+
 // Store is one referenced landscape store.
 type Store struct {
-	Name               string   `yaml:"name"`
-	Source             string   `yaml:"source"`                        // git URL or local path
-	Revision           string   `yaml:"revision,omitempty"`            // branch/tag/commit; default branch if empty
-	Path               string   `yaml:"path,omitempty"`                // store dir within the repo; default ".agent-memory"
-	Mode               string   `yaml:"mode,omitempty"`                // "read-only" (default/only in slice 1)
-	PriorityMultiplier *float64 `yaml:"priority_multiplier,omitempty"` // omitted = default (0.8); must be > 0 if set
+	Name                string   `yaml:"name"`
+	Source              string   `yaml:"source"`                        // git URL or local path
+	Revision            string   `yaml:"revision,omitempty"`            // branch/tag/commit; default branch if empty
+	Path                string   `yaml:"path,omitempty"`                // store dir within the repo; default ".agent-memory"
+	Mode                string   `yaml:"mode,omitempty"`                // "read-only" (default/only in slice 1)
+	PriorityMultiplier  *float64 `yaml:"priority_multiplier,omitempty"` // omitted = default (0.8); must be > 0 if set
+	ReadbackConsistency string   `yaml:"readback_consistency,omitempty"` // "strong" (default) | "eventual"
 }
 
 // StorePath returns the in-repo store directory, defaulting to ".agent-memory".
@@ -74,6 +81,15 @@ func (s Store) EffectiveMode() string {
 	return s.Mode
 }
 
+// EffectiveReadbackConsistency returns the declared readback consistency mode,
+// defaulting to "strong" (local atomic / flock-guaranteed).
+func (s Store) EffectiveReadbackConsistency() string {
+	if s.ReadbackConsistency == "" {
+		return ReadbackConsistencyStrong
+	}
+	return s.ReadbackConsistency
+}
+
 // validateStores checks the manifest's stores block: unique safe-slug names,
 // a non-empty source, a recognised mode, a positive priority (when set), and a
 // safe relative store path.
@@ -95,6 +111,9 @@ func validateStores(stores []Store) error {
 		}
 		if s.Mode != "" && s.Mode != StoreModeReadOnly {
 			return fmt.Errorf("manifest: stores[%d] (%s): mode %q unsupported (only %q)", i, s.Name, s.Mode, StoreModeReadOnly)
+		}
+		if s.ReadbackConsistency != "" && s.ReadbackConsistency != ReadbackConsistencyStrong && s.ReadbackConsistency != ReadbackConsistencyEventual {
+			return fmt.Errorf("manifest: stores[%d] (%s): readback_consistency %q unsupported (must be %q or %q)", i, s.Name, s.ReadbackConsistency, ReadbackConsistencyStrong, ReadbackConsistencyEventual)
 		}
 		if s.PriorityMultiplier != nil && *s.PriorityMultiplier <= 0 {
 			return fmt.Errorf("manifest: stores[%d] (%s): priority_multiplier must be > 0 when set (omit it for the default %g)", i, s.Name, DefaultStorePriority)
