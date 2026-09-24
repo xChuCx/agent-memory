@@ -414,3 +414,48 @@ Port 8080 conflicts with devserver.
 		t.Errorf("expected proposal content to be applied:\n%s", finalStr)
 	}
 }
+
+func TestRebaseStaged_WriteSkew_ReadSectionDriftBlocksRebase(t *testing.T) {
+	memDir, id, deps := stageContentMatchProposal(t)
+
+	// Read current hash of "stale-lock" in pitfalls.md
+	pitfallBytes, err := os.ReadFile(filepath.Join(memDir, "pitfalls.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashBefore := sectionHash(pitfallBytes, "stale-lock")
+
+	// Inject a ReadSections commitment into proposal.json
+	propPath := filepath.Join(memDir, "staging", id, "proposal.json")
+	propBytes, err := os.ReadFile(propPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prop StagedProposal
+	if err := json.Unmarshal(propBytes, &prop); err != nil {
+		t.Fatal(err)
+	}
+	prop.ReadSections = map[string]string{
+		"pitfalls.md#stale-lock": hashBefore,
+	}
+	updatedPropBytes, err := json.MarshalIndent(prop, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(propPath, updatedPropBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mutate the read section on disk
+	mutatePitfallsBody(t, memDir)
+
+	// Rebase with force=true must be BLOCKED by write skew on the read section
+	res, err := RebaseStaged(context.Background(), id, deps, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != StatusRejected || res.Reason != ReasonReadSkewDrift {
+		t.Fatalf("expected StatusRejected with ReasonReadSkewDrift, got Status=%q, Reason=%q (%s)",
+			res.Status, res.Reason, res.Message)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	agentfs "github.com/xChuCx/agent-memory/internal/fs"
@@ -193,6 +194,47 @@ func RebaseStaged(ctx context.Context, stagingID string, deps UpdateDeps, force 
 					Found:    curHash,
 				})
 			}
+		}
+	}
+
+	// (3c) check read-set section drift (SAR-008.2 Write-Skew Detection)
+	if len(proposal.ReadSections) > 0 {
+		var readDrifts []DriftReport
+		for secRef, expHash := range proposal.ReadSections {
+			parts := strings.SplitN(secRef, "#", 2)
+			if len(parts) == 2 {
+				relPath, secID := parts[0], parts[1]
+				curFileBytes, err := os.ReadFile(filepath.Join(deps.MemoryDir, filepath.FromSlash(relPath)))
+				if err != nil {
+					readDrifts = append(readDrifts, DriftReport{
+						Path:      relPath,
+						SectionID: secID,
+						Policy:    "read_skew_cas",
+						Expected:  expHash,
+						Found:     "missing",
+					})
+					continue
+				}
+				curHash := sectionHash(curFileBytes, secID)
+				if curHash == "" || curHash != expHash {
+					readDrifts = append(readDrifts, DriftReport{
+						Path:      relPath,
+						SectionID: secID,
+						Policy:    "read_skew_cas",
+						Expected:  expHash,
+						Found:     curHash,
+					})
+				}
+			}
+		}
+		if len(readDrifts) > 0 {
+			return &RebaseResult{
+				StagingID: stagingID,
+				Status:    StatusRejected,
+				Reason:    ReasonReadSkewDrift,
+				Message:   fmt.Sprintf("%d read-set section(s) drifted since stage; write skew detected", len(readDrifts)),
+				Drift:     readDrifts,
+			}, nil
 		}
 	}
 

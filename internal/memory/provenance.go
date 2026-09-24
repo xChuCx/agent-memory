@@ -13,9 +13,10 @@ import (
 // Distinguishes Proof-of-Ingestion (freshness nonce: proves fetch was called)
 // from Proof-of-Grounding (substantive locator: proves citation of content).
 type GroundingReceipt struct {
-	PackDigest string `json:"pack_digest,omitempty"` // SHA-256 of context pack (sha256:<hex>)
-	ReadNonce  string `json:"read_nonce,omitempty"`  // Freshness token emitted by fetch (poi-<hash>-<ts>)
-	Locator    string `json:"locator,omitempty"`     // Section ID, anchor quote, or line ref within the pack
+	PackDigest   string            `json:"pack_digest,omitempty"`   // SHA-256 of context pack (sha256:<hex>)
+	ReadNonce    string            `json:"read_nonce,omitempty"`    // Freshness token emitted by fetch (poi-<hash>-<ts>)
+	Locator      string            `json:"locator,omitempty"`       // Section ID, anchor quote, or line ref within the pack
+	ReadSections map[string]string `json:"read_sections,omitempty"` // Section locators ("path#section_id") bound to their content hash at fetch time
 }
 
 // ValidateGrounding verifies whether a grounding receipt is structurally sound.

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xChuCx/agent-memory/internal/schema"
 )
 
 // stageDecision runs a record_decision proposal (which always routes to
@@ -648,4 +650,26 @@ func TestApplyStaged_LostUpdateProtection_AdjacentSectionModified(t *testing.T) 
 		t.Errorf("concurrent edit was clobbered by staged apply!\n%s", afterBytes)
 	}
 }
+
+func TestApplyStaged_InterpreterDriftBlocksApply(t *testing.T) {
+	_, id, deps := stageDecision(t)
+
+	// Mutate the runtime manifest approval policy (simulating policy / interpreter upgrade between stage and apply)
+	mutatedManifest := *deps.Manifest
+	mutatedManifest.Updates.Approval.Decisions = schema.ApprovalApply // was stage
+	deps.Manifest = &mutatedManifest
+
+	// Attempt ApplyStaged: must fail-closed with ReasonInterpreterDrift
+	res, err := ApplyStaged(context.Background(), id, deps)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Status != StatusRejected {
+		t.Fatalf("Status = %q, want %q", res.Status, StatusRejected)
+	}
+	if res.Reason != ReasonInterpreterDrift {
+		t.Errorf("Reason = %q, want %q (%s)", res.Reason, ReasonInterpreterDrift, res.Message)
+	}
+}
+
 

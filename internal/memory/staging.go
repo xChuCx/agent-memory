@@ -21,12 +21,14 @@ import (
 // stageProposal and read back by review/apply. Public so CLI renderers and
 // test fixtures can inspect fields without re-parsing JSON themselves.
 type StagedProposal struct {
-	StagingID string            `json:"staging_id"`
-	StagedAt  string            `json:"staged_at"`
-	Request   ProposeRequest    `json:"request"`
-	Routing   Routing           `json:"routing"`
-	Files     []string          `json:"files"`
-	PreHashes map[string]string `json:"pre_hashes,omitempty"`
+	StagingID         string            `json:"staging_id"`
+	StagedAt          string            `json:"staged_at"`
+	Request           ProposeRequest    `json:"request"`
+	Routing           Routing           `json:"routing"`
+	Files             []string          `json:"files"`
+	PreHashes         map[string]string `json:"pre_hashes,omitempty"`
+	ReadSections      map[string]string `json:"read_sections,omitempty"`
+	InterpreterDigest string            `json:"interpreter_digest,omitempty"`
 }
 
 // ApplyResult is what ApplyStaged returns. Status is one of
@@ -470,6 +472,20 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 					})
 				}
 			}
+		}
+	}
+
+	// Policy Interpreter Semantics verification (SAR-008.1): verify that the
+	// routing interpreter and approval rules have not changed between stage and apply.
+	if proposal.InterpreterDigest != "" && deps.Manifest != nil {
+		currentInterpreter := ComputeInterpreterDigest(deps.Manifest)
+		if proposal.InterpreterDigest != currentInterpreter {
+			return &ApplyResult{
+				StagingID: stagingID,
+				Status:    StatusRejected,
+				Reason:    ReasonInterpreterDrift,
+				Message:   "policy interpreter semantics or approval rules drifted since stage; requires re-routing",
+			}, nil
 		}
 	}
 

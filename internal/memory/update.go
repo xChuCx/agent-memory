@@ -63,6 +63,8 @@ const (
 	ReasonPIIDetected           = "pii_detected"
 	ReasonWriteOnceViolation    = "write_once_violation"
 	ReasonArchiveExists         = "archive_exists"
+	ReasonInterpreterDrift      = "interpreter_drift_detected"
+	ReasonReadSkewDrift         = "read_skew_drift"
 )
 
 // ============================================================================
@@ -912,12 +914,16 @@ func stageProposal(
 
 	// proposal.json: archived for audit + replay.
 	envelope := StagedProposal{
-		StagingID: stagingID,
-		StagedAt:  time.Now().UTC().Format(time.RFC3339),
-		Request:   req,
-		Routing:   routing,
-		Files:     fileOrder,
-		PreHashes: preHashes,
+		StagingID:         stagingID,
+		StagedAt:          time.Now().UTC().Format(time.RFC3339),
+		Request:           req,
+		Routing:           routing,
+		Files:             fileOrder,
+		PreHashes:         preHashes,
+		InterpreterDigest: ComputeInterpreterDigest(deps.Manifest),
+	}
+	if req.Grounding != nil && len(req.Grounding.ReadSections) > 0 {
+		envelope.ReadSections = req.Grounding.ReadSections
 	}
 	pbytes, err := json.MarshalIndent(envelope, "", "  ")
 	if err != nil {
@@ -940,6 +946,38 @@ func stageProposal(
 		ReviewCommand:         "agent-memory review " + stagingID,
 		Message:               "Memory update staged; human approval required by policy. Review with: agent-memory review " + stagingID,
 	}, nil
+}
+
+// ComputeInterpreterDigest computes a deterministic SHA-256 digest over the manifest's
+// routing approval rules and store format version (SAR-008.1 Policy Interpreter Semantics).
+func ComputeInterpreterDigest(m *config.Manifest) string {
+	if m == nil {
+		return ""
+	}
+	type rulesSummary struct {
+		Version     int               `json:"store_format_version"`
+		Approval    map[string]string `json:"approval"`
+		EngineClass string            `json:"engine_class"`
+	}
+	appMap := map[string]string{
+		"decisions":        string(m.Updates.Approval.Decisions),
+		"conventions":      string(m.Updates.Approval.Conventions),
+		"modules":          string(m.Updates.Approval.Modules),
+		"pitfalls_replace": string(m.Updates.Approval.PitfallsReplace),
+		"pitfalls_append":  string(m.Updates.Approval.PitfallsAppend),
+		"archive":          string(m.Updates.Approval.Archive),
+		"current":          string(m.Updates.Approval.Current),
+		"current_shared":   string(m.Updates.Approval.CurrentShared),
+		"sessions":         string(m.Updates.Approval.Sessions),
+		"index":            string(m.Updates.Approval.Index),
+	}
+	data, _ := json.Marshal(rulesSummary{
+		Version:     m.StoreFormatVersion,
+		Approval:    appMap,
+		EngineClass: "agent-memory-v1",
+	})
+	h := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", h)
 }
 
 // sectionHash returns the ContentHash of the section identified by id in src,
