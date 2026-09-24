@@ -22,12 +22,15 @@ A pervasive, silent defect class in distributed agent architectures is **Naive C
 
 ## 2. Invariants of SAR-010
 
-### Invariant 1: Application-Layer Pre-Persistence Canonicalization
+### Invariant 1: Application-Layer Pre-Persistence Canonicalization (Full Unicode Casefold + NFC)
 **Never offload case-folding, normalization, or identity comparison to database collations or filesystem drivers.**
 - All identifiers, resource tags, section IDs, and filenames MUST be normalized at the application runtime level **before** being passed to storage or indexing layers.
+- **The Case Folding vs Lowercasing Trap:** Simple Unicode lowercasing (`toLower`) is insufficient for caseless matching. Under standard lowercasing, characters in category `Ll` (such as German `ß` or Greek final sigma `ς`) remain unchanged (`toLower("Straße")` -> `"straße"`, `toLower("STRASSE")` -> `"strasse"`), failing caseless equivalence and allowing duplicate entities into unique binary indexes.
 - Canonicalization requires:
-  1. **Unicode Normalization Form C (NFC):** Ensuring precomposed characters replace decomposed base+combining sequences.
-  2. **Full Unicode Case Folding:** Applying Unicode-compliant case folding (e.g., Go `strings.ToLower` or Python `str.casefold()`), which handles all scripts (Cyrillic, Greek, accented Latin) rather than naive ASCII subtraction.
+  1. **Unicode Normalization Form C (NFC):** Ensuring precomposed characters replace decomposed base+combining sequences (e.g. `e` + `\u0301` -> `é`).
+  2. **Full Unicode Case Folding (Status C + F from `CaseFolding.txt`):** Applying canonical Unicode case folding (e.g., Python `str.casefold()` or `cases.Fold()` in Go), which maps `ß` and uppercase `ẞ` (U+1E9E) to `"ss"`, and `ς` to `σ`, guaranteeing identical byte representations across all case variants.
+  3. **Canonical Identifier Formula:**
+     $$\text{CanonicalID}(s) = \text{FullCasefold}(\text{NFC}(\text{Trim}(s)))$$
 
 ### Invariant 2: Binary-Only Storage Constraints (`COLLATE BINARY`)
 **All unique constraints and foreign keys in database schemas MUST operate on canonicalized bytes with `COLLATE BINARY`.**
@@ -45,12 +48,34 @@ A pervasive, silent defect class in distributed agent architectures is **Naive C
 ### Invariant 4: Restricted Canonical Identifier Alphabets
 **Protocol-level agent names, task IDs, and verification receipts MUST adhere to an unambiguous ASCII or canonical subset.**
 - Protocol actors and verifiable receipts (VTP-1) MUST restrict machine-identifying handles to:
-  $$\text{regex: } `^[a-z0-9][a-z0-9_-]{2,63}$`$$
+  $$\text{regex: } ^[a-z0-9][a-z0-9_-]{2,63}$
 - Non-ASCII display names or titles must be carried in auxiliary metadata fields and never used as primary routing keys in settlement receipts.
+
+### Invariant 5: Unicode Versioning & Collision Quarantine Policy
+**Stores MUST record normalization parameters in metadata, and MUST NOT silently clobber colliding keys during migration or federation.**
+1. **Metadata Declaration (`manifest.yaml`):** Stores declare their canonicalization engine and Unicode version:
+   ```yaml
+   canonicalization:
+     algorithm: "NFC+FullCasefold"
+     unicode_version: "15.1.0"
+     collision_policy: "fail_closed_quarantine"
+   ```
+2. **Fail-Closed Collision Quarantine:** When migrating an existing store or importing a federated landscape store where two distinct keys collapse into the same `canonical_id` under Full Casefold (e.g. legacy `Straße.md` and `STRASSE.md`), the migration engine MUST NOT use `first_wins` or overwrite data. The engine MUST halt and flag the collision in `agent-memory doctor` with byte-level diffs for operator resolution.
 
 ---
 
-## 3. Reference Implementation & Verification
+## 3. Conformance Test Matrix & Reference Implementation
+
+### Conformance Test Pairs:
+
+| Input Pair A | Input Pair B | Expected Equivalence | Expected Canonical Form | Rationale |
+|---|---|---|---|---|
+| `Straße` | `STRASSE` | **COLLIDE (Equivalent)** | `strasse` | Full Casefold maps `ß` -> `ss` |
+| `STRAẞE` (U+1E9E) | `Straße` | **COLLIDE (Equivalent)** | `strasse` | Uppercase Eszett folds to `ss` |
+| `ὈΔΥΣΣΕΎΣ` | `ὀδυσсеύς` | **COLLIDE (Equivalent)** | `ὀδυσσευσ` | Greek final sigma `ς` folds to `σ` |
+| `Cafe\u0301` | `Café` | **COLLIDE (Equivalent)** | `café` | NFC normalizes combining acute accent |
+| Кириллица `а` (U+0430) | Латиница `a` (U+0061) | **DISTINCT (No Collision)** | Distinct codepoints | Cross-script homoglyphs are not unified by casefold |
+| `FILE_NAME` | `file_name` | **COLLIDE (Equivalent)** | `file_name` | Standard ASCII case equivalence |
 
 ### Verification Canary (SQL):
 ```sql
@@ -58,28 +83,18 @@ A pervasive, silent defect class in distributed agent architectures is **Naive C
 CREATE TABLE test_sar010 (
     canonical_id TEXT PRIMARY KEY COLLATE BINARY
 );
--- Application canonicalizes 'ПРИВЕТ' -> 'привет'
-INSERT INTO test_sar010 (canonical_id) VALUES ('привет');
--- Second insertion of pre-canonicalized input must fail cleanly:
-INSERT INTO test_sar010 (canonical_id) VALUES ('привет'); -- Fails: UNIQUE constraint failed
-```
-
-### Go Implementation in `agent-memory`:
-```go
-// CanonicalID normalizes an identifier according to SAR-010:
-// 1. Unicode NFC normalization
-// 2. Full Unicode lowercase
-// 3. Leading/trailing whitespace stripping
-func CanonicalID(s string) string {
-    return strings.ToLower(strings.TrimSpace(norm.NFC.String(s)))
-}
+-- Application canonicalizes 'Straße' -> 'strasse'
+INSERT INTO test_sar010 (canonical_id) VALUES ('strasse');
+-- Second insertion of pre-canonicalized input 'STRASSE' -> 'strasse' must fail cleanly:
+INSERT INTO test_sar010 (canonical_id) VALUES ('strasse'); -- Fails: UNIQUE constraint failed
 ```
 
 ---
 
 ## 4. Status in `agent-memory`
 
-- In `agent-memory`, the SQLite FTS5 shadow index (`memory_search`, `memory_sections`, `memory_docs`) already adheres to Invariant 2:
-  - All primary keys (`(store, file, section_id)` and `(store, file)`) use default binary comparison.
+- In `agent-memory`, the SQLite FTS5 shadow index (`memory_search`, `memory_sections`, `memory_docs`) adheres to Invariant 2:
+  - All primary keys (`(store, file, section_id)` and `(store, file)`) use default binary comparison (`COLLATE BINARY`).
   - The FTS5 tokenizer uses `tokenize='porter unicode61'`, which properly parses and indexes multi-lingual Unicode tokens.
-  - Heading and tag extractors employ Go's `strings.ToLower()`, guaranteeing full Unicode case-folding across Russian, English, and all non-ASCII languages.
+  - Section IDs and heading slugs are strictly canonicalized at generation time.
+  - Cross-platform collision detection is validated by `agent-memory doctor`.
