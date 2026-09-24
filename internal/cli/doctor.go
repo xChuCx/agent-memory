@@ -180,6 +180,7 @@ func runDoctor(rootFlag string) ([]Finding, error) {
 	// an adapter installed, guarding against the "decorative memory" failure mode.
 	findings = append(findings, promptWiringFindings(root)...)
 	findings = append(findings, scheduledLoopWiringFindings(root)...)
+	findings = append(findings, caseCollisionFindings(memDir)...)
 
 	// Stable order for deterministic output.
 	sort.Slice(findings, func(i, j int) bool {
@@ -400,5 +401,54 @@ func scheduledLoopWiringFindings(root string) []Finding {
 		}
 	}
 
+	return findings
+}
+
+// caseCollisionFindings diagnoses files in .agent-memory/ and modules/ that collide
+// under case-insensitive / Unicode case folding (SAR-010), preventing silent
+// overwrites or git corruption across Windows NTFS, macOS APFS, and Linux ext4.
+func caseCollisionFindings(memDir string) []Finding {
+	var findings []Finding
+	scanDirs := []string{
+		memDir,
+		filepath.Join(memDir, "modules"),
+	}
+
+	for _, dir := range scanDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		var names []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+		findings = append(findings, detectCaseCollisions(names, filepath.Base(dir))...)
+	}
+	return findings
+}
+
+func detectCaseCollisions(names []string, scope string) []Finding {
+	var findings []Finding
+	seen := make(map[string]string) // canonical_lower -> original_name
+	for _, name := range names {
+		if !strings.HasSuffix(strings.ToLower(name), ".md") {
+			continue
+		}
+		lower := strings.ToLower(name)
+		if prev, exists := seen[lower]; exists && prev != name {
+			findings = append(findings, Finding{
+				Severity: SeverityError,
+				Message: fmt.Sprintf(
+					"case collision detected in %s (SAR-010): %q and %q collapse to the same canonical identifier %q across filesystems",
+					scope, prev, name, lower,
+				),
+			})
+		} else {
+			seen[lower] = name
+		}
+	}
 	return findings
 }

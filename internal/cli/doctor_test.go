@@ -482,4 +482,27 @@ jobs:
 	}
 }
 
+func TestDoctor_DetectsCaseCollisions(t *testing.T) {
+	names := []string{
+		"conventions.md",
+		"decisions.md",
+		"Decisions.md", // Collides with decisions.md
+		"STRASSE.md",
+		"strasse.md",   // Collides with STRASSE.md
+		"other.txt",    // Non-markdown ignored
+	}
 
+	findings := detectCaseCollisions(names, "modules")
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 collision findings, got %d: %+v", len(findings), findings)
+	}
+
+	for _, f := range findings {
+		if f.Severity != SeverityError {
+			t.Errorf("expected SeverityError, got %v", f.Severity)
+		}
+		if !strings.Contains(f.Message, "case collision detected in modules (SAR-010)") {
+			t.Errorf("unexpected message: %s", f.Message)
+		}
+	}
+}
