@@ -51,6 +51,22 @@ func ValidateGrounding(g *GroundingReceipt, requireLocator bool) []string {
 	return viols
 }
 
+// ProvenanceAlert carries a structured alert when an entity or key
+// in federated landscape cannot be safely resolved (SAR-010.1).
+type ProvenanceAlert struct {
+	Code        string `json:"code"`         // KEY_COLLISION_QUARANTINE | OVERLAY_OUTDATED_DRIFT
+	IncidentID  string `json:"incident_id"`  // Unique incident correlation anchor
+	CanonicalID string `json:"canonical_id"` // Normalized identifier
+	Store       string `json:"store"`        // Store identifier
+	CommitSHA   string `json:"commit_sha"`   // Commit SHA at time of quarantine
+	Message     string `json:"message"`      // Actionable diagnostic summary
+}
+
+const (
+	AlertKeyCollisionQuarantine = "KEY_COLLISION_QUARANTINE"
+	AlertOverlayOutdatedDrift   = "OVERLAY_OUTDATED_DRIFT"
+)
+
 // Source describes one provenance entry attached to a propose_update
 // proposal — where the agent claims this knowledge comes from. The
 // fields mirror design doc v0.4.1 §23.5.
