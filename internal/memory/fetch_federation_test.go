@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,3 +254,101 @@ func TestLoadFetchStores(t *testing.T) {
 		t.Errorf("no stores → (nil,nil), got (%+v, %v)", refs, err)
 	}
 }
+
+func TestLoadFetchStores_RefusesOverlayWithEventualStore(t *testing.T) {
+	memDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(memDir, "meta", "cache", "stores", "eventual-store"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock := &config.StoresLock{Version: config.StoresLockVersion, Stores: map[string]config.LockedStore{
+		"eventual-store": {Source: "x", ResolvedCommit: "abc123def4567890", StorePath: ".agent-memory"},
+	}}
+	if err := config.WriteStoresLock(filepath.Join(memDir, "meta", config.StoresLockName), lock); err != nil {
+		t.Fatal(err)
+	}
+	mf := config.DefaultManifest()
+	mf.Stores = []config.Store{
+		{Name: "eventual-store", Source: "x", ReadbackConsistency: "eventual"},
+	}
+
+	// Write overlay targeting eventual-store
+	overridesYAML := `version: 1
+overrides:
+  - store: "eventual-store"
+    upstream_commit: "abc123def4567890"
+    key: "KEY_A"
+    local_alias: "key-a"
+    approved_by: "steward-1"
+`
+	if err := os.WriteFile(filepath.Join(memDir, "meta", config.StoreOverridesName), []byte(overridesYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadFetchStores(memDir, mf)
+	if err == nil {
+		t.Fatal("expected LoadFetchStores to refuse admission of overlay targeting eventual store")
+	}
+	if !strings.Contains(err.Error(), "overlay admission refused") || !strings.Contains(err.Error(), "strong") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestLoadFetchStores_DetectsOverlayDrift(t *testing.T) {
+	memDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(memDir, "meta", "cache", "stores", "strong-store"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock := &config.StoresLock{Version: config.StoresLockVersion, Stores: map[string]config.LockedStore{
+		"strong-store": {Source: "x", ResolvedCommit: "current-commit-111", StorePath: ".agent-memory"},
+	}}
+	if err := config.WriteStoresLock(filepath.Join(memDir, "meta", config.StoresLockName), lock); err != nil {
+		t.Fatal(err)
+	}
+	mf := config.DefaultManifest()
+	mf.Stores = []config.Store{
+		{Name: "strong-store", Source: "x", ReadbackConsistency: "strong"},
+	}
+
+	// 1. Overlay pinned to older commit -> MUST FAIL with ErrOverlayOutdatedDrift
+	driftedYAML := `version: 1
+overrides:
+  - store: "strong-store"
+    upstream_commit: "older-commit-000"
+    key: "KEY_A"
+    local_alias: "key-a"
+    approved_by: "steward-1"
+`
+	if err := os.WriteFile(filepath.Join(memDir, "meta", config.StoreOverridesName), []byte(driftedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadFetchStores(memDir, mf)
+	if err == nil {
+		t.Fatal("expected LoadFetchStores to fail on drifted commit")
+	}
+	if !errors.Is(err, config.ErrOverlayOutdatedDrift) {
+		t.Fatalf("expected error wrapping ErrOverlayOutdatedDrift, got: %v", err)
+	}
+
+	// 2. Overlay matching current-commit-111 -> MUST PASS
+	matchingYAML := `version: 1
+overrides:
+  - store: "strong-store"
+    upstream_commit: "current-commit-111"
+    key: "KEY_A"
+    local_alias: "key-a"
+    approved_by: "steward-1"
+`
+	if err := os.WriteFile(filepath.Join(memDir, "meta", config.StoreOverridesName), []byte(matchingYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	refs, err := LoadFetchStores(memDir, mf)
+	if err != nil {
+		t.Fatalf("expected matching overlay to pass, got: %v", err)
+	}
+	if len(refs) != 1 || refs[0].Name != "strong-store" {
+		t.Fatalf("expected strong-store in refs, got %+v", refs)
+	}
+}
+

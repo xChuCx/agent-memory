@@ -28,6 +28,7 @@ import (
 	"github.com/xChuCx/agent-memory/internal/config"
 	agentfs "github.com/xChuCx/agent-memory/internal/fs"
 	"github.com/xChuCx/agent-memory/internal/git"
+	"github.com/xChuCx/agent-memory/internal/lock"
 )
 
 // SyncDeps bundles what Sync needs.
@@ -71,10 +72,47 @@ type StoreSyncResult struct {
 // lock entry removed). The returned error is for whole-operation failures (a
 // malformed lock, an unwritable lock); per-store failures live in the results.
 func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
+	// 1. Overlay admission gate (SAR-010.1): validate that any declared overlay
+	// targets an active store with strong readback consistency. Refuse admission
+	// BEFORE any side effects (no network/clone, no cache mutations, no lock rewrite).
+	overridesPath := filepath.Join(deps.MemoryDir, "meta", config.StoreOverridesName)
+	overrides, err := config.LoadStoreOverrides(overridesPath)
+	if err != nil {
+		return nil, fmt.Errorf("sync: load store overrides: %w", err)
+	}
+	if err := config.ValidateOverlayAdmission(deps.Manifest, overrides); err != nil {
+		return nil, fmt.Errorf("sync: overlay admission refused: %w", err)
+	}
+
+	// 2. Acquire cross-process advisory lock to protect meta/stores.lock and cache root
+	// across the entire check-and-apply window, preventing TOCTOU races with concurrent writers.
+	var waitTimeout time.Duration
+	if deps.Manifest != nil && deps.Manifest.Concurrency.WaitTimeoutSeconds > 0 {
+		waitTimeout = time.Duration(deps.Manifest.Concurrency.WaitTimeoutSeconds) * time.Second
+	}
+	lk, err := lock.Acquire(
+		filepath.Join(deps.MemoryDir, "meta", "lock"),
+		lock.AcquireOpts{
+			WaitTimeout: waitTimeout,
+			Owner: lock.Metadata{
+				OwnerKind: "cli-sync",
+			},
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sync: acquire lock: %w", err)
+	}
+	defer func() { _ = lk.Release() }()
+
 	cacheRoot := filepath.Join(deps.MemoryDir, "meta", "cache", "stores")
 	lockPath := filepath.Join(deps.MemoryDir, "meta", config.StoresLockName)
 
-	lock, err := config.LoadStoresLock(lockPath) // fail-closed on malformed/too-new
+	initialLockDigest, err := config.ComputeStoresLockDigest(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("sync: compute lock digest: %w", err)
+	}
+
+	lockFile, err := config.LoadStoresLock(lockPath) // fail-closed on malformed/too-new
 	if err != nil {
 		return nil, err
 	}
@@ -85,18 +123,30 @@ func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
 		return nil, nil
 	}
 
+	// 3. Overlay drift verification (SAR-010.1): if not updating pins, verify
+	// that current lock entries match pinned overlay commits.
+	if overrides != nil && len(overrides.Overrides) > 0 && !deps.Update {
+		for _, ov := range overrides.Overrides {
+			if _, have := lockFile.Stores[ov.Store]; have {
+				if err := config.CheckOverlayDrift(ov, lockFile); err != nil {
+					return nil, fmt.Errorf("sync: %w", err)
+				}
+			}
+		}
+	}
+
 	declared := make(map[string]bool, len(deps.Manifest.Stores))
 	var results []StoreSyncResult
 	for _, st := range deps.Manifest.Stores {
 		declared[st.Name] = true
-		locked, haveLock := lock.Stores[st.Name]
+		locked, haveLock := lockFile.Stores[st.Name]
 		res := syncOneStore(ctx, deps, st, cacheRoot, locked, haveLock)
 		results = append(results, res)
 		if res.Err != nil {
 			deps.log().Warn("store sync failed", "store", st.Name, "error", res.Err.Error())
 			continue
 		}
-		lock.Stores[st.Name] = config.LockedStore{
+		lockFile.Stores[st.Name] = config.LockedStore{
 			Source:            st.Source,
 			RequestedRevision: st.Revision,
 			ResolvedCommit:    res.ResolvedCommit,
@@ -109,9 +159,9 @@ func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
 	}
 
 	// Reconcile: drop lock entries + cache dirs for undeclared stores.
-	for name := range lock.Stores {
+	for name := range lockFile.Stores {
 		if !declared[name] {
-			delete(lock.Stores, name)
+			delete(lockFile.Stores, name)
 		}
 	}
 	if entries, derr := os.ReadDir(cacheRoot); derr == nil {
@@ -123,9 +173,27 @@ func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
 		}
 	}
 
-	if err := config.WriteStoresLock(lockPath, lock); err != nil {
+	// 4. Verify CAS integrity before writing lockfile.
+	if initialLockDigest != "" {
+		if err := config.VerifyStoresLockCAS(lockPath, initialLockDigest); err != nil {
+			return results, fmt.Errorf("sync: %w", err)
+		}
+	}
+
+	if err := config.WriteStoresLock(lockPath, lockFile); err != nil {
 		return results, err
 	}
+
+	// 5. Post-sync overlay audit: warn if any active overlay has drifted after an update.
+	if overrides != nil && len(overrides.Overrides) > 0 {
+		for _, ov := range overrides.Overrides {
+			if err := config.CheckOverlayDrift(ov, lockFile); err != nil {
+				deps.log().Warn("overlay outdated drift detected after update",
+					"store", ov.Store, "key", ov.Key, "error", err)
+			}
+		}
+	}
+
 	return results, nil
 }
 

@@ -438,18 +438,20 @@ func TestValidateProvenance_GroundingRequiredPolicy(t *testing.T) {
 
 func TestProvenanceAlert_Serialization(t *testing.T) {
 	alert := ProvenanceAlert{
-		Code:        AlertKeyCollisionQuarantine,
-		IncidentID:  "urn:uuid:679fdb64-ee00-4049-8f6a-ad3329b5728d",
-		CanonicalID: "strasse",
-		Store:       "arch-wiki",
-		CommitSHA:   "9f2a81c74a00",
-		Message:     "key collision quarantined between local and arch-wiki",
+		Code:               AlertKeyCollisionQuarantine,
+		IncidentID:         "urn:uuid:679fdb64-ee00-4049-8f6a-ad3329b5728d",
+		CanonicalID:        "strasse",
+		Store:              "arch-wiki",
+		CommitSHA:          "9f2a81c74a00",
+		AssignedSteward:    "agent-stanislavsky",
+		EscalationDeadline: "2026-10-01T00:00:00Z",
+		Message:            "key collision quarantined between local and arch-wiki",
 	}
 
 	if alert.Code != AlertKeyCollisionQuarantine {
 		t.Fatalf("expected %s, got %s", AlertKeyCollisionQuarantine, alert.Code)
 	}
-	if alert.IncidentID == "" || alert.CanonicalID != "strasse" {
+	if alert.IncidentID == "" || alert.CanonicalID != "strasse" || alert.AssignedSteward != "agent-stanislavsky" {
 		t.Fatalf("malformed alert: %+v", alert)
 	}
 }

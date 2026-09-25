@@ -54,12 +54,14 @@ func ValidateGrounding(g *GroundingReceipt, requireLocator bool) []string {
 // ProvenanceAlert carries a structured alert when an entity or key
 // in federated landscape cannot be safely resolved (SAR-010.1).
 type ProvenanceAlert struct {
-	Code        string `json:"code"`         // KEY_COLLISION_QUARANTINE | OVERLAY_OUTDATED_DRIFT
-	IncidentID  string `json:"incident_id"`  // Unique incident correlation anchor
-	CanonicalID string `json:"canonical_id"` // Normalized identifier
-	Store       string `json:"store"`        // Store identifier
-	CommitSHA   string `json:"commit_sha"`   // Commit SHA at time of quarantine
-	Message     string `json:"message"`      // Actionable diagnostic summary
+	Code               string `json:"code"`                // KEY_COLLISION_QUARANTINE | OVERLAY_OUTDATED_DRIFT
+	IncidentID         string `json:"incident_id"`         // Unique incident correlation anchor
+	CanonicalID        string `json:"canonical_id"`        // Normalized identifier
+	Store              string `json:"store"`               // Store identifier
+	CommitSHA          string `json:"commit_sha"`          // Commit SHA at time of quarantine
+	AssignedSteward    string `json:"assigned_steward"`    // Designated owner responsible for incident resolution (SAR-010.1)
+	EscalationDeadline string `json:"escalation_deadline"` // ISO 8601 / RFC 3339 deadline before SLA breach
+	Message            string `json:"message"`             // Actionable diagnostic summary
 }
 
 const (

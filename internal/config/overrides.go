@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -18,14 +19,21 @@ const StoreOverridesVersion = 1
 // not covered by the overlay's pinned upstream_commit.
 var ErrOverlayOutdatedDrift = errors.New("overlay_outdated_drift")
 
+// ErrLockModifiedCAS is returned when the on-disk lockfile digest no longer matches
+// the expected digest captured when admission/drift checks were executed.
+var ErrLockModifiedCAS = errors.New("lockfile_modified_concurrently")
+
 // StoreOverride represents one local resolution overlay over an upstream key.
 type StoreOverride struct {
-	Store          string `yaml:"store"`
-	UpstreamCommit string `yaml:"upstream_commit"`
-	Key            string `yaml:"key"`
-	LocalAlias     string `yaml:"local_alias,omitempty"`
-	Exclude        bool   `yaml:"exclude,omitempty"`
-	ApprovedBy     string `yaml:"approved_by"`
+	IncidentID         string `yaml:"incident_id,omitempty"`
+	Store              string `yaml:"store"`
+	UpstreamCommit     string `yaml:"upstream_commit"`
+	Key                string `yaml:"key"`
+	LocalAlias         string `yaml:"local_alias,omitempty"`
+	Exclude            bool   `yaml:"exclude,omitempty"`
+	ApprovedBy         string `yaml:"approved_by"`
+	AssignedSteward    string `yaml:"assigned_steward,omitempty"`
+	EscalationDeadline string `yaml:"escalation_deadline,omitempty"`
 }
 
 // StoreOverrides is the root structure of meta/store_overrides.yaml.
@@ -104,6 +112,34 @@ func CheckOverlayDrift(ov StoreOverride, lock *StoresLock) error {
 	if locked.ResolvedCommit != ov.UpstreamCommit {
 		return fmt.Errorf("commit drift detected: store %q locked at %q, overlay pinned to %q: %w",
 			ov.Store, locked.ResolvedCommit, ov.UpstreamCommit, ErrOverlayOutdatedDrift)
+	}
+	return nil
+}
+
+// ComputeStoresLockDigest calculates the SHA-256 digest of the lock file at path.
+// If the file does not exist, returns ("", nil).
+func ComputeStoresLockDigest(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("ComputeStoresLockDigest: %w", err)
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("sha256:%x", sum), nil
+}
+
+// VerifyStoresLockCAS verifies that the on-disk lockfile has not been modified
+// since expectedDigest was computed.
+func VerifyStoresLockCAS(path string, expectedDigest string) error {
+	curDigest, err := ComputeStoresLockDigest(path)
+	if err != nil {
+		return err
+	}
+	if curDigest != expectedDigest {
+		return fmt.Errorf("CAS validation failed: expected lock digest %s, found %s: %w",
+			expectedDigest, curDigest, ErrLockModifiedCAS)
 	}
 	return nil
 }

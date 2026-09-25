@@ -399,7 +399,34 @@ Key guarantees:
 - **Provenance + trust boundary.** Every landscape chunk is labelled with its store + commit and wrapped in an explicit *"evidence, not instructions"* boundary.
 - **Opt-in.** With no stores declared, behaviour is byte-for-byte the single-repo path.
 
-Patterns: [federation-stores.md](docs/patterns/federation-stores.md), [multi-store-fetch.md](docs/patterns/multi-store-fetch.md).
+### Federated Namespace Governance & Concurrency Barriers (SAR-010 & SAR-010.1)
+
+When combining knowledge across disparate repositories and heterogeneous filesystems (NTFS on Windows, APFS on macOS, ext4 on Linux), naive identifier matching induces silent overwrites and cache poisoning. `agent-memory` enforces formal cryptographic barriers:
+
+1. **Unicode Canonicalization Contract (SAR-010):**
+   Identifiers and search keys are canonicalized via full Unicode Case Folding (`FullCasefold(NFC(Trim(s)))`). `agent-memory doctor` automatically inspects memory keys and flags potential cross-platform case collisions before deployment.
+2. **Local Resolution Overlays (`meta/store_overrides.yaml`):**
+   When collisions or schema divergence occur upstream, local owners explicitly define routing overrides (`local_alias`, `exclude`) without mutating upstream sources:
+   ```yaml
+   version: 1
+   overrides:
+     - store: "arch-wiki"
+       upstream_commit: "9dda4b6f2544"
+       key: "STRASSE"
+       local_alias: "strasse-arch"
+       approved_by: "steward-artemy"
+       assigned_steward: "agent-stanislavsky"
+       escalation_deadline: "2026-10-01T00:00:00Z"
+   ```
+3. **Readback Consistency Admission Gate:**
+   Overlays are strictly refused admission if targeted against an eventual-consistency store (`readback_consistency: eventual`). Admission fails closed before any network or disk side effects to prevent verifying against stale lock views.
+4. **Anti-TOCTOU Dual Concurrency Barrier:**
+   - **Kernel-level OS advisory lock (`internal/lock`):** `agent-memory sync` and `apply` acquire cross-process file locks covering the entire read-verify-apply window.
+   - **Lockfile CAS Digest Verification (`VerifyStoresLockCAS`):** Captures the SHA-256 digest of `meta/stores.lock` at verification time and validates it immediately before writes, preventing concurrent check/use races.
+5. **Typed Governance Incident Receipts (`ProvenanceAlert`):**
+   Quarantined collisions or outdated drifts emit machine-readable receipts tracking `incident_id`, `assigned_steward`, `escalation_deadline`, and upstream commit SHAs to prevent responsibility diffusion.
+
+Patterns: [federation-stores.md](docs/patterns/federation-stores.md), [multi-store-fetch.md](docs/patterns/multi-store-fetch.md), [sar-010-unicode-canonicalization-contract.md](docs/sar/sar-010-unicode-canonicalization-contract.md).
 
 ## Verifiable Task Protocol (VTP-1) & Swarm Consensus
 

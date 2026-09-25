@@ -136,3 +136,41 @@ overrides:
 		t.Fatalf("unexpected parsed overrides: %+v", o2)
 	}
 }
+
+func TestVerifyStoresLockCAS_DetectsInterleavedMutation(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "stores.lock")
+
+	// 1. Initial lockfile state A
+	if err := os.WriteFile(lockPath, []byte("version: 1\nstores:\n  repo-a:\n    commit: commit-aaa\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	digestA, err := ComputeStoresLockDigest(lockPath)
+	if err != nil {
+		t.Fatalf("ComputeStoresLockDigest: %v", err)
+	}
+	if digestA == "" {
+		t.Fatal("expected non-empty digest for existing lockfile")
+	}
+
+	// CAS check against unchanged file passes
+	if err := VerifyStoresLockCAS(lockPath, digestA); err != nil {
+		t.Fatalf("expected CAS check to pass on unchanged file: %v", err)
+	}
+
+	// 2. Interleaved concurrent modification to state B
+	if err := os.WriteFile(lockPath, []byte("version: 1\nstores:\n  repo-a:\n    commit: commit-bbb\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// CAS check with digest A now MUST FAIL with ErrLockModifiedCAS
+	err = VerifyStoresLockCAS(lockPath, digestA)
+	if err == nil {
+		t.Fatal("expected VerifyStoresLockCAS to fail after concurrent modification, got nil")
+	}
+	if !errors.Is(err, ErrLockModifiedCAS) {
+		t.Fatalf("expected ErrLockModifiedCAS, got: %v", err)
+	}
+}
+

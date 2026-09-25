@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/xChuCx/agent-memory/internal/config"
+	"github.com/xChuCx/agent-memory/internal/lock"
 )
 
 func requireGit(t *testing.T) {
@@ -284,3 +285,110 @@ func TestSync_RejectsSecretOnIngest(t *testing.T) {
 		t.Error("a rejected store must not leave a cache dir")
 	}
 }
+
+func TestSync_RefusesEventualStoreWithOverlay(t *testing.T) {
+	src := newGitStore(t, storeFiles(map[string]string{
+		".agent-memory/contracts.md": "# Contracts\n",
+	}))
+	dir := stInit(t)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
+
+	// Set readback_consistency: eventual in manifest
+	mfPath := filepath.Join(dir, ".agent-memory", "meta", "manifest.yaml")
+	mf, err := config.LoadManifest(mfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range mf.Stores {
+		if mf.Stores[i].Name == "platform" {
+			mf.Stores[i].ReadbackConsistency = "eventual"
+		}
+	}
+	if err := config.WriteManifest(mfPath, mf); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add store_overrides.yaml targeting platform
+	overridesYAML := `version: 1
+overrides:
+  - store: "platform"
+    upstream_commit: "abc123456789"
+    key: "POST /refunds"
+    local_alias: "post-refunds"
+    approved_by: "steward-1"
+`
+	if err := os.WriteFile(filepath.Join(dir, ".agent-memory", "meta", config.StoreOverridesName), []byte(overridesYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runSyncCmd(t, "--root", dir)
+	if err == nil {
+		t.Fatalf("expected sync to reject eventual store referenced by overlay\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "overlay admission refused") || !strings.Contains(err.Error(), "strong") {
+		t.Fatalf("unexpected error message: %v\noutput: %s", err, out)
+	}
+
+	// Invariant: no side effects occurred
+	if exists(filepath.Join(dir, ".agent-memory", "meta", "cache", "stores", "platform")) {
+		t.Error("a rejected store must not leave a cache dir")
+	}
+}
+
+func TestSync_DetectsOverlayDrift(t *testing.T) {
+	src := newGitStore(t, storeFiles(map[string]string{
+		".agent-memory/contracts.md": "# Contracts\n",
+	}))
+	dir := stInit(t)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
+
+	// Initial sync to pin commit
+	if _, err := runSyncCmd(t, "--root", dir); err != nil {
+		t.Fatalf("initial sync failed: %v", err)
+	}
+
+	// Add store_overrides.yaml with different commit
+	overridesYAML := `version: 1
+overrides:
+  - store: "platform"
+    upstream_commit: "drifted-commit-sha-999"
+    key: "POST /refunds"
+    local_alias: "post-refunds"
+    approved_by: "steward-1"
+`
+	if err := os.WriteFile(filepath.Join(dir, ".agent-memory", "meta", config.StoreOverridesName), []byte(overridesYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runSyncCmd(t, "--root", dir)
+	if err == nil {
+		t.Fatalf("expected sync to fail on overlay drift\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "overlay_outdated_drift") {
+		t.Fatalf("expected overlay_outdated_drift error, got: %v\noutput: %s", err, out)
+	}
+}
+
+func TestSync_FailsWhenLockHeld(t *testing.T) {
+	src := newGitStore(t, storeFiles(map[string]string{
+		".agent-memory/contracts.md": "# Contracts\n",
+	}))
+	dir := stInit(t)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
+
+	// Acquire lock externally to simulate concurrent writer
+	lk, err := lock.Acquire(filepath.Join(dir, ".agent-memory", "meta", "lock"), lock.AcquireOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lk.Release() }()
+
+	out, err := runSyncCmd(t, "--root", dir)
+	if err == nil {
+		t.Fatalf("expected sync to fail when lock is held\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "lock held") {
+		t.Fatalf("expected lock held error, got: %v\noutput: %s", err, out)
+	}
+}
+

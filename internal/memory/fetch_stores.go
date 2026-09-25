@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/xChuCx/agent-memory/internal/config"
@@ -27,9 +28,44 @@ func LoadFetchStores(memDir string, manifest *config.Manifest) ([]StoreRef, erro
 	if manifest == nil || len(manifest.Stores) == 0 {
 		return nil, nil
 	}
-	lock, err := config.LoadStoresLock(filepath.Join(memDir, "meta", config.StoresLockName))
+
+	// 1. Overlay admission gate (SAR-010.1): validate that any declared overlay
+	// targets an active store with strong readback consistency. Refuse admission
+	// if an overlay references an eventual-consistency store.
+	overridesPath := filepath.Join(memDir, "meta", config.StoreOverridesName)
+	overrides, err := config.LoadStoreOverrides(overridesPath)
+	if err != nil {
+		return nil, fmt.Errorf("LoadFetchStores: %w", err)
+	}
+	if err := config.ValidateOverlayAdmission(manifest, overrides); err != nil {
+		return nil, fmt.Errorf("LoadFetchStores: overlay admission refused: %w", err)
+	}
+
+	lockPath := filepath.Join(memDir, "meta", config.StoresLockName)
+	lockDigest, err := config.ComputeStoresLockDigest(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("LoadFetchStores: %w", err)
+	}
+
+	lock, err := config.LoadStoresLock(lockPath)
 	if err != nil {
 		return nil, err
+	}
+
+	// 2. Overlay drift verification (SAR-010.1): verify that locked commits match overlay pins.
+	if overrides != nil && len(overrides.Overrides) > 0 {
+		for _, ov := range overrides.Overrides {
+			if err := config.CheckOverlayDrift(ov, lock); err != nil {
+				return nil, fmt.Errorf("LoadFetchStores: %w", err)
+			}
+		}
+	}
+
+	// 3. CAS validation: verify lockfile was not modified concurrently during read.
+	if lockDigest != "" {
+		if err := config.VerifyStoresLockCAS(lockPath, lockDigest); err != nil {
+			return nil, fmt.Errorf("LoadFetchStores: %w", err)
+		}
 	}
 	cacheRoot := filepath.Join(memDir, "meta", "cache", "stores")
 
