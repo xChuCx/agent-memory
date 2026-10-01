@@ -475,6 +475,48 @@ func ApplyStaged(ctx context.Context, stagingID string, deps UpdateDeps) (res *A
 		}
 	}
 
+	// Read-set section drift check (SAR-008.2 Write-Skew Detection): verify that
+	// sections read during grounding/proposal generation have not mutated before apply.
+	if len(proposal.ReadSections) > 0 {
+		var readDrifts []DriftReport
+		for secRef, expHash := range proposal.ReadSections {
+			parts := strings.SplitN(secRef, "#", 2)
+			if len(parts) == 2 {
+				relPath, secID := parts[0], parts[1]
+				curFileBytes, err := os.ReadFile(filepath.Join(deps.MemoryDir, filepath.FromSlash(relPath)))
+				if err != nil {
+					readDrifts = append(readDrifts, DriftReport{
+						Path:      relPath,
+						SectionID: secID,
+						Policy:    "read_skew_cas",
+						Expected:  expHash,
+						Found:     "missing",
+					})
+					continue
+				}
+				curHash := sectionHash(curFileBytes, secID)
+				if curHash == "" || curHash != expHash {
+					readDrifts = append(readDrifts, DriftReport{
+						Path:      relPath,
+						SectionID: secID,
+						Policy:    "read_skew_cas",
+						Expected:  expHash,
+						Found:     curHash,
+					})
+				}
+			}
+		}
+		if len(readDrifts) > 0 {
+			return &ApplyResult{
+				StagingID: stagingID,
+				Status:    StatusRejected,
+				Reason:    ReasonReadSkewDrift,
+				Message:   fmt.Sprintf("%d read-set section(s) drifted since stage; write skew detected", len(readDrifts)),
+				Drift:     readDrifts,
+			}, nil
+		}
+	}
+
 	// Policy Interpreter Semantics verification (SAR-008.1): verify that the
 	// routing interpreter and approval rules have not changed between stage and apply.
 	if proposal.InterpreterDigest != "" && deps.Manifest != nil {

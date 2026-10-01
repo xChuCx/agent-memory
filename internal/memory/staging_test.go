@@ -672,4 +672,62 @@ func TestApplyStaged_InterpreterDriftBlocksApply(t *testing.T) {
 	}
 }
 
+func TestApplyStaged_ReadSkewDriftBlocksApply(t *testing.T) {
+	memDir, id, deps := stageDecision(t)
+
+	// Ensure conventions.md exists with a known section
+	convPath := filepath.Join(memDir, "conventions.md")
+	convContent := "# Conventions\n\n## Naming\n<!-- @id: naming -->\n\nCamelCase names.\n"
+	if err := os.WriteFile(convPath, []byte(convContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	h := sectionHash([]byte(convContent), "naming")
+
+	// Inject ReadSections into proposal.json simulating a proposal grounded in conventions.md#naming
+	proposalPath := filepath.Join(memDir, "staging", id, "proposal.json")
+	proposal, err := LoadStaged(deps.MemoryDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal.ReadSections = map[string]string{
+		"conventions.md#naming": h,
+	}
+	b, err := json.MarshalIndent(proposal, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(proposalPath, b, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Concurrent actor mutates conventions.md#naming before ApplyStaged
+	mutatedConv := "# Conventions\n\n## Naming\n<!-- @id: naming -->\n\nsnake_case names only.\n"
+	if err := os.WriteFile(convPath, []byte(mutatedConv), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Snapshot decisions.md before apply
+	decPath := filepath.Join(memDir, "decisions.md")
+	decBefore, _ := os.ReadFile(decPath)
+
+	// ApplyStaged must reject due to write skew (read premise changed)
+	res, err := ApplyStaged(context.Background(), id, deps)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Status != StatusRejected {
+		t.Fatalf("Status = %q, want %q", res.Status, StatusRejected)
+	}
+	if res.Reason != ReasonReadSkewDrift {
+		t.Errorf("Reason = %q, want %q (%s)", res.Reason, ReasonReadSkewDrift, res.Message)
+	}
+
+	// Invariant: decisions.md was NOT modified
+	decAfter, _ := os.ReadFile(decPath)
+	if string(decBefore) != string(decAfter) {
+		t.Errorf("decisions.md was modified despite rejected write skew:\nbefore: %s\nafter: %s", decBefore, decAfter)
+	}
+}
+
+
 
