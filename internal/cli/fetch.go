@@ -142,7 +142,7 @@ func runFetch(ctx context.Context, opts fetchOptions) (*memory.FetchResponse, er
 	if err != nil {
 		return nil, fmt.Errorf("fetch: acquire reader lock: %w", err)
 	}
-	defer readLock.Release()
+	defer func() { _ = readLock.Release() }()
 
 	stores, serr := memory.LoadFetchStores(memDir, manifest)
 	if serr != nil {

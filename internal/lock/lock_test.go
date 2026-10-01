@@ -513,13 +513,13 @@ func TestAcquireShared_AllowsMultipleReaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first AcquireShared failed: %v", err)
 	}
-	defer r1.Release()
+	defer func() { _ = r1.Release() }()
 
 	r2, err := AcquireShared(p, AcquireOpts{})
 	if err != nil {
 		t.Fatalf("second AcquireShared should succeed concurrently: %v", err)
 	}
-	defer r2.Release()
+	defer func() { _ = r2.Release() }()
 }
 
 func TestAcquireShared_BlocksExclusiveWriter(t *testing.T) {
@@ -529,7 +529,7 @@ func TestAcquireShared_BlocksExclusiveWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireShared failed: %v", err)
 	}
-	defer r1.Release()
+	defer func() { _ = r1.Release() }()
 
 	// Exclusive writer must fail with ErrLockHeld
 	_, err = Acquire(p, AcquireOpts{})
