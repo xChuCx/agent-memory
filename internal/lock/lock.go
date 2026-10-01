@@ -118,6 +118,34 @@ func Acquire(path string, opts AcquireOpts) (*Lock, error) {
 	return &Lock{fl: fl, path: path}, nil
 }
 
+// AcquireShared opens (creating if missing) the file at path and tries to acquire
+// a shared (read) OS advisory lock on it. Multiple readers can hold shared locks concurrently,
+// but exclusive writers (Acquire) are blocked until all shared locks are released.
+func AcquireShared(path string, opts AcquireOpts) (*Lock, error) {
+	fl := flock.New(path)
+
+	var locked bool
+	var err error
+	if opts.WaitTimeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), opts.WaitTimeout)
+		defer cancel()
+		locked, err = fl.TryRLockContext(ctx, 10*time.Millisecond)
+	} else {
+		locked, err = fl.TryRLock()
+	}
+
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return nil, ErrLockHeld
+	case err != nil:
+		return nil, fmt.Errorf("lock: acquire shared %q: %w", path, err)
+	case !locked:
+		return nil, ErrLockHeld
+	}
+
+	return &Lock{fl: fl, path: path}, nil
+}
+
 // Release closes the lock file. The kernel releases the OS lock atomically
 // as part of close. The lock file itself persists.
 //

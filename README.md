@@ -418,11 +418,11 @@ When combining knowledge across disparate repositories and heterogeneous filesys
        assigned_steward: "agent-stanislavsky"
        escalation_deadline: "2026-10-01T00:00:00Z"
    ```
-3. **Readback Consistency Admission Gate:**
-   Overlays are strictly refused admission if targeted against an eventual-consistency store (`readback_consistency: eventual`). Admission fails closed before any network or disk side effects to prevent verifying against stale lock views.
+3. **Readback Consistency & Governance Admission Gate:**
+   Overlays are strictly refused admission if targeted against an eventual-consistency store (`readback_consistency: eventual`). Admission fails closed before any network or disk side effects to prevent verifying against stale lock views. Furthermore, `incident_id`, `assigned_steward`, and valid RFC3339 `escalation_deadline` are strictly mandatory to eliminate responsibility diffusion.
 4. **Anti-TOCTOU Dual Concurrency Barrier:**
-   - **Kernel-level OS advisory lock (`internal/lock`):** `agent-memory sync` and `apply` acquire cross-process file locks covering the entire read-verify-apply window.
-   - **Lockfile CAS Digest Verification (`VerifyStoresLockCAS`):** Captures the SHA-256 digest of `meta/stores.lock` at verification time and validates it immediately before writes, preventing concurrent check/use races.
+   - **Kernel-level OS advisory locks (`internal/lock`):** Exclusive cross-process file locks protect writer operations (`agent-memory sync`, `apply`). Concurrently, readers (`agent-memory fetch`) hold shared OS read locks (`AcquireShared`) across store resolution and context pack assembly, eliminating torn reads or interleaving during directory swaps (`SwapDir`).
+   - **Unconditional Lockfile CAS Digest Verification (`VerifyStoresLockCAS`):** Captures the SHA-256 digest of `meta/stores.lock` at verification time and validates it immediately before writes (even when the file is initially absent), preventing concurrent check/use races and interleaved creations.
 5. **Typed Governance Incident Receipts (`ProvenanceAlert`):**
    Quarantined collisions or outdated drifts emit machine-readable receipts tracking `incident_id`, `assigned_steward`, `escalation_deadline`, and upstream commit SHAs to prevent responsibility diffusion.
 

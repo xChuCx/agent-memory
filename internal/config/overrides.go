@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -25,15 +26,15 @@ var ErrLockModifiedCAS = errors.New("lockfile_modified_concurrently")
 
 // StoreOverride represents one local resolution overlay over an upstream key.
 type StoreOverride struct {
-	IncidentID         string `yaml:"incident_id,omitempty"`
+	IncidentID         string `yaml:"incident_id"`
 	Store              string `yaml:"store"`
 	UpstreamCommit     string `yaml:"upstream_commit"`
 	Key                string `yaml:"key"`
 	LocalAlias         string `yaml:"local_alias,omitempty"`
 	Exclude            bool   `yaml:"exclude,omitempty"`
 	ApprovedBy         string `yaml:"approved_by"`
-	AssignedSteward    string `yaml:"assigned_steward,omitempty"`
-	EscalationDeadline string `yaml:"escalation_deadline,omitempty"`
+	AssignedSteward    string `yaml:"assigned_steward"`
+	EscalationDeadline string `yaml:"escalation_deadline"`
 }
 
 // StoreOverrides is the root structure of meta/store_overrides.yaml.
@@ -63,6 +64,8 @@ func LoadStoreOverrides(path string) (*StoreOverrides, error) {
 // 2. The targeted store MUST have readback_consistency == "strong". An eventual-consistency
 //    store is strictly refused admission to prevent verifying against a stale lock view.
 // 3. UpstreamCommit and ApprovedBy are mandatory for W-fact cryptographic tracking.
+// 4. Governance fields IncidentID, AssignedSteward, and EscalationDeadline are mandatory,
+//    and EscalationDeadline must be a valid RFC3339 timestamp.
 func ValidateOverlayAdmission(m *Manifest, o *StoreOverrides) error {
 	if o == nil || len(o.Overrides) == 0 {
 		return nil
@@ -93,6 +96,18 @@ func ValidateOverlayAdmission(m *Manifest, o *StoreOverrides) error {
 		}
 		if ov.Key == "" {
 			return fmt.Errorf("overlay[%d]: key is required", i)
+		}
+		if ov.IncidentID == "" {
+			return fmt.Errorf("overlay[%d]: incident_id is required for governance tracking (SAR-010.1)", i)
+		}
+		if ov.AssignedSteward == "" {
+			return fmt.Errorf("overlay[%d]: assigned_steward is required for governance accountability (SAR-010.1)", i)
+		}
+		if ov.EscalationDeadline == "" {
+			return fmt.Errorf("overlay[%d]: escalation_deadline is required (SAR-010.1)", i)
+		}
+		if _, err := time.Parse(time.RFC3339, ov.EscalationDeadline); err != nil {
+			return fmt.Errorf("overlay[%d]: escalation_deadline %q must be valid RFC3339 timestamp: %w", i, ov.EscalationDeadline, err)
 		}
 	}
 	return nil

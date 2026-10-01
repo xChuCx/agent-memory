@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/xChuCx/agent-memory/internal/config"
 	agentgit "github.com/xChuCx/agent-memory/internal/git"
 	"github.com/xChuCx/agent-memory/internal/index"
+	"github.com/xChuCx/agent-memory/internal/lock"
 	"github.com/xChuCx/agent-memory/internal/memory"
 	"github.com/xChuCx/agent-memory/internal/schema"
 )
@@ -126,8 +128,22 @@ func runFetch(ctx context.Context, opts fetchOptions) (*memory.FetchResponse, er
 	changed, _ := agentgit.ChangedFiles(root)
 
 	// Federation (PR5): cached landscape stores to blend into the search path.
-	// A malformed/too-new lock degrades to a local-only fetch rather than
-	// failing the request; with no stores declared this is nil (unchanged).
+	// Reader lifetime consistency (SAR-010.2): acquire a shared read lock across
+	// LoadFetchStores and BuildContextPack. While held, concurrent sync operations
+	// (which take an exclusive lock) cannot swap cache directories or mutate lockfiles.
+	lockPath := filepath.Join(memDir, "meta", "lock")
+	readLock, err := lock.AcquireShared(lockPath, lock.AcquireOpts{
+		WaitTimeout: 5 * time.Second,
+		Owner: lock.Metadata{
+			OwnerKind: "cli-fetch",
+			OpID:      "fetch-context-pack",
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fetch: acquire reader lock: %w", err)
+	}
+	defer readLock.Release()
+
 	stores, serr := memory.LoadFetchStores(memDir, manifest)
 	if serr != nil {
 		cliLogger().Warn("federation disabled for this fetch", "error", serr.Error())

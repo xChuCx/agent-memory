@@ -311,11 +311,14 @@ func TestSync_RefusesEventualStoreWithOverlay(t *testing.T) {
 	// Add store_overrides.yaml targeting platform
 	overridesYAML := `version: 1
 overrides:
-  - store: "platform"
+  - incident_id: "INC-SYNC-1"
+    store: "platform"
     upstream_commit: "abc123456789"
     key: "POST /refunds"
     local_alias: "post-refunds"
     approved_by: "steward-1"
+    assigned_steward: "steward-1"
+    escalation_deadline: "2026-10-31T00:00:00Z"
 `
 	if err := os.WriteFile(filepath.Join(dir, ".agent-memory", "meta", config.StoreOverridesName), []byte(overridesYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -350,11 +353,14 @@ func TestSync_DetectsOverlayDrift(t *testing.T) {
 	// Add store_overrides.yaml with different commit
 	overridesYAML := `version: 1
 overrides:
-  - store: "platform"
+  - incident_id: "INC-SYNC-2"
+    store: "platform"
     upstream_commit: "drifted-commit-sha-999"
     key: "POST /refunds"
     local_alias: "post-refunds"
     approved_by: "steward-1"
+    assigned_steward: "steward-1"
+    escalation_deadline: "2026-10-31T00:00:00Z"
 `
 	if err := os.WriteFile(filepath.Join(dir, ".agent-memory", "meta", config.StoreOverridesName), []byte(overridesYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -391,4 +397,29 @@ func TestSync_FailsWhenLockHeld(t *testing.T) {
 		t.Fatalf("expected lock held error, got: %v\noutput: %s", err, out)
 	}
 }
+
+func TestSync_FailsWhenSharedReaderLockHeld(t *testing.T) {
+	src := newGitStore(t, storeFiles(map[string]string{
+		".agent-memory/contracts.md": "# Contracts\n",
+	}))
+	dir := stInit(t)
+	mustAddStore(t, dir, "--name", "platform", "--source", src)
+
+	// Acquire shared reader lock externally to simulate active fetch reading cache
+	lk, err := lock.AcquireShared(filepath.Join(dir, ".agent-memory", "meta", "lock"), lock.AcquireOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lk.Release() }()
+
+	// Sync requires exclusive lock to swap directories; it must fail while reader lock is held
+	out, err := runSyncCmd(t, "--root", dir)
+	if err == nil {
+		t.Fatalf("expected sync to fail when shared reader lock is held\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "lock held") {
+		t.Fatalf("expected lock held error, got: %v\noutput: %s", err, out)
+	}
+}
+
 

@@ -2,6 +2,7 @@ package lock
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -504,3 +505,36 @@ func assertNoOverlap(t *testing.T, intervals []interval) {
 		}
 	}
 }
+
+func TestAcquireShared_AllowsMultipleReaders(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "lock")
+
+	r1, err := AcquireShared(p, AcquireOpts{})
+	if err != nil {
+		t.Fatalf("first AcquireShared failed: %v", err)
+	}
+	defer r1.Release()
+
+	r2, err := AcquireShared(p, AcquireOpts{})
+	if err != nil {
+		t.Fatalf("second AcquireShared should succeed concurrently: %v", err)
+	}
+	defer r2.Release()
+}
+
+func TestAcquireShared_BlocksExclusiveWriter(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "lock")
+
+	r1, err := AcquireShared(p, AcquireOpts{})
+	if err != nil {
+		t.Fatalf("AcquireShared failed: %v", err)
+	}
+	defer r1.Release()
+
+	// Exclusive writer must fail with ErrLockHeld
+	_, err = Acquire(p, AcquireOpts{})
+	if !errors.Is(err, ErrLockHeld) {
+		t.Fatalf("expected ErrLockHeld for writer while reader holds shared lock, got: %v", err)
+	}
+}
+

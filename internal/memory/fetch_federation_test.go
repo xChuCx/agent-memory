@@ -274,11 +274,14 @@ func TestLoadFetchStores_RefusesOverlayWithEventualStore(t *testing.T) {
 	// Write overlay targeting eventual-store
 	overridesYAML := `version: 1
 overrides:
-  - store: "eventual-store"
+  - incident_id: "INC-1"
+    store: "eventual-store"
     upstream_commit: "abc123def4567890"
     key: "KEY_A"
     local_alias: "key-a"
     approved_by: "steward-1"
+    assigned_steward: "steward-1"
+    escalation_deadline: "2026-10-31T00:00:00Z"
 `
 	if err := os.WriteFile(filepath.Join(memDir, "meta", config.StoreOverridesName), []byte(overridesYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -312,11 +315,14 @@ func TestLoadFetchStores_DetectsOverlayDrift(t *testing.T) {
 	// 1. Overlay pinned to older commit -> MUST FAIL with ErrOverlayOutdatedDrift
 	driftedYAML := `version: 1
 overrides:
-  - store: "strong-store"
+  - incident_id: "INC-2"
+    store: "strong-store"
     upstream_commit: "older-commit-000"
     key: "KEY_A"
     local_alias: "key-a"
     approved_by: "steward-1"
+    assigned_steward: "steward-1"
+    escalation_deadline: "2026-10-31T00:00:00Z"
 `
 	if err := os.WriteFile(filepath.Join(memDir, "meta", config.StoreOverridesName), []byte(driftedYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -333,11 +339,14 @@ overrides:
 	// 2. Overlay matching current-commit-111 -> MUST PASS
 	matchingYAML := `version: 1
 overrides:
-  - store: "strong-store"
+  - incident_id: "INC-3"
+    store: "strong-store"
     upstream_commit: "current-commit-111"
     key: "KEY_A"
     local_alias: "key-a"
     approved_by: "steward-1"
+    assigned_steward: "steward-1"
+    escalation_deadline: "2026-10-31T00:00:00Z"
 `
 	if err := os.WriteFile(filepath.Join(memDir, "meta", config.StoreOverridesName), []byte(matchingYAML), 0644); err != nil {
 		t.Fatal(err)

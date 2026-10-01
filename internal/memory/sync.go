@@ -174,10 +174,9 @@ func Sync(ctx context.Context, deps SyncDeps) ([]StoreSyncResult, error) {
 	}
 
 	// 4. Verify CAS integrity before writing lockfile.
-	if initialLockDigest != "" {
-		if err := config.VerifyStoresLockCAS(lockPath, initialLockDigest); err != nil {
-			return results, fmt.Errorf("sync: %w", err)
-		}
+	// Validates that the lockfile was not modified (or created) concurrently.
+	if err := config.VerifyStoresLockCAS(lockPath, initialLockDigest); err != nil {
+		return results, fmt.Errorf("sync: %w", err)
 	}
 
 	if err := config.WriteStoresLock(lockPath, lockFile); err != nil {
