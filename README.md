@@ -420,10 +420,13 @@ When combining knowledge across disparate repositories and heterogeneous filesys
    ```
 3. **Readback Consistency & Governance Admission Gate:**
    Overlays are strictly refused admission if targeted against an eventual-consistency store (`readback_consistency: eventual`). Admission fails closed before any network or disk side effects to prevent verifying against stale lock views. Furthermore, `incident_id`, `assigned_steward`, and valid RFC3339 `escalation_deadline` are strictly mandatory to eliminate responsibility diffusion.
-4. **Anti-TOCTOU Dual Concurrency Barrier:**
-   - **Kernel-level OS advisory locks (`internal/lock`):** Exclusive cross-process file locks protect writer operations (`agent-memory sync`, `apply`). Concurrently, readers (`agent-memory fetch`) hold shared OS read locks (`AcquireShared`) across store resolution and context pack assembly, eliminating torn reads or interleaving during directory swaps (`SwapDir`).
-   - **Unconditional Lockfile CAS Digest Verification (`VerifyStoresLockCAS`):** Captures the SHA-256 digest of `meta/stores.lock` at verification time and validates it immediately before writes (even when the file is initially absent), preventing concurrent check/use races and interleaved creations.
-5. **Typed Governance Incident Receipts (`ProvenanceAlert`):**
+4. **Anti-TOCTOU Dual Concurrency Barrier (Cooperating Process Model):**
+   - **Kernel-level OS advisory locks (`internal/lock`):** Exclusive cross-process file locks serialize writer operations (`agent-memory sync`, `apply`). Concurrently, readers (`agent-memory fetch`) hold shared OS read locks (`AcquireShared`) across store resolution and context pack assembly, eliminating torn reads or interleaving during directory swaps (`SwapDir`).
+   - **Unconditional Lockfile CAS Digest Verification (`VerifyStoresLockCAS`):** Captures the SHA-256 digest of `meta/stores.lock` at verification time and validates it immediately before writes (even when the file was initially absent), preventing concurrent check/use races and interleaved creations among cooperating participants.
+   - **Contract Boundary:** This dual barrier guarantees strict serializability for all cooperating processes participating in the locking protocol: held advisory locks serialize execution windows, while digest verification detects changes prior to verification. It is explicitly bounded against non-cooperating external writers that bypass OS advisory locks.
+5. **Read-Set Write-Skew Verification (`ReadSections` CAS):**
+   Staged proposals capture the hashes of all sections read during proposal synthesis (`proposal.ReadSections`). Both `agent-memory rebase` and `agent-memory apply` validate that read-set sections have not drifted prior to applying mutations, preventing silent write-skew anomalies when concurrent sessions update interdependent memory sections.
+6. **Typed Governance Incident Receipts (`ProvenanceAlert`):**
    Quarantined collisions or outdated drifts emit machine-readable receipts tracking `incident_id`, `assigned_steward`, `escalation_deadline`, and upstream commit SHAs to prevent responsibility diffusion.
 
 Patterns: [federation-stores.md](docs/patterns/federation-stores.md), [multi-store-fetch.md](docs/patterns/multi-store-fetch.md), [sar-010-unicode-canonicalization-contract.md](docs/sar/sar-010-unicode-canonicalization-contract.md).
