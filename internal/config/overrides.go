@@ -106,9 +106,13 @@ func ValidateOverlayAdmission(m *Manifest, o *StoreOverrides) error {
 		if ov.EscalationDeadline == "" {
 			return fmt.Errorf("overlay[%d]: escalation_deadline is required (SAR-010.1)", i)
 		}
-		if _, err := time.Parse(time.RFC3339, ov.EscalationDeadline); err != nil {
+		parsedTime, err := time.Parse(time.RFC3339, ov.EscalationDeadline)
+		if err != nil {
 			return fmt.Errorf("overlay[%d]: escalation_deadline %q must be valid RFC3339 timestamp: %w", i, ov.EscalationDeadline, err)
 		}
+		// Canonicalize to UTC RFC3339 (e.g. 2026-10-01T00:00:00Z) to prevent
+		// semantic moment vs literal string spelling divergence (Class 251).
+		o.Overrides[i].EscalationDeadline = parsedTime.UTC().Format(time.RFC3339)
 	}
 	return nil
 }

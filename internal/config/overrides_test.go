@@ -260,9 +260,15 @@ func TestValidateOverlayAdmission_EnforcesGovernanceFields(t *testing.T) {
 		t.Fatal("expected error for non-RFC3339 EscalationDeadline, got nil")
 	}
 
-	// Valid overlay passes
-	if err := ValidateOverlayAdmission(m, &StoreOverrides{Version: 1, Overrides: []StoreOverride{base}}); err != nil {
+	// Valid overlay passes and canonicalizes non-UTC offset to UTC RFC3339
+	ovValid := base
+	ovValid.EscalationDeadline = "2026-10-15T12:00:00+02:00"
+	storeOv := &StoreOverrides{Version: 1, Overrides: []StoreOverride{ovValid}}
+	if err := ValidateOverlayAdmission(m, storeOv); err != nil {
 		t.Fatalf("expected valid overlay to pass, got: %v", err)
+	}
+	if want := "2026-10-15T10:00:00Z"; storeOv.Overrides[0].EscalationDeadline != want {
+		t.Errorf("expected canonicalized UTC deadline %q, got %q", want, storeOv.Overrides[0].EscalationDeadline)
 	}
 }
 
